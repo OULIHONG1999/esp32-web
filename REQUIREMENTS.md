@@ -1,6 +1,7 @@
 # ESP32 Web Flasher — 实际需求与评估
 
 > 日期：2026-09-26 · 状态：已确认 · 关联：DESIGN.md、research/esp32-web-flash/REPORT.md
+> **实现进度与工作记录见 `PROGRESS.md`（活文档）；接手纪律见 `AGENTS.md`。**
 
 ## 1. 已确认的需求决策
 
