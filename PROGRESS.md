@@ -22,9 +22,9 @@
 | T1 脚手架 Vue3+Vite+TS | ✅ done | `npm run build` 通过（vue-tsc + vite） |
 | T2 环境自检（F-01） | ✅ done | `src/env/environment.ts` + `EnvCheck.vue` |
 | T3 粘合层+状态机+日志+错误翻译 | ✅ done | **27/27 Vitest 全绿** + typecheck 通过；覆盖 F-08/09/10 |
-| T4 连接与芯片检测实机 | 🔄 in_progress | 需要：① S3 板插电脑 ② glue 接入 SessionDeps ③ 连接向导 UI |
-| T5 烧录主链路实机 | ⬜ open | 依赖 T4 |
-| T6 擦除+manifest+日志导出 | ⬜ open | 擦除已有 deps.erase；manifest 未做 |
+| T4 连接与芯片检测实机 | 🔄 **代码完成，待实机** | glue/sessionDeps + useSession + ConnectPanel 已接线；需浏览器选 COM3 实测 |
+| T5 烧录主链路实机 | 🔄 **UI 代码完成，待实机** | FirmwarePanel（多段+地址猜测+进度条）+ 自动硬复位已接；待 S3 固件产物 |
+| T6 擦除+manifest+日志导出 | 🔶 部分 | 擦除（带确认）/硬复位按钮已接；日志面板+导出已接；manifest 一键载入未做 |
 
 ## 已完成代码清单（2026-09-26 首次实现）
 
@@ -79,4 +79,5 @@ tests/{session,errors,log}.test.ts   # 27 用例
 
 ## 变更日志
 
+- **2026-09-26（晚）**：T4/T5/T6 代码主体完成——`glue/sessionDeps.ts`（SessionDeps 实现）、`composables/useSession.ts`（Vue 接线）、`ConnectPanel`/`FirmwarePanel`/`LogPanel` 三个组件、App 组装；27 测试 + build 全绿。**设备确认：ESP32-S3 @ COM3**（已写入全局记忆）；用户旧 hello_world 为 target=esp32，正在重编 esp32s3 版本（注意：之前 set-target esp32s3 曾触发 crt0 大端链接错误，若复发需修工具链——esp32 能编而 s3 不能，问题定位于 esp32s3 multilib 路径）。
 - **2026-09-26**：T1/T2/T3 完成（27 测试全绿，build 通过）；建立 PROGRESS/AGENTS 交接文档。此前完成：调研报告、DESIGN、REQUIREMENTS、C 盘分析、IDF 工具链 junction 迁移。
