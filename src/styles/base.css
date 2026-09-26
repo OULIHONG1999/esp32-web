@@ -1,0 +1,27 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --ink: #e6edf3;
+  --muted: #8b949e;
+  --accent: #2ea87d;
+  --warn: #d29922;
+  --err: #f85149;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+code,
+pre {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
