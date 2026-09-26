@@ -50,9 +50,15 @@ tests/{session,errors,log}.test.ts   # 27 用例
    & $env:MIMO_NODE $env:MIMO_NPM install        # 装依赖
    & $env:MIMO_NODE $env:MIMO_NPM test           # 27 用例
    & $env:MIMO_NODE $env:MIMO_NPM run build      # typecheck + 产物
-   & $env:MIMO_NODE $env:MIMO_NPM run dev        # 本地开发（localhost 即安全上下文）
    ```
-5. 状态机迁移表在 `src/core/session.ts` 顶部 `TRANSITIONS`/`ALLOWED`；**改表必须同步 DESIGN §4.1 和 tests/session.test.ts**。
+5. **dev 服务器启动（含一键载入功能，两个坑都踩过）**：必须带 `IDF_BUILD_DIR`；且脱离 MiMo 会话启动时 node 需要 `MIMO_ELECTRON_NODE_HOST`，npm shim 会报错——推荐 WMI 直启 vite：
+   ```powershell
+   $cmd = "cmd /c cd /d `"$wd`" && set `"IDF_BUILD_DIR=<你的 build 目录>`" && set `"MIMO_ELECTRON_NODE_HOST=$env:MIMO_ELECTRON_NODE_HOST`" && `"$env:MIMO_NODE`" `"$wd\node_modules\vite\bin\vite.js`" > `"$env:TEMP\esp32-web-dev.out.log`" 2>&1"
+   Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
+   ```
+   验证：`GET http://localhost:5173/api/artifacts` 返回 flash_args 三段+烧录参数即成功。
+6. **一键载入（F-03 本地路径）**：页面「⚡ 载入本地构建」按钮经 dev 中间件读 `IDF_BUILD_DIR/flash_args`（权威地址 + dio/freq/size 参数）。服务器部署场景的 manifest JSON 路径仍未做。
+7. 状态机迁移表在 `src/core/session.ts` 顶部 `TRANSITIONS`/`ALLOWED`；**改表必须同步 DESIGN §4.1 和 tests/session.test.ts**。
 
 ## 外部环境快照（与本项目相关）
 
