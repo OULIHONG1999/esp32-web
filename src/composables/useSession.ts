@@ -3,6 +3,8 @@ import { Logger, type LogEntry } from '../core/log'
 import { FlashSession, type ChipInfo, type FlashPart, type Progress, type SessionState } from '../core/session'
 import type { ClassifiedError } from '../core/errors'
 import { createSessionDeps } from '../glue/sessionDeps'
+import { SerialMonitor } from '../glue/monitor'
+import { requestPort } from '../glue/esptool'
 
 /** Vue 与 FlashSession/Logger 的接线（ref 镜像 subscribe 通知） */
 export function useSession() {
@@ -15,6 +17,9 @@ export function useSession() {
   const lastError: Ref<ClassifiedError | null> = ref(null)
   const progress: Ref<Progress | null> = ref(null)
   const logs: Ref<LogEntry[]> = ref([])
+  const monitorActive = ref(false)
+
+  let monitor: SerialMonitor | null = null
 
   session.subscribe(() => {
     state.value = session.state
@@ -47,10 +52,65 @@ export function useSession() {
     }
   }
 
+  /** 实时日志监视（与烧录会话互斥，需先断开回 idle） */
+  async function startMonitor(baudRate = 115200): Promise<void> {
+    if (session.state !== 'idle') {
+      log.add({
+        level: 'warn',
+        source: 'app',
+        text: '请先断开烧录会话，再启动实时日志',
+      })
+      return
+    }
+    try {
+      const port = deps.getLastPort() ?? (await requestPort())
+      monitor = new SerialMonitor({
+        onLine: (line) => {
+          log.add({ level: 'device', source: 'device', text: line })
+        },
+        onStopped: (reason, message) => {
+          monitorActive.value = false
+          if (reason === 'error') {
+            log.add({
+              level: 'warn',
+              source: 'serial',
+              text: `日志流中断：${message ?? '连接断开'}`,
+            })
+          } else {
+            log.add({ level: 'info', source: 'app', text: '实时日志已停止' })
+          }
+          monitor = null
+        },
+      })
+      await monitor.start(port, baudRate)
+      monitorActive.value = true
+      log.add({
+        level: 'info',
+        source: 'app',
+        text: `实时日志已启动（${baudRate} 波特率）——设备复位后将在这里滚动输出`,
+      })
+    } catch (err) {
+      monitorActive.value = false
+      monitor = null
+      log.add({
+        level: 'error',
+        source: 'serial',
+        text: `无法打开串口：${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  }
+
+  async function stopMonitor(): Promise<void> {
+    if (monitor) await monitor.stop()
+  }
+
   return {
     log,
     session,
     setFlashParams: deps.setFlashParams,
+    monitorActive,
+    startMonitor,
+    stopMonitor,
     state,
     chip,
     lastError,

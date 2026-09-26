@@ -19,12 +19,15 @@ export type FlashParamOverrides = Partial<
 export interface SessionDepsWithConfig extends SessionDeps {
   /** 由 UI 注入的烧录参数（取自 IDF flash_args，见 DESIGN §3） */
   setFlashParams(p: FlashParamOverrides): void
+  /** 上次授权的端口，供监视器免弹窗重开 */
+  getLastPort(): SerialPort | null
 }
 
 /** 把 glue 函数组装成 FlashSession 可注入的 SessionDeps；内部持有活动端口会话 */
 export function createSessionDeps(log: Logger, baudrate = 115200): SessionDepsWithConfig {
   let active: PortSession | null = null
   let flashParams: FlashParamOverrides = {}
+  let lastPort: SerialPort | null = null
 
   const requireSession = (): PortSession => {
     if (!active) throw new Error('serial session not opened')
@@ -32,6 +35,10 @@ export function createSessionDeps(log: Logger, baudrate = 115200): SessionDepsWi
   }
 
   const deps: SessionDepsWithConfig = {
+    getLastPort(): SerialPort | null {
+      return lastPort
+    },
+
     setFlashParams(p: FlashParamOverrides): void {
       flashParams = { ...flashParams, ...p }
       log.add({
@@ -43,6 +50,7 @@ export function createSessionDeps(log: Logger, baudrate = 115200): SessionDepsWi
 
     async requestPort(): Promise<void> {
       const port = await requestPort()
+      lastPort = port
       active = openSession(port, log, baudrate)
       log.add({ level: 'info', source: 'app', text: '已选择串口，建立 Transport' })
     },

@@ -85,5 +85,6 @@ tests/{session,errors,log}.test.ts   # 27 用例
 
 ## 变更日志
 
+- **2026-09-26（深夜）**：**全链路实机验收通过**（工具链修复 → S3 编译 → ⚡一键载入 → 三段烧录 → Hello world 输出 + 重启循环）。新增 **F-16 实时串口日志监视器**（`glue/monitor.ts` + `core/lines.ts` 行切分器 + LogPanel 控制钮，31 测试全绿）。已知问题记录：① `SHA-256 comparison failed` 警告（疑镜像头参数修补，不影响启动，待收敛）；② 芯片实际 flash 16MB 与镜像头 4MB 不一致的告警；③ `flash_args` 说 80m 但启动日志显示 40MHz——烧录参数是否真正生效待核对。
 - **2026-09-26（晚）**：T4/T5/T6 代码主体完成——`glue/sessionDeps.ts`（SessionDeps 实现）、`composables/useSession.ts`（Vue 接线）、`ConnectPanel`/`FirmwarePanel`/`LogPanel` 三个组件、App 组装；27 测试 + build 全绿。**设备确认：ESP32-S3 @ COM3**（已写入全局记忆）；用户旧 hello_world 为 target=esp32，正在重编 esp32s3 版本（注意：之前 set-target esp32s3 曾触发 crt0 大端链接错误，若复发需修工具链——esp32 能编而 s3 不能，问题定位于 esp32s3 multilib 路径）。
 - **2026-09-26**：T1/T2/T3 完成（27 测试全绿，build 通过）；建立 PROGRESS/AGENTS 交接文档。此前完成：调研报告、DESIGN、REQUIREMENTS、C 盘分析、IDF 工具链 junction 迁移。

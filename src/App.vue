@@ -17,6 +17,7 @@ const {
   busy,
   canFlash,
   percent,
+  monitorActive,
   connect,
   flash,
   erase,
@@ -25,9 +26,12 @@ const {
   exportLogs,
   clearLogs,
   setFlashParams,
+  startMonitor,
+  stopMonitor,
 } = useSession()
 
 const connected = computed(() => ['ready', 'done'].includes(state.value))
+const canStartMonitor = computed(() => state.value === 'idle' && !monitorActive.value)
 
 function onRecheck(): void {
   report.value = checkEnvironment()
@@ -77,7 +81,15 @@ function onErase(): void {
           @params="setFlashParams"
         />
 
-        <LogPanel :logs="logs" :export-text="exportLogs" @clear="clearLogs" />
+        <LogPanel
+          :logs="logs"
+          :export-text="exportLogs"
+          :monitor-active="monitorActive"
+          :can-start-monitor="canStartMonitor"
+          @clear="clearLogs"
+          @start="startMonitor"
+          @stop="stopMonitor"
+        />
       </template>
     </main>
   </div>
