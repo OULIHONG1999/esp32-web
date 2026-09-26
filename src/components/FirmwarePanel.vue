@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import type { FlashPart } from '../core/session'
+import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
 
 interface Row {
   id: number
@@ -14,6 +15,7 @@ let nextId = 1
 
 const emit = defineEmits<{
   flash: [parts: FlashPart[]]
+  'params': [params: FlashParams]
 }>()
 
 const props = defineProps<{
@@ -21,6 +23,34 @@ const props = defineProps<{
   percent: number | null
   chipName: string | null
 }>()
+
+const localLoadMsg = ref<string | null>(null)
+
+/** 一键载入：从 dev 中间件读取 IDF build 目录（flash_args 权威地址 + 烧录参数） */
+async function loadLocalBuild(): Promise<void> {
+  localLoadMsg.value = null
+  const manifest = await fetchBuildManifest()
+  if (!manifest) {
+    localLoadMsg.value =
+      '本地构建载入不可用：需设置 IDF_BUILD_DIR 环境变量并已执行过 idf.py build'
+    return
+  }
+  try {
+    const loaded: Row[] = []
+    for (const p of manifest.parts) {
+      const bytes = await fetchBuildPartBytes(p.rel)
+      const file = new File([bytes as BlobPart], p.name, {
+        type: 'application/octet-stream',
+      })
+      loaded.push({ id: nextId++, label: p.label, address: p.address, file })
+    }
+    rows.splice(0, rows.length, ...loaded)
+    emit('params', manifest.flashParams)
+    localLoadMsg.value = `已载入 ${loaded.length} 段（${manifest.buildDir}）`
+  } catch (e) {
+    localLoadMsg.value = `载入失败：${e instanceof Error ? e.message : String(e)}`
+  }
+}
 
 function hex(n: number): string {
   return '0x' + n.toString(16).toUpperCase().padStart(4, '0')
@@ -98,10 +128,22 @@ function reset(): void {
       当前芯片：<code>{{ chipName ?? '未连接' }}</code>
     </p>
 
-    <label class="filebtn">
-      添加 bin 文件…
-      <input type="file" accept=".bin" multiple @change="onFiles" />
-    </label>
+    <div class="loadrow">
+      <button
+        class="btn btn--load"
+        type="button"
+        :disabled="disabled"
+        title="从 IDF build 目录自动载入 flash_args 中的全部固件段与烧录参数"
+        @click="loadLocalBuild"
+      >
+        ⚡ 载入本地构建（一键）
+      </button>
+      <label class="filebtn">
+        添加 bin 文件…
+        <input type="file" accept=".bin" multiple @change="onFiles" />
+      </label>
+    </div>
+    <p v-if="localLoadMsg" class="loadmsg">{{ localLoadMsg }}</p>
 
     <table v-if="rows.length" class="tbl">
       <thead>
@@ -162,6 +204,30 @@ function reset(): void {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
+}
+.loadrow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn--load {
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn--load:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.loadmsg {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 .filebtn {
   display: inline-block;

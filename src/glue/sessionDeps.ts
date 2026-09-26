@@ -1,5 +1,6 @@
 import type { ChipInfo, FlashPart, Progress, SessionDeps } from '../core/session'
 import type { Logger } from '../core/log'
+import type { FlashOptions } from 'esptool-js'
 import {
   detectChip,
   eraseFlash,
@@ -11,16 +12,35 @@ import {
   type PortSession,
 } from './esptool'
 
+export type FlashParamOverrides = Partial<
+  Pick<FlashOptions, 'flashMode' | 'flashFreq' | 'flashSize'>
+>
+
+export interface SessionDepsWithConfig extends SessionDeps {
+  /** 由 UI 注入的烧录参数（取自 IDF flash_args，见 DESIGN §3） */
+  setFlashParams(p: FlashParamOverrides): void
+}
+
 /** 把 glue 函数组装成 FlashSession 可注入的 SessionDeps；内部持有活动端口会话 */
-export function createSessionDeps(log: Logger, baudrate = 115200) {
+export function createSessionDeps(log: Logger, baudrate = 115200): SessionDepsWithConfig {
   let active: PortSession | null = null
+  let flashParams: FlashParamOverrides = {}
 
   const requireSession = (): PortSession => {
     if (!active) throw new Error('serial session not opened')
     return active
   }
 
-  const deps: SessionDeps = {
+  const deps: SessionDepsWithConfig = {
+    setFlashParams(p: FlashParamOverrides): void {
+      flashParams = { ...flashParams, ...p }
+      log.add({
+        level: 'debug',
+        source: 'app',
+        text: `烧录参数：mode=${flashParams.flashMode ?? 'dio'} freq=${flashParams.flashFreq ?? '40m'} size=${flashParams.flashSize ?? '4MB'}`,
+      })
+    },
+
     async requestPort(): Promise<void> {
       const port = await requestPort()
       active = openSession(port, log, baudrate)
@@ -40,7 +60,7 @@ export function createSessionDeps(log: Logger, baudrate = 115200) {
         source: 'app',
         text: `开始烧录 ${parts.length} 段，共 ${total} 字节`,
       })
-      await writeFlash(requireSession(), parts, onProgress)
+      await writeFlash(requireSession(), parts, onProgress, flashParams)
       log.add({ level: 'info', source: 'app', text: '烧录写入完成' })
     },
 

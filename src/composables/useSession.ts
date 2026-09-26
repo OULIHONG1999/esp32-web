@@ -50,6 +50,7 @@ export function useSession() {
   return {
     log,
     session,
+    setFlashParams: deps.setFlashParams,
     state,
     chip,
     lastError,

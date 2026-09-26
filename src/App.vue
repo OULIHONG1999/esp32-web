@@ -24,6 +24,7 @@ const {
   release,
   exportLogs,
   clearLogs,
+  setFlashParams,
 } = useSession()
 
 const connected = computed(() => ['ready', 'done'].includes(state.value))
@@ -73,6 +74,7 @@ function onErase(): void {
           :percent="percent"
           :chip-name="chip?.name ?? null"
           @flash="flash"
+          @params="setFlashParams"
         />
 
         <LogPanel :logs="logs" :export-text="exportLogs" @clear="clearLogs" />

@@ -61,14 +61,15 @@ export async function writeFlash(
   session: PortSession,
   parts: FlashPart[],
   onProgress: (p: Progress) => void,
+  params?: Partial<Pick<FlashOptions, 'flashMode' | 'flashFreq' | 'flashSize'>>,
 ): Promise<void> {
   const fileArray = parts.map((p) => ({ data: p.data, address: p.address }))
   const total = parts.reduce((n, p) => n + p.data.byteLength, 0)
   const options: FlashOptions = {
     fileArray,
-    flashMode: 'dio',
-    flashFreq: '40m',
-    flashSize: '4MB',
+    flashMode: params?.flashMode ?? 'dio',
+    flashFreq: params?.flashFreq ?? '40m',
+    flashSize: params?.flashSize ?? '4MB',
     eraseAll: false,
     compress: true,
     reportProgress: (fileIndex, written, bytesTotal) => {
