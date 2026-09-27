@@ -48,6 +48,11 @@ export interface DeviceDeps {
   flash(parts: FlashPart[], onProgress: (p: Progress) => void): Promise<void>
   erase(): Promise<void>
   hardReset(): Promise<void>
+  /**
+   * D1 自动降速：烧录失败后释放会话、以原波特率/2（下限 115200）重建并重新同步芯片。
+   * 返回后由 DeviceManager 重试写入一次。可选——未实现时烧录失败直接上抛（不做重试）。
+   */
+  reopenForRetry?(): Promise<void>
 }
 
 type Command = 'connect' | 'switchPort' | 'flash' | 'erase' | 'hardReset' | 'disconnect'
@@ -91,6 +96,40 @@ export interface ConnectOptions {
   forcePick?: boolean
 }
 
+/** D2 操作超时（EXECUTION-PLAN 实现债）；测试可注入更小值 */
+export interface DeviceTimeouts {
+  /** detect 无响应超时，默认 20s */
+  detectMs?: number
+  /** flash 无进度（空闲）超时，默认 60s；进度回调会重置计时 */
+  flashIdleMs?: number
+}
+
+const DEFAULT_TIMEOUTS: Required<DeviceTimeouts> = {
+  detectMs: 20_000,
+  flashIdleMs: 60_000,
+}
+
+/** 限时等待；超时以 name=TimeoutError 抛出，原 promise 的迟到结果被忽略且不会成为未处理拒绝 */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const e = new Error(`${what} timed out after ${ms}ms`)
+      e.name = 'TimeoutError'
+      reject(e)
+    }, ms)
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
 export class DeviceManager {
   state: DeviceState = 'disconnected'
   chip: ChipInfo | null = null
@@ -101,8 +140,16 @@ export class DeviceManager {
   private lineHandler: (line: string) => void = () => {}
   private noticeHandler: (message: string) => void = () => {}
   private streamOn = false
+  private readonly detectMs: number
+  private readonly flashIdleMs: number
 
-  constructor(private deps: DeviceDeps) {}
+  constructor(
+    private deps: DeviceDeps,
+    timeouts: DeviceTimeouts = {},
+  ) {
+    this.detectMs = timeouts.detectMs ?? DEFAULT_TIMEOUTS.detectMs
+    this.flashIdleMs = timeouts.flashIdleMs ?? DEFAULT_TIMEOUTS.flashIdleMs
+  }
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -182,13 +229,16 @@ export class DeviceManager {
         await this.deps.pickPort()
       }
       this.transition('detecting')
-      this.chip = await this.deps.detect()
+      // D2：识别挂死（驱动/线缆异常）20s 超时 → 归位 error，不锁死 UI
+      this.chip = await withTimeout(this.deps.detect(), this.detectMs, 'chip detect')
       // 互斥编排：识别用的 esptool 会话必须先归还端口，日志流才能 open
       await this.deps.closeEsptool()
       await this.openStream()
       this.transition('ready')
     } catch (err) {
-      const cls = classifyError(err, 'connect')
+      // detect 超时以 phase='detect' 分类（→ ChipDetectFail 超时文案）
+      const isTimeout = err instanceof Error && err.name === 'TimeoutError'
+      const cls = classifyError(err, isTimeout ? 'detect' : 'connect')
       await this.teardownQuietly()
       if (cls.cls === 'UserCancel') {
         this.state = 'disconnected'
@@ -255,6 +305,8 @@ export class DeviceManager {
       await this.recoverStream()
       throw err
     }
+    // 成功：清掉旧错误（D3 错误条随下一次成功操作自动消失）
+    this.lastError = null
     // 成功：recoverStream 内部会先 closeEsptool 再恢复日志流
     await this.recoverStream()
   }
@@ -278,13 +330,61 @@ export class DeviceManager {
     if (parts.length === 0) throw new Error('no firmware parts selected')
     this.progress = { written: 0, total: 0, partIndex: 0 }
     await this.runCritical('flash', async () => {
-      await this.deps.flash(parts, (p) => {
-        this.progress = p
+      try {
+        await this.flashAttempt(parts)
+      } catch (err) {
+        // D1：可重试错误 → 降速重建会话后重试一次（仅一次，避免死循环）
+        const reopen = this.deps.reopenForRetry?.bind(this.deps)
+        if (!classifyError(err, 'flash').retryable || !reopen) throw err
+        await reopen()
+        this.progress = { written: 0, total: 0, partIndex: 0 }
         this.emit()
-      })
+        await this.flashAttempt(parts)
+      }
       // F-07：写入完成后自动硬复位，让设备立即运行新固件
       await this.deps.hardReset()
     })
+  }
+
+  /**
+   * 单次烧录写入，带 D2 空闲超时：flashIdleMs 内无进度回调 → 以 TimeoutError 拒绝。
+   * 底层写入若在超时后仍在进行，其结果被忽略且不会泄漏为未处理拒绝。
+   */
+  private flashAttempt(parts: FlashPart[]): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let settled = false
+      const settle = (fn: () => void): void => {
+        settled = true
+        if (timer) clearTimeout(timer)
+        fn()
+      }
+      const arm = (): void => {
+        if (settled) return
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          const e = new Error(`flash idle for ${this.flashIdleMs}ms without progress`)
+          e.name = 'TimeoutError'
+          settle(() => reject(e))
+        }, this.flashIdleMs)
+      }
+      arm()
+      this.deps.flash(parts, (p) => {
+        this.progress = p
+        this.emit()
+        arm()
+      }).then(
+        () => settle(() => resolve()),
+        (err) => settle(() => reject(err)),
+      )
+    })
+  }
+
+  /** D3：用户手动关闭 ready 态错误条 */
+  clearError(): void {
+    if (!this.lastError) return
+    this.lastError = null
+    this.emit()
   }
 
   async erase(): Promise<void> {

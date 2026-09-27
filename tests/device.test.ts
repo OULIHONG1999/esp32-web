@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BusyError,
   DeviceManager,
@@ -208,5 +208,166 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     resolveFlash = () => {}
     resolveFlash()
     await flashPromise
+  })
+})
+
+describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
+  it('烧录失败 → reopenForRetry 降速重建 → 重试一次成功（调用序）', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    let attempts = 0
+    deps.flash = async () => {
+      attempts += 1
+      rec.calls.push('flash')
+      if (attempts === 1) throw new Error('Timeout: lost sync')
+    }
+    deps.reopenForRetry = async () => {
+      rec.calls.push('reopenForRetry')
+    }
+    const d = await connectReady(deps)
+    rec.calls.length = 0
+    await d.flash(parts)
+    expect(attempts).toBe(2)
+    expect(rec.calls).toEqual([
+      'stopStream', 'flash', 'reopenForRetry', 'flash', 'hardReset', 'closeEsptool', 'startStream',
+    ])
+    expect(d.state).toBe('ready')
+    expect(d.lastError).toBeNull()
+  })
+
+  it('重试也失败 → 只重试一次、错误上抛、lastError 置位、状态回 ready', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    let attempts = 0
+    deps.flash = async () => {
+      attempts += 1
+      rec.calls.push('flash')
+      throw new Error('Timeout: lost sync')
+    }
+    deps.reopenForRetry = async () => {
+      rec.calls.push('reopenForRetry')
+    }
+    const d = await connectReady(deps)
+    rec.calls.length = 0
+    await expect(d.flash(parts)).rejects.toThrow()
+    expect(attempts).toBe(2)
+    expect(rec.calls.filter((c) => c === 'reopenForRetry')).toHaveLength(1)
+    expect(d.state).toBe('ready')
+    expect(d.lastError?.cls).toBe('TransferFail')
+    expect(d.isStreamOn).toBe(true)
+  })
+
+  it('不可重试错误（retryable=false）→ 不 reopen、不重试，直接上抛', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    let attempts = 0
+    deps.flash = async () => {
+      attempts += 1
+      rec.calls.push('flash')
+      throw new Error('Requires a secure context')
+    }
+    deps.reopenForRetry = async () => {
+      rec.calls.push('reopenForRetry')
+    }
+    const d = await connectReady(deps)
+    rec.calls.length = 0
+    await expect(d.flash(parts)).rejects.toThrow()
+    expect(attempts).toBe(1)
+    expect(rec.calls).not.toContain('reopenForRetry')
+    expect(d.lastError?.cls).toBe('PolicyInsecure')
+  })
+
+  it('deps 未实现 reopenForRetry → 失败直接上抛（不重试）', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true, failFlash: true })
+    const d = await connectReady(deps)
+    rec.calls.length = 0
+    await expect(d.flash(parts)).rejects.toThrow()
+    expect(rec.calls.filter((c) => c === 'flash')).toHaveLength(1)
+    expect(d.lastError?.cls).toBe('TransferFail')
+  })
+})
+
+describe('D2 操作超时（EXECUTION-PLAN 实现债）', () => {
+  it('识别 20s 无响应 → 超时归位 error，ChipDetectFail 超时文案', async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps } = makeDeps({ hasExistingPort: true })
+      deps.detect = () => new Promise<ChipInfo>(() => {}) // 永不返回
+      const d = new DeviceManager(deps)
+      const p = d.connect()
+      const assertion = expect(p).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(20_000)
+      await assertion
+      expect(d.state).toBe('error')
+      expect(d.lastError?.cls).toBe('ChipDetectFail')
+      expect(d.lastError?.message).toContain('超时')
+      await d.disconnect()
+      expect(d.state).toBe('disconnected')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('烧录 60s 无进度 → 空闲超时 → 归位 ready + TransferFail 超时文案', async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, rec } = makeDeps({ hasExistingPort: true })
+      deps.flash = () => new Promise<void>(() => {}) // 永不结束、无进度
+      const d = await connectReady(deps)
+      rec.calls.length = 0
+      const p = d.flash(parts)
+      const assertion = expect(p).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await assertion
+      expect(d.state).toBe('ready')
+      expect(d.lastError?.cls).toBe('TransferFail')
+      expect(d.lastError?.message).toContain('超时')
+      expect(d.isStreamOn).toBe(true)
+      expect(rec.calls).toContain('startStream')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('进度回调重置空闲计时：50s 有进度 → 总 70s 完成不超时', async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps } = makeDeps({ hasExistingPort: true })
+      deps.flash = async (_p, on) => {
+        await new Promise<void>((r) => setTimeout(r, 50_000))
+        on({ written: 10, total: 100, partIndex: 0 })
+        await new Promise<void>((r) => setTimeout(r, 20_000))
+      }
+      const d = await connectReady(deps)
+      const p = d.flash(parts)
+      await vi.advanceTimersByTimeAsync(70_000)
+      await p
+      expect(d.state).toBe('ready')
+      expect(d.lastError).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('D3 ready 态错误可见与清除', () => {
+  it('烧录失败 → ready 态 lastError 置位；clearError 手动清除', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true, failFlash: true })
+    const d = await connectReady(deps)
+    await expect(d.flash(parts)).rejects.toThrow()
+    expect(d.state).toBe('ready')
+    expect(d.lastError).not.toBeNull()
+    d.clearError()
+    expect(d.lastError).toBeNull()
+    // 无错误时 clearError 幂等
+    d.clearError()
+    expect(d.lastError).toBeNull()
+  })
+
+  it('成功完成临界区操作 → 自动清除旧 lastError', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true, failFlash: true })
+    const d = await connectReady(deps)
+    await expect(d.flash(parts)).rejects.toThrow()
+    expect(d.lastError).not.toBeNull()
+    await d.erase() // 成功 → runCritical 清掉旧错误
+    expect(d.lastError).toBeNull()
+    expect(d.state).toBe('ready')
   })
 })

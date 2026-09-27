@@ -77,6 +77,24 @@ export function classifyError(err: unknown, phase?: SessionPhase): ClassifiedErr
   const text = errText(err)
   const name = errName(err)
 
+  // D2：core 自抛的超时（detect 20s / flash 空闲 60s）——先于其它规则，避免被 /timeout/ 误吞
+  if (name === 'TimeoutError') {
+    if (phase === 'detect') {
+      return {
+        cls: 'ChipDetectFail',
+        message: '芯片识别超时（20 秒无响应）',
+        hint: '检查接线与供电后重试；设备若已拔出，请重新点「连接」。',
+        retryable: true,
+      }
+    }
+    return {
+      cls: 'TransferFail',
+      message: '操作超时（长时间无进度）',
+      hint: '将自动降波特率重试一次；若反复失败，改用较短线缆并关闭占用 CPU 的程序。',
+      retryable: true,
+    }
+  }
+
   if (name === 'NotFoundError' || /no port selected|user cancelled|denied by user/i.test(text)) {
     return { cls: 'UserCancel', ...COPY.UserCancel }
   }

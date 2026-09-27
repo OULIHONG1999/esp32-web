@@ -17,6 +17,9 @@ export type FlashParamOverrides = Partial<
   Pick<FlashOptions, 'flashMode' | 'flashFreq' | 'flashSize'>
 >
 
+/** 降速下限（DESIGN §4.4 自动降速策略） */
+const MIN_BAUD = 115200
+
 export interface DeviceOps extends DeviceDeps {
   setFlashParams(p: FlashParamOverrides): void
 }
@@ -118,6 +121,31 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
     async hardReset(): Promise<void> {
       log.add({ level: 'info', source: 'app', text: '发送硬复位，设备重启' })
       await hardReset(ensureEsptool())
+    },
+
+    /** D1：烧录失败后降速重建会话（波特率/2，下限 115200）并重新同步，供上层重试一次 */
+    async reopenForRetry(): Promise<void> {
+      const next = Math.max(Math.floor(baudrate / 2), MIN_BAUD)
+      if (esptool) {
+        try {
+          await releaseSession(esptool)
+        } catch {
+          /* 释放失败也继续重建 */
+        }
+        esptool = null
+      }
+      const downgraded = next < baudrate
+      baudrate = next
+      log.add({
+        level: 'warn',
+        source: 'app',
+        text: downgraded
+          ? `烧录失败，降速至 ${baudrate} 波特率，重建会话后重试（仅一次）`
+          : `已达波特率下限 ${MIN_BAUD}，按原速率重建会话重试（仅一次）`,
+      })
+      // 重新同步（芯片仍在下载模式）；失败会向上抛，由调用方归位报错
+      const info = await detectChip(ensureEsptool())
+      log.add({ level: 'info', source: 'app', text: `重试会话已同步：${info.name}` })
     },
   }
 }

@@ -77,6 +77,9 @@ ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notic
 - **互斥靠编排而非用户**：流（SerialMonitor）与 esptool 会话独占同一端口，切换顺序固定为 stopStream → esptool → closeEsptool → startStream。
 - **单飞行**：working 期间禁止一切其他命令（按钮灰化即由此而来）。
 - **拔线感知**：日志流 error 停止 → 自动回 disconnected 并出 notice。
+- **操作超时（D2，2026-09-26）**：`detect` 20s 无响应 → `TimeoutError` → 归位 **error**（ChipDetectFail 超时文案），UI 不再锁死；`flash` **空闲 60s 无进度** → `TimeoutError` → 走临界区失败路径归位 ready（TransferFail 超时文案）。进度回调会重置 flash 空闲计时。超时值经 `DeviceTimeouts` 注入，测试可覆盖。
+- **自动降速重试（D1，2026-09-26）**：flash 失败且错误 `retryable` → 调 `deps.reopenForRetry()`（glue：释放会话 → 波特率/2 下限 115200 → 重建 → 重新同步）后**重试一次**；仅一次，重试仍失败才上抛。
+- **错误可见性（D3，2026-09-26）**：`lastError` 在 **error 与 ready 态都显示**（可关闭的错误条）；临界区操作**成功后自动清除**旧错误，`clearError()` 供手动关闭。
 
 ### 4.2 Logger（日志系统）
 
@@ -159,6 +162,8 @@ interface FirmwareSet {
 | `PermissionDenied` | Permissions-Policy 无 serial | "页面未获串口权限" | 检测 `navigator.serial === undefined` 提前拦截 |
 
 **自动降速策略**：flash 断在中途 → 以 `原波特率/2` 重试一次（下限 115200），重试写入日志；只重试一次，避免死循环。
+
+**超时分类（D2，2026-09-26 实现）**：core 自抛的 `TimeoutError`（`name==='TimeoutError'`，先于文本规则分类）——detect 阶段映射 `ChipDetectFail`（"芯片识别超时"），flash/erase 阶段映射 `TransferFail`（"操作超时（长时间无进度）"）。错误条在 ready 态也显示且可关闭（D3）。改文案/分类须同步 `tests/errors.test.ts`（AGENTS 纪律 4）。
 
 ### 4.5 UI 流程（方向1 四区块布局，2026-09-26 重构后）
 

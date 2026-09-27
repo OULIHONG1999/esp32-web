@@ -8,7 +8,7 @@ defineProps<{
   lastError: ClassifiedError | null
   busy: boolean
 }>()
-defineEmits<{ connect: []; disconnect: []; switchPort: [] }>()
+defineEmits<{ connect: []; disconnect: []; switchPort: []; dismissError: [] }>()
 
 const LABEL: Record<DeviceState, string> = {
   disconnected: '未连接',
@@ -59,7 +59,19 @@ const LABEL: Record<DeviceState, string> = {
       </button>
     </div>
 
-    <div v-if="lastError && state === 'error'" class="panel__error">
+    <!-- D3：ready 态烧录失败的错误条也可见，可手动关闭 -->
+    <div
+      v-if="lastError && (state === 'error' || state === 'ready')"
+      class="panel__error"
+    >
+      <button
+        class="panel__error-close"
+        type="button"
+        title="关闭错误提示"
+        @click="$emit('dismissError')"
+      >
+        ✕
+      </button>
       <p class="panel__error-msg">{{ lastError.message }}</p>
       <p class="panel__error-hint">{{ lastError.hint }}</p>
       <p class="panel__error-cls">分类：{{ lastError.cls }}</p>
@@ -120,10 +132,25 @@ const LABEL: Record<DeviceState, string> = {
   font-weight: 600;
 }
 .panel__error {
+  position: relative;
   margin-top: 12px;
   padding: 10px;
   border: 1px solid var(--err);
   border-radius: 6px;
+}
+.panel__error-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.panel__error-close:hover {
+  color: var(--err);
 }
 .panel__error-msg {
   margin: 0 0 6px;

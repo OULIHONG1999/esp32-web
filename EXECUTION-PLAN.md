@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：**已批准，阶段1 执行中** · 2026-09-26 · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准，阶段1 完成待门1 验收** · 2026-09-26 · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）
@@ -63,9 +63,9 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 
 | ID | 问题 | 处理 |
 |---|---|---|
-| D1 | F-05 承诺的降速重试未实现 | 阶段1：flash 失败→波特率/2 重试一次（下限 115200），单测 |
-| D2 | detecting/working 无超时 → UI 锁死 | 阶段1：状态机操作超时（detect 20s、flash 空闲 60s 无进度）→归位+错误 |
-| D3 | 烧录失败错误卡不可见（ready 态不显示 lastError） | 阶段1：ready 态也显示可关闭的错误条 |
+| D1 | F-05 承诺的降速重试未实现 | ✅ 2026-09-26 完成：flash 失败且 retryable → `reopenForRetry`（波特率/2 下限 115200，重建+重新同步）→ 重试一次；单测 4 用例 |
+| D2 | detecting/working 无超时 → UI 锁死 | ✅ 2026-09-26 完成：detect 20s 超时→归位 error；flash 空闲 60s 无进度→归位 ready（进度重置计时）；TimeoutError 分类；单测 5 用例 |
+| D3 | 烧录失败错误卡不可见（ready 态不显示 lastError） | ✅ 2026-09-26 完成：ready+error 态均显示可关闭错误条；临界区成功自动清除；单测 2 用例 |
 
 ### C. 实机核对（门2）
 
@@ -92,13 +92,13 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 
 ## 3. 每阶段的具体实现流程
 
-### 阶段1：文档修订 + 实现债（预计 1 个会话内完成）
+### 阶段1：文档修订 + 实现债（预计 1 个会话内完成）——✅ 全部完成（2026-09-26，待门1）
 
-1. 改 `FIRMWARE-REGISTRY.md`：§3 加 API proxy 定案、§4.1 Release 补 `flashParams`、§5/§3 补安全条目与 rebuild 工具、技术选型表替换 §0 表格；
-2. 改 `DESIGN.md` §7：加"v1.5 起由自含服务托管，纯静态描述仅适用 v1"注记；`PROGRESS.md` 任务线重排；
-3. 代码：D1（flash 重试）、D2（超时）、D3（错误条）各带单测 → `test + build` 全绿 → **一个 commit**（`fix(v1-debt)`）；
-4. 更新验收表 F-05 状态标注。
-**门1**：32+ 新测试全绿；文档 diff 你抽查。
+1. ✅ 改 `FIRMWARE-REGISTRY.md`：§3 加 API proxy 定案、§4.1 Release 补 `flashParams`、§5.4 补安全条目与 rebuild 工具、§0 技术选型表（同步 §0）；
+2. ✅ 改 `DESIGN.md` §7 superseded 注 + §4.1/§4.4 超时与降速规则；`PROGRESS.md` 任务线重排（T11）；
+3. ✅ 代码：D1（flash 重试）、D2（超时）、D3（错误条）各带单测 → `test + build` 全绿（43 测试）→ `fix(v1-debt)` commit；
+4. ✅ 更新验收表 F-05 状态标注。
+**门1**：43 测试全绿（已满足）；文档 diff 用户抽查（待执行）。
 
 ### S1：最小闭环（预计 1–2 个会话）
 

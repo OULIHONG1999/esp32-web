@@ -26,6 +26,7 @@ const {
   flash,
   erase,
   hardReset,
+  clearError,
   exportLogs,
   clearLogs,
   setFlashParams,
@@ -73,6 +74,7 @@ function onErase(): void {
           @connect="connect"
           @switch-port="switchPort"
           @disconnect="disconnect"
+          @dismiss-error="clearError"
         />
 
         <div v-if="idf.available" class="toolbar toolbar--idf">

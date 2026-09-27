@@ -118,6 +118,7 @@ export function useSession() {
     flash: (parts: FlashPart[]) => run(() => device.flash(parts)),
     erase: () => run(() => device.erase()),
     hardReset: () => run(() => device.hardReset()),
+    clearError: () => device.clearError(),
     toggleViewPause,
     exportLogs: () => log.exportText(),
     clearLogs: () => {
