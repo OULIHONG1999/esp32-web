@@ -5,3 +5,6 @@ dist/
 *.local
 .DS_Store
 server-data/
+*.log
+*.err
+
