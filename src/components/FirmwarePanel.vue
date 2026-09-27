@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import type { FlashPart } from '../core/session'
+import type { FlashPart } from '../core/device'
 import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
 
 interface Row {

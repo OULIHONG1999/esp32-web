@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import EnvCheck from './components/EnvCheck.vue'
 import ConnectPanel from './components/ConnectPanel.vue'
 import FirmwarePanel from './components/FirmwarePanel.vue'
@@ -15,23 +15,21 @@ const {
   lastError,
   logs,
   busy,
-  canFlash,
+  connected,
+  canOperate,
   percent,
-  monitorActive,
+  viewPaused,
   connect,
+  switchPort,
+  disconnect,
   flash,
   erase,
   hardReset,
-  release,
   exportLogs,
   clearLogs,
   setFlashParams,
-  startMonitor,
-  stopMonitor,
+  toggleViewPause,
 } = useSession()
-
-const connected = computed(() => ['ready', 'done'].includes(state.value))
-const canStartMonitor = computed(() => state.value === 'idle' && !monitorActive.value)
 
 function onRecheck(): void {
   report.value = checkEnvironment()
@@ -47,7 +45,7 @@ function onErase(): void {
   <div class="shell">
     <header class="shell__header">
       <span class="shell__brand">ESP32 Web Flasher</span>
-      <span class="shell__hint">v0.1.0 · T4/T5</span>
+      <span class="shell__hint">v0.2.0 · 设备常驻连接</span>
     </header>
 
     <main class="shell__main">
@@ -60,10 +58,11 @@ function onErase(): void {
           :last-error="lastError"
           :busy="busy"
           @connect="connect"
-          @release="release"
+          @switch-port="switchPort"
+          @disconnect="disconnect"
         />
 
-        <div v-if="connected" class="toolbar">
+        <div v-if="canOperate" class="toolbar">
           <button class="btn btn--danger" type="button" :disabled="busy" @click="onErase">
             完全擦除
           </button>
@@ -74,7 +73,7 @@ function onErase(): void {
 
         <FirmwarePanel
           v-if="connected"
-          :disabled="!canFlash"
+          :disabled="!canOperate"
           :percent="percent"
           :chip-name="chip?.name ?? null"
           @flash="flash"
@@ -84,11 +83,9 @@ function onErase(): void {
         <LogPanel
           :logs="logs"
           :export-text="exportLogs"
-          :monitor-active="monitorActive"
-          :can-start-monitor="canStartMonitor"
+          :view-paused="viewPaused"
           @clear="clearLogs"
-          @start="startMonitor"
-          @stop="stopMonitor"
+          @toggle-pause="toggleViewPause"
         />
       </template>
     </main>

@@ -5,7 +5,7 @@ import {
   type IEspLoaderTerminal,
   type LoaderOptions,
 } from 'esptool-js'
-import type { ChipInfo, FlashPart, Progress } from '../core/session'
+import type { ChipInfo, FlashPart, Progress } from '../core/device'
 import type { Logger } from '../core/log'
 
 /** esptool 原始输出 → Logger（ESLint 无法替换的官方注入点，DESIGN §3） */

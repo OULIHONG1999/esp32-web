@@ -24,11 +24,12 @@
 
 1. **esptool-js 只升不改**：锁 `0.7.0`；`typescript` 锁 `5.9`（TS7 会砸 vue-tsc，见 PROGRESS 坑1）。
 2. **分层**：`esptool-js` 的 import 只允许出现在 `src/glue/`；`src/core/` 不得引用任何浏览器 API 或 esptool（这是可单测性的根基）。
-3. **改状态机迁移表**（`src/core/session.ts` 的 `TRANSITIONS`/`ALLOWED`）必须同步：`DESIGN.md` §4.1 + `tests/session.test.ts`。
+3. **改状态机迁移表**（`src/core/device.ts` 的 `TRANSITIONS`/`ALLOWED`，方向1 设备常驻模型）必须同步：`DESIGN.md` §4.1 + `tests/device.test.ts`。
 4. **改错误文案/分类**同步 `DESIGN.md` §4.4 与 `tests/errors.test.ts`。
 5. 提交信息用中文，正文引用对应 `F-xx` 验收项。
 6. 实机相关改动（T4+）不能只靠单测：在 `PROGRESS.md` 记录人工清单执行结果。
-7. 不做的事（v1 范围外，见 REQUIREMENTS）：读取备份、串口监视、ELF 转换、espefuse/espsecure、多用户鉴权、Safari 支持。
+7. 不做的事（见 REQUIREMENTS）：读取备份、ELF 转换、espefuse/espsecure、多用户鉴权、Safari 支持。（串口监视已入 v1：F-16，且方向1 下**连接后自动开启**，没有手动开关。）
+8. **日志渲染纪律**（实测洪峰卡页教训）：LogEntry 必须带 `seq` 作稳定 key；批量 flush（120ms）后才推视图；显示上限 500；不得恢复"每行一次响应式更新/索引 key 全量 diff"的写法。
 
 ## 目录约定
 

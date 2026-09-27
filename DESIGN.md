@@ -21,8 +21,8 @@
 │  连接向导 · 文件选择 · 日志面板 · 进度条 · 命令按钮      │
 ├─────────────────────────────────────────────────────┤
 │ 应用服务层（本项目核心代码）                            │
-│  FlashSession 状态机   │  Logger 日志服务              │
-│  FirmwareSet 文件管理  │  CommandBus 命令编排           │
+│  DeviceManager 设备状态机 │ Logger 日志服务              │
+│  FirmwareSet 文件管理  │  DeviceManager 编排 + Logger    │
 │  ErrorMapper 错误翻译  │  PresetTable 芯片/地址预设     │
 ├─────────────────────────────────────────────────────┤
 │ 粘合层（唯一接触 esptool-js API 的地方）                │
@@ -42,7 +42,7 @@
 |---|---|---|
 | 日志系统（分级/面板/导出） | 实现 `IEspLoaderTerminal`（clean/writeLine/write） | TerminalBridge 把字节流解析成带 level 的 `LogEntry` 推给 Logger |
 | 进度展示 | `FlashOptions.reportProgress(fileIndex, written, total)` | 归一化为 `ProgressState` |
-| 下载命令控制（连接/复位/擦除/烧录/硬复位） | `main()` / `writeFlash()` / `eraseFlash()` / `after()` / `readFlash()` | CommandBus 串成状态机，禁止非法并发调用 |
+| 下载命令控制（连接/切换端口/擦除/烧录/硬复位） | `main()` / `writeFlash()` / `eraseFlash()` / `after()` | DeviceManager 临界区编排：stopStream → esptool → startStream，working 单飞行 |
 | 复位策略（S3 USB / 普通 UART / 自定义硬件） | `resetConstructors`：`classicReset` / `hardReset` / `usbJtagSerialReset` / 自定义 `D0\|R1\|W…` 序列 | ResetBridge 按检测到的芯片/端口类型选择策略，失败时给出手动 BOOT 指引 |
 | 波特率策略 | `LoaderOptions.baudrate` | PresetTable 提供默认值（先低后高策略见 §8） |
 | 文件与地址 | `FlashOptions.fileArray: {data, address}[]` | FirmwareSet 生成；地址来自预设表或用户显式覆盖 |
@@ -51,33 +51,39 @@
 
 ## 4. 核心模块设计
 
-### 4.1 FlashSession（状态机，中枢）
+### 4.1 DeviceManager（设备常驻状态机，中枢 · 2026-09-26 方向1 重构）
+
+> 旧版 FlashSession（idle/双会话互斥）已被本模型取代：**端口授权与连接是长生命周期，日志是默认背景流，烧录/擦除/复位是短暂临界区**。
 
 ```
-idle
- └─ connect() → requesting-port     （用户手势触发 requestPort）
-      ├─(用户取消)→ idle
-      └─ selected → detecting       （main()：自动复位 + 检测芯片）
-           ├─(识别失败)→ error:chip-detect
-           └─ ok → ready            （持锁：chip / baud / transport）
-                ├─ flash()  → flashing → verifying → resetting → done → ready
-                ├─ erase()  → erasing → ready
-                ├─ read()   → reading → ready
-                ├─ hardReset() → ready
-                └─ disconnect() → idle
-任意状态 ─(不可恢复错误)→ error ─release()→ idle
+disconnected
+ └─ connect() → requesting            （无授权端口才弹选择器；否则复用 lastPort）
+      ├─(用户取消)→ disconnected（静默）
+      └─ → detecting                  （esptool main()：自动复位 + 检测芯片）
+           ├─(识别失败)→ error ─disconnect()→ disconnected
+           └─ ok → ready              （已连接 · 日志监视中：startStream 自动开启）
+                ├─ flash()   → working（stopStream → 写入 → closeEsptool → startStream）→ ready
+                ├─ erase()   → working（同上临界区）→ ready
+                ├─ hardReset() → working → ready
+                ├─ switchPort() → 停流关会话 → requesting（强制弹选择器）
+                └─ disconnect() → disconnected
+ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notice
+任意临界区失败 → 恢复日志流回 ready（lastError 置位）；恢复失败 → error
 ```
 
 规则：
-- **单飞行**：flashing/erasing/reading 互斥，命令按钮按状态机灰化（这就是"下载命令控制"的主体）。
-- **释放纪律**：离开 ready/done/error 必须 `transport.disconnect()` + 释放 reader，否则串口被占用、二次连接失败（报告 F4[10] 的坑）。
-- 断线（disconnect 事件）→ 立即回收到 idle 并记 warning 日志。
+- **端口复用**：`lastPort` 长期保留，二次 connect/重连不弹系统选择器；「切换端口」才弹。
+- **日志自动**：进入 ready 即开实时日志流；进入 working 自动挂起、结束自动恢复（用户无感知）。
+- **互斥靠编排而非用户**：流（SerialMonitor）与 esptool 会话独占同一端口，切换顺序固定为 stopStream → esptool → closeEsptool → startStream。
+- **单飞行**：working 期间禁止一切其他命令（按钮灰化即由此而来）。
+- **拔线感知**：日志流 error 停止 → 自动回 disconnected 并出 notice。
 
 ### 4.2 Logger（日志系统）
 
 ```ts
 type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'transfer' | 'device'
 interface LogEntry {
+  seq: number           // 单调序号：渲染稳定 key（性能关键）
   ts: number            // 时间戳
   level: LogLevel
   source: 'loader' | 'serial' | 'app' | 'device'
@@ -88,8 +94,9 @@ interface LogEntry {
 
 - `source: 'device'`：解析 stub/ROM 回显（`Connecting...`、`Chip is …`、`Changed baudrate` 等）提取结构化字段（芯片名、MAC、flash 大小）反哺 UI。
 - `source: 'app'`：本项目的操作日志（用户点了什么、状态迁移）。
-- 内存环形缓冲（如 2000 条）+ UI 虚拟滚动；支持导出 .txt（自用排障刚需）。
+- 内存环形缓冲 2000 条；支持导出 .txt（自用排障刚需）。
 - esptool-js 原始输出保留原文，**解析失败不丢原文**，只降级为 `source:'loader'` 纯文本。
+- **渲染性能（2026-09-26，实测日志洪峰卡页后引入）**：① 订阅端**批量 flush**（120ms 聚合一次推入视图）；② 视图列表**稳定 seq key**（避免索引 key 全量重绘）；③ 显示上限 500 条（导出仍为全量 2000）；④ 「暂停视图」缓冲继续收集、恢复时补显。
 
 ### 4.3 FirmwareSet（文件选择与地址管理）
 
@@ -135,7 +142,7 @@ interface FirmwareSet {
 
 预设只是默认值，**永远允许用户改**；与实测 `chipFamily` 不一致时显示警告而非阻断。
 
-### 4.4 CommandBus + ErrorMapper（命令控制与错误翻译）
+### 4.4 DeviceManager + ErrorMapper（命令控制与错误翻译）
 
 命令集：`connect / flash / erase / readFlash / hardReset / disconnect / abort`。
 
@@ -143,8 +150,8 @@ interface FirmwareSet {
 
 | 内部错误类 | 典型来源 | 用户提示方向 | 恢复动作 |
 |---|---|---|---|
-| `PortBusy` | 打开失败/claimInterface 失败、他处占用 | "串口被占用，关闭串口助手/其他标签页后重试" | 回 idle |
-| `UserCancel` | requestPort 取消 | 静默 | 回 idle |
+| `PortBusy` | 打开失败/claimInterface 失败、他处占用 | "串口被占用，关闭串口助手/其他标签页后重试" | 回 disconnected/ready |
+| `UserCancel` | requestPort 取消 | 静默 | 回 disconnected |
 | `ResetFailed` | 复位序列无响应 | "无法进入下载模式：按住 BOOT 再点重试"（S3 USB 场景提示换对端口） | 停在 ready 前，可重试 |
 | `ChipDetectFail` | magic 不匹配等 | "芯片识别失败，升级内核/选择芯片型号强制模式" | 支持手动指定 chip |
 | `TransferFail` | 高波特率失步（报告 F4 案例2） | "传输中断，已自动降波特率重试 1 次" | 自动降速重试一次，再失败才报错 |

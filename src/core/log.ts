@@ -2,6 +2,8 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'transfer' | 'devic
 export type LogSource = 'loader' | 'serial' | 'app' | 'device'
 
 export interface LogEntry {
+  /** 单调递增序号（渲染稳定 key，2026-09-26 性能优化引入） */
+  seq: number
   ts: number
   level: LogLevel
   source: LogSource
@@ -15,11 +17,12 @@ type Listener = (entry: LogEntry) => void
 export class Logger {
   private entries: LogEntry[] = []
   private listeners = new Set<Listener>()
+  private nextSeq = 1
 
   constructor(private capacity = 2000) {}
 
-  add(entry: Omit<LogEntry, 'ts'> & { ts?: number }): LogEntry {
-    const full: LogEntry = { ts: entry.ts ?? Date.now(), ...entry }
+  add(entry: Omit<LogEntry, 'ts' | 'seq'> & { ts?: number }): LogEntry {
+    const full: LogEntry = { seq: this.nextSeq++, ts: entry.ts ?? Date.now(), ...entry }
     this.entries.push(full)
     if (this.entries.length > this.capacity) {
       this.entries.splice(0, this.entries.length - this.capacity)

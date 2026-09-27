@@ -1,41 +1,61 @@
 <script setup lang="ts">
-import type { ChipInfo, SessionState } from '../core/session'
+import type { DeviceState, ChipInfo } from '../core/device'
 import type { ClassifiedError } from '../core/errors'
 
 defineProps<{
-  state: SessionState
+  state: DeviceState
   chip: ChipInfo | null
   lastError: ClassifiedError | null
   busy: boolean
 }>()
-defineEmits<{ connect: []; release: [] }>()
+defineEmits<{ connect: []; disconnect: []; switchPort: [] }>()
+
+const LABEL: Record<DeviceState, string> = {
+  disconnected: '未连接',
+  requesting: '选择端口…',
+  detecting: '识别芯片…',
+  ready: '已连接 · 日志监视中',
+  working: '操作进行中…',
+  error: '连接错误',
+}
 </script>
 
 <template>
   <section class="panel">
-    <h2 class="panel__title">① 连接设备</h2>
+    <h2 class="panel__title">① 设备</h2>
     <p class="panel__state">
       状态：<code>{{ state }}</code>
-      <span v-if="chip" class="chip">芯片：{{ chip.name }}</span>
+      <span class="statelabel">{{ LABEL[state] }}</span>
+      <span v-if="chip" class="chip">{{ chip.name }}</span>
     </p>
 
     <div class="panel__actions">
       <button
         class="btn btn--primary"
         type="button"
-        :disabled="state !== 'idle' || busy"
+        :disabled="!['disconnected', 'error'].includes(state)"
         @click="$emit('connect')"
       >
-        {{ busy && (state === 'requesting' || state === 'detecting') ? '连接中…' : '连接（选择串口）' }}
+        {{ state === 'detecting' || state === 'requesting' ? '连接中…' : '连接设备' }}
       </button>
       <button
-        v-if="['ready', 'done', 'error'].includes(state)"
+        v-if="state === 'ready'"
         class="btn"
         type="button"
         :disabled="busy"
-        @click="$emit('release')"
+        title="换一个串口（重新弹出系统选择器）"
+        @click="$emit('switchPort')"
       >
-        断开
+        切换端口
+      </button>
+      <button
+        v-if="state !== 'disconnected'"
+        class="btn"
+        type="button"
+        :disabled="state === 'working'"
+        @click="$emit('disconnect')"
+      >
+        断开设备
       </button>
     </div>
 
@@ -44,7 +64,9 @@ defineEmits<{ connect: []; release: [] }>()
       <p class="panel__error-hint">{{ lastError.hint }}</p>
       <p class="panel__error-cls">分类：{{ lastError.cls }}</p>
     </div>
-    <p v-if="state === 'done'" class="panel__done">✅ 烧录完成，设备已复位。可再次烧录或断开。</p>
+    <p v-if="state === 'ready'" class="panel__hint">
+      设备常驻连接：烧录/擦除会自动挂起日志，结束后自动恢复；无需手动切换模式。
+    </p>
   </section>
 </template>
 
@@ -64,6 +86,10 @@ defineEmits<{ connect: []; release: [] }>()
   margin: 0 0 12px;
   color: var(--muted);
   font-size: 13px;
+}
+.statelabel {
+  margin-left: 10px;
+  color: var(--ink);
 }
 .chip {
   margin-left: 12px;
@@ -116,9 +142,10 @@ defineEmits<{ connect: []; release: [] }>()
   font-size: 12px;
   opacity: 0.7;
 }
-.panel__done {
+.panel__hint {
   margin: 12px 0 0;
-  color: var(--accent);
-  font-size: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 </style>

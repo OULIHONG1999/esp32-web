@@ -5,10 +5,9 @@ import type { LogEntry } from '../core/log'
 const props = defineProps<{
   logs: readonly LogEntry[]
   exportText: () => string
-  monitorActive: boolean
-  canStartMonitor: boolean
+  viewPaused: boolean
 }>()
-defineEmits<{ clear: []; start: []; stop: [] }>()
+defineEmits<{ clear: []; togglePause: [] }>()
 
 const body = ref<HTMLElement | null>(null)
 
@@ -36,30 +35,21 @@ function doExport(): void {
     <h2 class="panel__title">④ 日志</h2>
     <div class="logbar">
       <button
-        v-if="!monitorActive"
-        class="btn btn--live"
+        class="btn"
+        :class="viewPaused ? 'btn--live' : ''"
         type="button"
-        :disabled="!canStartMonitor"
-        :title="canStartMonitor ? '打开串口持续读取设备输出' : '需先断开烧录会话（状态 idle）'"
-        @click="$emit('start')"
+        :title="viewPaused ? '恢复滚动显示' : '暂停滚动显示（日志仍在收集）'"
+        @click="$emit('togglePause')"
       >
-        ▶ 实时日志
-      </button>
-      <button
-        v-else
-        class="btn btn--stop"
-        type="button"
-        @click="$emit('stop')"
-      >
-        ■ 停止
+        {{ viewPaused ? '▶ 恢复视图' : '⏸ 暂停视图' }}
       </button>
       <button class="btn" type="button" @click="doExport">导出 .txt</button>
       <button class="btn" type="button" @click="$emit('clear')">清空</button>
-      <span class="logbar__count">{{ logs.length }} 条</span>
+      <span class="logbar__count">{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}</span>
     </div>
-    <p v-if="monitorActive" class="logbar__hint">● 实时采集中——设备复位/重启的输出会实时滚动到这里</p>
+    <p v-if="viewPaused" class="logbar__hint">⏸ 视图已暂停——日志仍在后台收集，导出不受影响</p>
     <div ref="body" class="logbox">
-      <p v-for="(e, i) in logs" :key="i" class="logline" :class="'logline--' + e.level">
+      <p v-for="e in logs" :key="e.seq" class="logline" :class="'logline--' + e.level">
         <span class="logline__ts">{{ new Date(e.ts).toLocaleTimeString() }}</span>
         <span class="logline__text">{{ e.text }}</span>
       </p>
