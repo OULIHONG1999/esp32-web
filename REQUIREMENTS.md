@@ -24,7 +24,7 @@
 | F-02 | 选固件（本地） | 文件选择/拖拽单个或多段 `.bin`，地址可编辑，按芯片预设自动填（芯片未检出时用上次选择或手填） |
 | F-03 | 选固件（服务器） | 读取同域 `firmware/manifest.json`，展示一键列表，点击载入等价于填好 parts |
 | F-04 | 连接设备 | 「连接」按钮（用户手势）→ `requestPort` → 自动复位 + 芯片检测；失败给恢复指引（换口/按 BOOT/关串口助手） |
-| F-05 | 烧录 | 多段 `writeFlash`，进度条（`reportProgress`），中途失败自动降速重试 1 次 |
+| F-05 | 烧录 | 多段 `writeFlash`，进度条（`reportProgress`），中途失败自动降速重试 1 次（**2026-09-26：降速重试未实现=实现债 D1，阶段1 修复；MD5 校验=门2 D5**） |
 | F-06 | 擦除 | `eraseFlash` 全片擦除，带确认弹窗（防误触） |
 | F-07 | 硬复位 | `after("hard_reset")`，烧录完成后自动执行 + 独立按钮 |
 | F-08 | 日志系统 | 分级（debug/info/warn/error/transfer/device）、环形缓冲、实时面板、导出 .txt；保留 esptool 原文 |

@@ -7,8 +7,10 @@
 | 要做什么 | 入口 |
 |---|---|
 | 了解当前进度 / 下一步 | `PROGRESS.md` |
+| **执行计划（唯一权威线路）** | `EXECUTION-PLAN.md`（五道门 + 问题清单） |
 | 验收标准（F-xx） | `REQUIREMENTS.md` §2 |
 | 架构与状态机定义 | `DESIGN.md` §3–§4 |
+| v1.5 固件库设计 | `FIRMWARE-REGISTRY.md` |
 | 为什么选这条路线 | `research/esp32-web-flash/REPORT.md` |
 
 ## 命令（本机 Node 不在 PATH）
@@ -17,7 +19,6 @@
 & $env:MIMO_NODE $env:MIMO_NPM install
 & $env:MIMO_NODE $env:MIMO_NPM test          # Vitest，提交前必须全绿
 & $env:MIMO_NODE $env:MIMO_NPM run build     # vue-tsc --noEmit + vite build，必须过
-& $env:MIMO_NODE $env:MIMO_NPM run build    # vue-tsc --noEmit + vite build，必须过
 & $env:MIMO_NODE $env:MIMO_NPM run dev      # 简单场景可用；完整启动配方（IDF_BUILD_DIR / MIMO_ELECTRON_NODE_HOST 两个坑）见 PROGRESS.md「关键决策 4」
 ```
 

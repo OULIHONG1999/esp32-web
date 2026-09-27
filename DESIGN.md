@@ -192,6 +192,8 @@ interface FirmwareSet {
 
 约束：仅绑定 localhost（vite 默认）；生产构建无此插件 → 客户端探测 404 后隐藏相关按钮（F-19）。
 
+> **路由分流（v1.5 定案）**：本表端点由 vite 自管；`/api/registry*`、`/api/publish*` 走 vite proxy 转发到 `localhost:8787`（自含服务），两者路径不相撞。见 FIRMWARE-REGISTRY §3。
+
 ## 5. ESP32-S3 原生 USB（CDC）专项
 
 1. **复位策略**：默认尝试 `usbJtagSerialReset` → 失败回退 `classicReset` → 再失败提示手动 BOOT（三层兜底）。
@@ -207,11 +209,13 @@ interface FirmwareSet {
 | 前端框架 | **Vue 3 + Vite + TypeScript**（架构不依赖框架：粘合层+状态机独立于 UI 可测） |
 | 状态管理 | Pinia（或按需手写 store；状态机本身手写） |
 | 样式 | 深色终端风为默认审美 |
-| 打包部署 | 纯静态产物（dist/）；固件文件作为静态资源同域放置 |
+| 打包部署 | 纯静态产物（dist/）；固件文件作为静态资源同域放置（v1 描述；v1.5 起由自含服务托管，见 §7 注） |
 
 相关决策（详见 REQUIREMENTS.md）：v1 范围 = 烧录 + 擦除 + 硬复位；单用户自用；固件来源 = 本地选文件 + 服务器 manifest 一键载入；开发先 localhost，部署后置。
 
 ## 7. 部署设计（自用放宽版）
+
+> ⚠️ **v1.5 起 superseded（2026-09-26）**：部署将改为**自含 Node 服务**（`server/`，registry + 发布 + SSE + 静态托管，见 `FIRMWARE-REGISTRY.md` §0 与 `EXECUTION-PLAN.md`）。本节"纯静态 dist/ + firmware/ 目录"的描述**仅适用于 v1**（本地 localhost / 无 registry 场景）；HTTPS 三选一与 iframe `allow="serial"` 的约束在 v1.5 仍有效（部署 runbook 随 S2 交付）。
 
 ```
 https://your.host/

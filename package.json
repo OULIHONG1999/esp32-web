@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "esptool-js": "^0.7.0",
+    "esptool-js": "0.7.0",
     "vue": "^3.5.43"
   },
   "devDependencies": {

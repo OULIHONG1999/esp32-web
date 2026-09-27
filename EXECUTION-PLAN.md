@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：待批准 · 2026-09-26 · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准，阶段1 执行中** · 2026-09-26 · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）

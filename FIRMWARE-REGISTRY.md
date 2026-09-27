@@ -1,7 +1,21 @@
 # 固件项目库与远程发布 — 设计文档（FIRMWARE-REGISTRY）
 
-> 状态：需求定稿，待实现 · 2026-09-26 · 关联：DESIGN.md、REQUIREMENTS.md（F-20…F-23）、PROGRESS.md
-> 本文是三轮需求讨论（项目管理 → 托管/订阅 → 任意烧录文件）的合并定稿。
+> 状态：需求定稿，实现走线以 **`EXECUTION-PLAN.md`（已批准）** 为准 · 2026-09-26 · 关联：DESIGN.md、REQUIREMENTS.md（F-20…F-24）、PROGRESS.md
+> 本文是三轮需求讨论（项目管理 → 托管/订阅 → 任意烧录文件）的合并定稿。执行顺序/验收门/实现债见 EXECUTION-PLAN；本文不重复其线路细节。
+
+## 0. 已拍板的技术选型（实现中不再讨论，与 EXECUTION-PLAN §0 同步）
+
+| 项 | 决定 |
+|---|---|
+| 服务端 | **Node 24 + 原生 `node:http`，零第三方依赖**；单文件夹部署；端口 `PORT`（默认 8787） |
+| API | 全部相对路径 `/api/*`；**vite dev 用 proxy** 把 `/api/registry*` `/api/publish*` 转发到 `localhost:8787`，dev 专属（artifacts/build）留 vite 自管 |
+| 存储 | `server-data/` 下：`registry.json` + `projects/<id>/<variant>/<release>/`；registry 写入 = tmp+rename 原子；附 `rebuild.js` 自愈工具 |
+| 鉴权 | 发布/晋升带 `Authorization: Bearer <token>`（服务端 config + 环境变量）；读取公开；多用户命名空间仅预留 |
+| 上传安全 | 文件名取 basename 且白名单 `[A-Za-z0-9._-]`、单文件 ≤64MB、单发布 ≤256MB、发布互斥锁、逐文件 SHA256 校验 |
+| 发布端 | `tools/publish/` Node CLI（零依赖）：`once` / `--watch` / `--promote` / `--ai-notes`；读 `build/flash_args` + `publish.config.json`（assets 任意文件+地址） |
+| 数据模型 | Project → Variant(按 target 自动) → Release(不可变快照, **parts 含 flashParams**）；snapshot/release 分层；retention 分类型 |
+| 前端 | 固件区双 Tab（项目库 / ⚡本地构建保留）；载入三来源汇入同一表格；SSE 横幅+手动载入 |
+| AI 说明 | S5 期；OpenAI 兼容 endpoint 可配置，diff hash 缓存 |
 
 ## 1. 背景与目标
 
@@ -32,6 +46,8 @@
 | N12 | 多芯片变体（set-target 一码多芯，按 target 自动归类） | 定稿（§4.1） |
 
 ## 3. 总体架构（三端）
+
+> **API 路径定案（S1'）**：前后端一律相对路径 `/api/*`，不写死 host。生产：server 同域托管 dist，天然同源；开发：vite dev 配 proxy，把 `/api/registry*`、`/api/publish*` 转发到 `localhost:8787`，而 dev 专属的 `/api/artifacts`、`/api/build`（IDF 中间件，DESIGN §4.6）留 vite 自管——两组路由互不相撞。
 
 ```
 【Windows build 机】
@@ -74,6 +90,7 @@ Release（不可变快照，一次烧录的完整文件全集）{
   id: "20260926-2210-3f8a",               // 时间戳 + commit 短哈希
   type: "snapshot" | "release",
   chipFamily: "ESP32-S3",
+  flashParams: { mode, freq, size },      // ★ S2'：随快照固化（如 dio/40m/16MB），载入时注入烧录参数
   note: string,                            // snapshot: 自动一行摘要或空
                                             // release: 手写 或 AI 生成
   noteSource?: "manual" | "ai",
@@ -146,6 +163,14 @@ publish --config path        多工程/CI 场景显式指定配置
 
 浏览器直接上传 = 同一 API 的第二客户端（页面"补充文件/上传固件"入口，测试与临时发布用）。
 
+### 5.4 上传安全与崩溃一致性（S3'/S4' 定案，S1 实现）
+
+- **路径安全**：服务端对 multipart 文件名取 `basename` 并过白名单 `[A-Za-z0-9._-]`，拒绝 `..`/分隔符/非 ASCII；落盘路径永远由服务端按 `projects/<id>/<variant>/<release>/` 拼接，不信任客户端路径。
+- **体量上限**：单文件 ≤64MB、单发布 ≤256MB，超限 413 拒收；发布按 Release 加互斥锁（并发发布 409）。
+- **完整性**：逐文件 SHA256 与元数据比对，不匹配即拒（400），不落正式目录。
+- **原子性**：文件先进临时目录，全部校验通过后原子 rename 为 Release 目录，再以 tmp+rename 更新 `registry.json`——读者永远看不到半份 Release。
+- **自愈**：`server-data/rebuild.js` 扫描 `projects/` 目录树重建 `registry.json`（registry 丢失/损坏时手动执行）；retention 清理同样只删完整目录。
+
 ## 6. 订阅链（N5）
 
 - 页面 `GET /api/registry/stream`（SSE）：事件 `publish {project, variant, release}` →
@@ -186,6 +211,8 @@ publish --config path        多工程/CI 场景显式指定配置
 - 远端 Windows 真机验收：`publish --watch` 挂上 → 本机 build → 订阅横幅 → 载入 → 烧录。
 
 ## 10. 实现拆解（任务序列）
+
+> ⚠️ **编号以 EXECUTION-PLAN §5 为准**：下表是本设计文档的历史拆解（T11–T14），现行任务面板为 T11=阶段1（文档+实现债）→ T12=S1 最小闭环 → T13=S2 watch+部署 → T14=S3 订阅 → T15=S4 版本管理 → T16=S5 可选。两表内容可按下述映射理解：本表 T11≈现行 T11+T12（server），T12≈T12（CLI），T13≈T13+T14（前端），T14≈T14 收尾。
 
 | 任务 | 内容 | 依赖 |
 |---|---|---|
