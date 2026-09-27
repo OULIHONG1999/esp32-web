@@ -100,3 +100,13 @@
 1. ~~第一款目标芯片~~ → **已确认：ESP32-S3**。剩余动作仅为实现阶段用实际固件产物核对 F-14 地址预设（0x0/0x8000/0x10000）。
 2. 服务器 HTTPS 方案（有无域名）——只阻塞部署，不阻塞开发。
 3. 读取备份 / 串口监视是否进 v2。
+
+### 扩展需求（v1.5 固件项目库，2026-09-26 定稿 · 详见 FIRMWARE-REGISTRY.md）
+
+| 需求 | 验收标准 |
+|---|---|
+| F-20 项目/版本/多芯片变体 | Project→Variant(按target自动归类)→Release(不可变快照)三层；回滚=改 latest；snapshot/release 两层类型 |
+| F-21 订阅推送 | ★订阅项目发布后本地 SSE 即时感知（轮询降级）→横幅+角标→**手动**点载入 |
+| F-22 任意烧录文件管理 | 字体/资源等任意文件+地址与编译产物统一进 Release.parts；页面可补充上传；SHA256 完整性 |
+| F-23 发布 CLI 与自动触发 | Node CLI 平台无关（远端 Windows）；--watch 自动发布；flash_args+config.assets 自动识别；增量上传；Bearer token |
+| F-24 版本说明与保留策略 | snapshot 免说明/promote 时手写或 AI 生成（diff 缓存去重）；retention 按项目分类型，切换只向未来生效+确认 |
