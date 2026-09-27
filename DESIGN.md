@@ -18,7 +18,7 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │ UI 层（框架待定：Vue3/React/原生 TS）                  │
-│  连接向导 · 文件选择 · 日志面板 · 进度条 · 命令按钮      │
+│  设备连接 · IDF命令 · 固件烧录 · 日志面板        │
 ├─────────────────────────────────────────────────────┤
 │ 应用服务层（本项目核心代码）                            │
 │  DeviceManager 设备状态机 │ Logger 日志服务              │
@@ -160,18 +160,37 @@ interface FirmwareSet {
 
 **自动降速策略**：flash 断在中途 → 以 `原波特率/2` 重试一次（下限 115200），重试写入日志；只重试一次，避免死循环。
 
-### 4.5 连接向导（UI 流程，五步）
+### 4.5 UI 流程（方向1 四区块布局，2026-09-26 重构后）
 
 ```
-① 检查环境   浏览器支持? 安全上下文? （不满足给出修复指引，见 §7）
-② 选固件     单文件模式(默认) / 多段模式 / 载入 manifest
-③ 连接设备   「连接」按钮 → requestPort（用户手势）→ 自动复位检测 → 展示芯片信息
-             失败 → 引导：换 USB 口 / 按住 BOOT / 关串口助手
-④ 烧录       进度条 + 实时日志（transfer 级滚动）
-⑤ 完成       自动 hard_reset → 显示"设备已重启" → 保持会话可再次烧录
+区块①  设备      [连接]（首次弹选择器，之后免弹窗） [切换端口] [断开设备]
+                  状态：disconnected / requesting / detecting / ready·日志监视中 / working / error
+                  连接成功 → 自动识别芯片 → 自动开启实时日志流（方向1 核心）
+区块①.5 IDF 命令（仅 dev 中间件存在时显示）
+                  [🔨 编译](idf.py build) [🧹 清理](fullclean) [■ 中止]
+                  编译输出实时进日志面板；编译成功 → 自动载入固件段
+区块②  固件      [⚡ 载入本地构建]（flash_args 权威地址+烧录参数） / [添加 bin…]（手动多段）
+                  [烧录]（临界区：日志自动挂起 → 写入 → 自动硬复位 → 日志自动恢复）
+                  [完全擦除]（确认弹窗） [硬复位]
+区块③  日志      连接后常开、自动滚动；[⏸ 暂停视图] [导出 .txt] [清空]；显示最近 500 条
 ```
 
-任何步骤可回退；②③ 顺序可互换（先连后选也允许，检测结果反过来预填地址）。
+典型动线：连接（一次）→ 🔨编译 →（自动载入）→ 烧录 →（自动复位+日志滚出 Hello world）。
+拔线：日志流 error → 自动回 disconnected（无自动重连，重新点连接即可，端口授权保留）。
+
+### 4.6 dev 中间件 API（仅 localhost 开发环境，不进生产）
+
+由 `vite.config.ts` 的 `idfBuildArtifacts()` 插件提供，`IDF_BUILD_DIR` 未设置时整体关闭：
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/api/artifacts` | GET | 读 build 目录 `flash_args` → 三段清单 + 烧录参数（dio/freq/size） |
+| `/api/artifacts/file?path=` | GET | 下载固件段（路径限定在 buildDir 内，防穿越） |
+| `/api/build/status?since=N` | GET | 轮询：行缓冲增量 + running/exitCode（单飞行） |
+| `/api/build/start?cmd=build\|clean` | POST | spawn PowerShell + EIM profile 执行 `idf.py build/fullclean` |
+| `/api/build/abort` | POST | `taskkill /T /F` 中止 |
+
+约束：仅绑定 localhost（vite 默认）；生产构建无此插件 → 客户端探测 404 后隐藏相关按钮（F-19）。
 
 ## 5. ESP32-S3 原生 USB（CDC）专项
 
