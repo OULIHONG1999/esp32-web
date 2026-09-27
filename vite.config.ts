@@ -219,6 +219,13 @@ function idfBuildArtifacts(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [vue(), idfBuildArtifacts()],
+  // v1.5：/api/registry* 与 /api/publish* 转发自含服务；dev 专属 artifacts/build 留 vite 自管（FIRMWARE-REGISTRY §3）
+  server: {
+    proxy: {
+      '/api/registry': 'http://localhost:8787',
+      '/api/publish': 'http://localhost:8787',
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -226,6 +233,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    // .ts = 前端核心层；.js = server/ 与 tools/publish（纯 JS 零依赖，不进 vue-tsc）
+    include: ['tests/**/*.test.{ts,js}'],
   },
 })

@@ -1,0 +1,10 @@
+{
+  "//": "fixtures 专用；token 由测试注入环境变量",
+  "server": "http://localhost:8787",
+  "token": "${FIRMWARE_PUBLISH_TOKEN}",
+  "project": { "id": "hello-world", "name": "Hello World", "description": "fixtures demo" },
+  "buildDir": "fake-build",
+  "assets": [
+    { "label": "font", "file": "assets/font.bin", "address": "0x290000" }
+  ]
+}

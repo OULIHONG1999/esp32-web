@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "server": "node server/index.js",
+    "rebuild-registry": "node server/rebuild.js",
+    "publish:once": "node tools/publish/index.js once"
   },
   "dependencies": {
     "esptool-js": "0.7.0",

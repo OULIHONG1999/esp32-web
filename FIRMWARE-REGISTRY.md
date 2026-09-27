@@ -48,6 +48,8 @@
 ## 3. 总体架构（三端）
 
 > **API 路径定案（S1'）**：前后端一律相对路径 `/api/*`，不写死 host。生产：server 同域托管 dist，天然同源；开发：vite dev 配 proxy，把 `/api/registry*`、`/api/publish*` 转发到 `localhost:8787`，而 dev 专属的 `/api/artifacts`、`/api/build`（IDF 中间件，DESIGN §4.6）留 vite 自管——两组路由互不相撞。
+>
+> **S1 已实现端点**（2026-09-27，`server/app.js`）：`GET /api/registry`（含 ETag）、`POST /api/publish`（Bearer 鉴权 + multipart）、`GET /api/registry/projects/:pid/variants/:vid/releases/:rid/parts/:file`（下载，路径段白名单+前缀双检）、静态 `dist/`（SPA fallback）。SSE `…/registry/stream` 与 promote/notes 未实现（S3/S4）。
 
 ```
 【Windows build 机】

@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：**已批准，阶段1 完成待门1 验收** · 2026-09-26 · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准；门1 已过（2026-09-27），S1 代码+本地 e2e 完成，门2 待真机** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）
@@ -98,17 +98,17 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 2. ✅ 改 `DESIGN.md` §7 superseded 注 + §4.1/§4.4 超时与降速规则；`PROGRESS.md` 任务线重排（T11）；
 3. ✅ 代码：D1（flash 重试）、D2（超时）、D3（错误条）各带单测 → `test + build` 全绿（43 测试）→ `fix(v1-debt)` commit；
 4. ✅ 更新验收表 F-05 状态标注。
-**门1**：43 测试全绿（已满足）；文档 diff 用户抽查（待执行）。
+**门1**：✅ 已过（2026-09-27）——43 测试全绿；用户确认 5 项拍板（降速语义/20s·60s 超时/错误条/64MB·256MB 限制/超时范围砍削）。
 
-### S1：最小闭环（预计 1–2 个会话）
+### S1：最小闭环（预计 1–2 个会话）——✅ 代码+本地 e2e 完成（2026-09-27），待门2 真机
 
 实现顺序（每步可编译可测）：
-1. `server/` 骨架：config（token/port/dataDir）+ 静态托管 dist + `GET /api/registry`（读）；
-2. `POST /api/publish`：鉴权→校验（安全条目）→算/比 SHA256→原子落位→更新 registry→互斥；**单测**（穿越、超限、坏 hash、并发）；
-3. `tools/publish/`：`publish once`（解析 flash_args+config.assets→查缺→multipart 上传）；**单测**（解析、差集）；
-4. 前端：固件区加"项目库"最小版——拉 registry、列 latest、点载入进现有表格（flashParams 注入）；vite proxy 配好；
-5. fixtures：`test/fixtures/fake-build/` 三段假 bin；本地 `node server &` 端到端脚本。
-**门2（核心）**：本地 fixtures 全链路自动通过 → **你的真机**：publish 真实 hello_world → 页面载入 → 烧录成功 → 同时核对 D4/D5 → 你在 PROGRESS 验收表勾 F-03/F-13 等。
+1. ✅ `server/` 骨架：config（token/port/dataDir）+ 静态托管 dist + `GET /api/registry`（读，含 ETag）；
+2. ✅ `POST /api/publish`：鉴权→校验（白名单/64MB/256MB）→SHA256→原子落位→更新 registry→互斥；**单测**（穿越、超限、坏 hash、幂等补传）；
+3. ✅ `tools/publish/`：`publish once`（解析 flash_args+config.assets→查缺→multipart 上传）；**单测**（解析、差集、fixtures 全集）；
+4. ✅ 前端：固件区"项目库"最小版——拉 registry、列 latest、点载入进现有表格（flashParams 注入）；vite proxy 已配；
+5. ✅ fixtures：`tests/fixtures/fake-build/`（计划原文 test/fixtures，实现统一进 tests/）四段假 bin；e2e 测试：CLI→server→registry→下载比对→幂等 0 上传→错 token 拒收，5 用例全过。
+**门2（核心）**：本地 fixtures 全链路自动通过 ✅ → **你的真机**：publish 真实 hello_world → 页面载入 → 烧录成功 → 同时核对 D4/D5 → 你在 PROGRESS 验收表勾 F-03/F-13 等（待执行）。
 
 ### S2：自动发布 + 部署
 

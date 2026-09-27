@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import type { FlashPart } from '../core/device'
 import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
+import {
+  fetchRegistry,
+  fetchReleasePart,
+  flattenLatest,
+  toFlashParams,
+  type RegistryOption,
+} from '../api/registry'
 
 interface Row {
   id: number
@@ -128,6 +135,55 @@ async function doFlash(): Promise<void> {
 function reset(): void {
   rows.splice(0, rows.length)
 }
+
+// ---- 项目库（v1.5 F-20 最小版：拉 registry、列 latest、载入进同一表格）----
+const registryOptions = ref<RegistryOption[]>([])
+const registryMsg = ref<string | null>(null)
+const registryLoading = ref(false)
+const selectedIdx = ref(-1)
+
+async function refreshRegistry(): Promise<void> {
+  registryLoading.value = true
+  registryMsg.value = null
+  try {
+    const reg = await fetchRegistry()
+    registryOptions.value = flattenLatest(reg)
+    registryMsg.value =
+      registryOptions.value.length === 0 ? '服务器暂无已发布项目' : null
+    if (selectedIdx.value >= registryOptions.value.length) selectedIdx.value = -1
+  } catch (e) {
+    registryOptions.value = []
+    selectedIdx.value = -1
+    registryMsg.value = `项目库不可达：${e instanceof Error ? e.message : String(e)}（自含服务未启动？node server/index.js）`
+  } finally {
+    registryLoading.value = false
+  }
+}
+
+async function loadRegistryRelease(): Promise<void> {
+  const opt = registryOptions.value[selectedIdx.value]
+  if (!opt) return
+  registryMsg.value = null
+  try {
+    const loaded: Row[] = []
+    for (const p of opt.release.parts) {
+      const bytes = await fetchReleasePart(opt.projectId, opt.variant, opt.release.id, p.file)
+      const file = new File([bytes as BlobPart], p.file, {
+        type: 'application/octet-stream',
+      })
+      loaded.push({ id: nextId++, label: p.label, address: p.address, file })
+    }
+    rows.splice(0, rows.length, ...loaded)
+    emit('params', toFlashParams(opt.release.flashParams))
+    registryMsg.value = `已载入 ${opt.projectName}/${opt.variant} ${opt.release.id}（${loaded.length} 段，烧录参数已注入）`
+  } catch (e) {
+    registryMsg.value = `载入失败：${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+onMounted(() => {
+  void refreshRegistry()
+})
 </script>
 
 <template>
@@ -154,6 +210,40 @@ function reset(): void {
       </label>
     </div>
     <p v-if="localLoadMsg" class="loadmsg">{{ localLoadMsg }}</p>
+
+    <!-- 项目库（v1.5 F-20 最小版）：两跳可达——选项目 → 载入 latest -->
+    <div class="registry">
+      <span class="registry__label">📁 项目库</span>
+      <select
+        v-model="selectedIdx"
+        class="registry__select"
+        :disabled="registryLoading || registryOptions.length === 0"
+      >
+        <option :value="-1" disabled>— 点「刷新」加载 —</option>
+        <option v-for="(o, i) in registryOptions" :key="o.projectId + '/' + o.variant" :value="i">
+          {{ o.projectName }} · {{ o.variant }} · {{ o.release.id }}{{ o.release.type === 'release' ? ' ★' : '' }}
+        </option>
+      </select>
+      <button
+        class="btn"
+        type="button"
+        :disabled="registryLoading"
+        title="拉取 /api/registry 最新版本列表"
+        @click="refreshRegistry"
+      >
+        {{ registryLoading ? '拉取中…' : '刷新' }}
+      </button>
+      <button
+        class="btn btn--load"
+        type="button"
+        :disabled="disabled || selectedIdx < 0"
+        title="下载该版本全部段并填入下方表格（含烧录参数）"
+        @click="loadRegistryRelease"
+      >
+        载入此版本
+      </button>
+    </div>
+    <p v-if="registryMsg" class="loadmsg">{{ registryMsg }}</p>
 
     <table v-if="rows.length" class="tbl">
       <thead>
@@ -238,6 +328,32 @@ function reset(): void {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+.registry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.registry__label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.registry__select {
+  flex: 1;
+  min-width: 220px;
+  background: var(--bg, #0d1117);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 13px;
+}
+.registry__select:disabled {
+  opacity: 0.45;
 }
 .filebtn {
   display: inline-block;
