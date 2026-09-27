@@ -86,6 +86,12 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 14. **发布互斥锁 409 在当前实现下实际不可达**：`handlePublish` 主体为同步代码，node 单线程天然串行——锁保留为将来异步化的防御；e2e 用"连续两次发布均成功"代理验证无死锁。若未来加入异步步骤需重测 409。
 15. **vitest include 扩为 `*.{ts,js}`**：server/ 与 tools/publish 为零依赖纯 JS（不进 vue-tsc），配套测试用 `.js`；前端核心层保持 `.ts`。改 vite.config 的 test.include 时勿回退。
 
+### 门2 首轮实测问题记录（2026-09-27，真机烧录暴露）
+
+16. **方向1 裸会话直接 writeFlash 必失败（已修）**：connect 后 `closeEsptool` 归还端口，flash/erase/hardReset 新建的会话从未 `main()` 同步就发命令 → esptool-js 不会自动同步 → 首把秒败；D1 重试的 `reopenForRetry` 恰好跑了完整 main() 兜底，造成"每次烧录先失败一次"的假象。方向1 后首次实机烧录才暴露（F-17 回归价值的直接证据）。**修复**：glue 加 `ensureSynced()`（新会话首次使用前自动同步），detect/flash/erase/hardReset 四入口全覆盖；`reopenForRetry` 同步维护 synced 状态。
+17. **⚡载入 flashParams 字段名失配——D4 疑云真根因（已修）**：dev 中间件返回 `{mode,freq,size}`，前端按 `{flashMode,flashFreq,flashSize}` 消费 → TS 类型撒谎抓不到（vite.config 不在 tsconfig include）→ 参数全落默认 **40m/4MB**，flash_args 的 80m/2MB **从未生效**——历史"80m vs 启动日志 40MHz"疑云即此（烧录实际就按 40m 烧的）。**修复**：中间件改返回 `flashMode/flashFreq/flashSize` + `buildArtifacts.normalizeFlashParams` 双形状归一兜底 + `tests/api.test.ts` 守护。项目库（toFlashParams）路径字段名本就正确。
+18. **重试首因不可见（已修）**：D1 重试成功后 `lastError` 被清、首败错误也不进日志——盲区。**修复**：core 重试前经 noticeHandler 写"首次写入失败（原因），自动重建会话重试…"进日志；useSession 不再硬编码"——请重新连接"后缀（拔线默认消息由 core 自带）。附带观察：⚡/项目库载入后**表格只显示段数不显示烧录参数**，参数生效性只能从日志行读——backlog：载入成功提示中带上 mode/freq/size。
+
 ## 外部环境快照
 
 - IDF 工具链已迁 D 盘（junction `C:\Espressif → D:\Espressif`）；**esp32s3 multilib 缺失已修复**（idf_tools 重装 xtensa-esp-elf，坏包残留 `xtensa-esp-elf.broken` 待用户确认后可删，约 1.07GB）。
@@ -134,7 +140,9 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-27（门2 首轮实测修复）**：真机烧录链路走通（发布→载入→三段烧录→硬复位→D1 重试兜底成功），暴露并修复四问题（记录 16–18 + D5）：① 裸会话未 sync 首把必败——glue `ensureSynced` 四入口；② flashParams 字段名失配（D4 真根因，参数从未生效）——中间件改形状+normalize+单测；③ 重试首因不可见——notice 进日志；④ **D5 实现**——`core/md5.ts` 同步 MD5（node:crypto 对拍 13 长度 + RFC 向量）接入 `calculateMD5Hash`，日志将出现 File md5 / Flash md5 / Hash of data verified.。88 测试 + build 全绿（+@types/node）。烧录后无设备日志输出待查（疑 console=UART0，IDF-ENV §6）。
 - **2026-09-27（S1 最小闭环）**：跨设备下载本体（手动版）落地——`server/`（零依赖 node:http：registry 原子读写+ETag、POST publish 鉴权/白名单/SHA256/原子落位/幂等补传、parts 下载双检、静态 SPA、rebuild 自愈）；`tools/publish` once CLI（flash_args+assets 解析、差集查缺、multipart、--release-id）；前端项目库最小版（latest 列表+载入+flashParams 注入）+ vite proxy；fixtures e2e（发布→registry→下载比对→0 上传幂等→401 拒收）5 用例。**81 测试全绿 + build 通过**。新问题记录 11–15。门2 本地部分过，待真机。
+
 - **2026-09-26（阶段1 实现债 D1–D3）**：`fix(v1-debt)`——**D1**：`DeviceDeps.reopenForRetry`（glue：释放会话→波特率/2 下限 115200→重建→重新同步）+ `DeviceManager.flash` 可重试错误降速重试一次（仅一次）；**D2**：`DeviceTimeouts` 注入（detect 20s→error、flash 空闲 60s→ready，进度重置计时，`TimeoutError` name 前置分类）；**D3**：ready+error 态可关闭错误条（`clearError`）+ 临界区成功自动清除。43 测试（+11）+ build 全绿；同步 DESIGN §4.1/§4.4、EXECUTION-PLAN B 组、REQUIREMENTS F-05、本文验收表/问题记录（8–10）。
 - **2026-09-26（阶段1 文档同步）**：按 EXECUTION-PLAN 全面同步——FIRMWARE-REGISTRY：新增 §0 技术选型表（与计划 §0 对齐）、§3 API proxy 定案（S1'）、Release 补 `flashParams`（S2'）、§5.4 上传安全+原子写+rebuild.js（S3'/S4'）、§10 任务编号映射注（附加 a）；DESIGN：§7 加 v1.5 自含服务 superseded 注（S6'）、§6 部署行与 §4.6 加路由分流定案（附加 d）；AGENTS：快速入口补执行计划/固件库设计、修重复命令行；REQUIREMENTS：F-05 标注 D1 实现债；EXECUTION-PLAN 状态改"已批准"（附加 c）；本文：T6 并入新线（S6'）、新增 T11、验收表补 F-19…F-24（附加 b）、下一步重排。
 - **2026-09-26（IDF 命令按钮）**：新增 F-19——`/api/build` dev 中间件（spawn PowerShell+EIM profile 跑 `idf.py build/fullclean`，行缓冲+900ms 轮询回传，单飞行/taskkill 中止），页面 [🔨编译][🧹清理][■中止] 按钮，**编译成功自动载入固件段**；冒烟测试 exit 0。探测端点在生产构建下不存在→按钮自动隐藏。

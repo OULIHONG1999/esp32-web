@@ -182,7 +182,9 @@ function idfBuildArtifacts(): Plugin {
             res.end(
               JSON.stringify({
                 buildDir,
-                flashParams: { mode, freq, size },
+                // 字段名与前端 FlashParams 对齐（门2 实测：曾因 mode/freq/size 形状不符
+                // 导致全部落入默认 40m/4MB，flash_args 参数从未生效——D4 根因）
+                flashParams: { flashMode: mode, flashFreq: freq, flashSize: size },
                 parts,
               }),
             )

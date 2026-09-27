@@ -212,7 +212,7 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
 })
 
 describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
-  it('烧录失败 → reopenForRetry 降速重建 → 重试一次成功（调用序）', async () => {
+  it('烧录失败 → reopenForRetry 降速重建 → 重试一次成功（调用序 + 首因进 notice）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     let attempts = 0
     deps.flash = async () => {
@@ -224,6 +224,8 @@ describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
       rec.calls.push('reopenForRetry')
     }
     const d = await connectReady(deps)
+    const notices: string[] = []
+    d.setNoticeHandler((m) => notices.push(m))
     rec.calls.length = 0
     await d.flash(parts)
     expect(attempts).toBe(2)
@@ -232,6 +234,10 @@ describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
     ])
     expect(d.state).toBe('ready')
     expect(d.lastError).toBeNull()
+    // 门2 盲区修复：重试成功后首败原因仍可见（进日志）
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain('首次写入失败')
+    expect(notices[0]).toContain('重试')
   })
 
   it('重试也失败 → 只重试一次、错误上抛、lastError 置位、状态回 ready', async () => {

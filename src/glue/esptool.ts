@@ -6,6 +6,7 @@ import {
   type LoaderOptions,
 } from 'esptool-js'
 import type { ChipInfo, FlashPart, Progress } from '../core/device'
+import { md5Hex } from '../core/md5'
 import type { Logger } from '../core/log'
 
 /** esptool 原始输出 → Logger（ESLint 无法替换的官方注入点，DESIGN §3） */
@@ -72,6 +73,8 @@ export async function writeFlash(
     flashSize: params?.flashSize ?? '4MB',
     eraseAll: false,
     compress: true,
+    // D5：写入后芯片读回 MD5 比对（日志 File md5 / Flash md5 / Hash of data verified.）
+    calculateMD5Hash: (image: Uint8Array) => md5Hex(image),
     reportProgress: (fileIndex, written, bytesTotal) => {
       const before = parts
         .slice(0, fileIndex)

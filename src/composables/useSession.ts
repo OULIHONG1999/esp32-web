@@ -30,7 +30,8 @@ export function useSession() {
     log.add({ level: 'device', source: 'device', text: line })
   })
   device.setNoticeHandler((message) => {
-    log.add({ level: 'warn', source: 'serial', text: `⚠ ${message}——请重新连接` })
+    // 后缀由 core 消息自带（重试提示等不应拼"请重新连接"）
+    log.add({ level: 'warn', source: 'serial', text: `⚠ ${message}` })
   })
 
   device.subscribe(() => {

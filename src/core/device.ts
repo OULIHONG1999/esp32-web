@@ -198,7 +198,7 @@ export class DeviceManager {
             this.state = 'disconnected'
             this.emit()
           }
-          this.noticeHandler(message ?? '设备连接中断')
+          this.noticeHandler(message ?? '设备连接中断——请重新连接')
         }
       },
     }
@@ -335,7 +335,10 @@ export class DeviceManager {
       } catch (err) {
         // D1：可重试错误 → 降速重建会话后重试一次（仅一次，避免死循环）
         const reopen = this.deps.reopenForRetry?.bind(this.deps)
-        if (!classifyError(err, 'flash').retryable || !reopen) throw err
+        const cls = classifyError(err, 'flash')
+        if (!cls.retryable || !reopen) throw err
+        // 首因进日志（重试成功后 lastError 会被清掉，否则首败不可见——门2 盲区）
+        this.noticeHandler(`首次写入失败（${cls.message}），自动重建会话重试…`)
         await reopen()
         this.progress = { written: 0, total: 0, partIndex: 0 }
         this.emit()

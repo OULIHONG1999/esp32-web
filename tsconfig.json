@@ -14,7 +14,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client", "w3c-web-serial"],
+    "types": ["vite/client", "w3c-web-serial", "node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

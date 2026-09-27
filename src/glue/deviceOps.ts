@@ -35,6 +35,8 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
   let esptool: PortSession | null = null
   let monitor: SerialMonitor | null = null
   let flashParams: FlashParamOverrides = {}
+  /** 当前 esptool 会话是否已 main() 同步（新会话必须先 sync 才能收命令） */
+  let syncedName: string | null = null
 
   const ensureEsptool = (): PortSession => {
     if (!lastPort) throw new Error('serial port not selected')
@@ -43,6 +45,21 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
       log.add({ level: 'debug', source: 'app', text: 'esptool 会话已建立' })
     }
     return esptool
+  }
+
+  /**
+   * 会话首次使用前自动同步（main：复位+识别+加载 stub）。
+   * 方向1 教训：connect 后 closeEsptool 归还端口，flash/erase/hardReset 新建的裸会话
+   * 若直接发命令必超时失败——所有操作入口统一走这里（门2 实测暴露，2026-09-27）。
+   */
+  const ensureSynced = async (): Promise<PortSession> => {
+    const session = ensureEsptool()
+    if (syncedName === null) {
+      const info = await detectChip(session)
+      syncedName = info.name
+      log.add({ level: 'info', source: 'app', text: `会话已同步：${info.name}` })
+    }
+    return session
   }
 
   return {
@@ -68,14 +85,20 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
       if (esptool) {
         await releaseSession(esptool)
         esptool = null
+        syncedName = null
         log.add({ level: 'debug', source: 'app', text: 'esptool 会话已关闭' })
       }
     },
 
     async detect(): Promise<ChipInfo> {
-      const info = await detectChip(ensureEsptool())
-      log.add({ level: 'info', source: 'app', text: `芯片识别成功：${info.name}` })
-      return info
+      const session = ensureEsptool()
+      if (syncedName === null) {
+        const info = await detectChip(session)
+        syncedName = info.name
+        log.add({ level: 'info', source: 'app', text: `芯片识别成功：${info.name}` })
+        return info
+      }
+      return { name: syncedName }
     },
 
     async startStream(handlers: StreamHandlers): Promise<void> {
@@ -108,19 +131,22 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
         source: 'app',
         text: `开始烧录 ${parts.length} 段，共 ${total} 字节`,
       })
-      await writeFlash(ensureEsptool(), parts, onProgress, flashParams)
+      const session = await ensureSynced()
+      await writeFlash(session, parts, onProgress, flashParams)
       log.add({ level: 'info', source: 'app', text: '烧录写入完成' })
     },
 
     async erase(): Promise<void> {
       log.add({ level: 'warn', source: 'app', text: '开始全片擦除…' })
-      await eraseFlash(ensureEsptool())
+      const session = await ensureSynced()
+      await eraseFlash(session)
       log.add({ level: 'info', source: 'app', text: '擦除完成' })
     },
 
     async hardReset(): Promise<void> {
       log.add({ level: 'info', source: 'app', text: '发送硬复位，设备重启' })
-      await hardReset(ensureEsptool())
+      const session = await ensureSynced()
+      await hardReset(session)
     },
 
     /** D1：烧录失败后降速重建会话（波特率/2，下限 115200）并重新同步，供上层重试一次 */
@@ -133,6 +159,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
           /* 释放失败也继续重建 */
         }
         esptool = null
+        syncedName = null
       }
       const downgraded = next < baudrate
       baudrate = next
@@ -145,6 +172,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
       })
       // 重新同步（芯片仍在下载模式）；失败会向上抛，由调用方归位报错
       const info = await detectChip(ensureEsptool())
+      syncedName = info.name
       log.add({ level: 'info', source: 'app', text: `重试会话已同步：${info.name}` })
     },
   }
