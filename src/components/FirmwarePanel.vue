@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import type { FlashPart } from '../core/device'
 import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
 
@@ -22,9 +22,19 @@ const props = defineProps<{
   disabled: boolean
   percent: number | null
   chipName: string | null
+  buildRunning: boolean
+  autoLoadSignal: number
 }>()
 
 const localLoadMsg = ref<string | null>(null)
+
+// 编译成功信号 → 自动载入（loadLocalBuild 内部会把 buildRunning 期间禁用）
+watch(
+  () => props.autoLoadSignal,
+  (n) => {
+    if (n > 0) void loadLocalBuild()
+  },
+)
 
 /** 一键载入：从 dev 中间件读取 IDF build 目录（flash_args 权威地址 + 烧录参数） */
 async function loadLocalBuild(): Promise<void> {
@@ -132,8 +142,8 @@ function reset(): void {
       <button
         class="btn btn--load"
         type="button"
-        :disabled="disabled"
-        title="从 IDF build 目录自动载入 flash_args 中的全部固件段与烧录参数"
+        :disabled="disabled || buildRunning"
+        :title="buildRunning ? '编译进行中，完成后会自动载入' : '从 IDF build 目录自动载入 flash_args 中的全部固件段与烧录参数'"
         @click="loadLocalBuild"
       >
         ⚡ 载入本地构建（一键）
