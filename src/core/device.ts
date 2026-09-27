@@ -183,6 +183,8 @@ export class DeviceManager {
       }
       this.transition('detecting')
       this.chip = await this.deps.detect()
+      // 互斥编排：识别用的 esptool 会话必须先归还端口，日志流才能 open
+      await this.deps.closeEsptool()
       await this.openStream()
       this.transition('ready')
     } catch (err) {

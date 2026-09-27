@@ -77,19 +77,25 @@ async function connectReady(deps: DeviceDeps): Promise<DeviceManager> {
 }
 
 describe('DeviceManager（方向1 设备常驻模型）', () => {
-  it('首次连接：无已授权端口 → 弹选择器 → 识别 → ready 并开启日志流', async () => {
+  it('首次连接：无已授权端口 → 弹选择器 → 识别 → 关 esptool 归还端口 → 开日志流', async () => {
     const { deps, rec } = makeDeps()
     const d = await connectReady(deps)
-    expect(rec.calls).toEqual(['openExistingPort', 'pickPort', 'detect', 'startStream'])
+    expect(rec.calls).toEqual([
+      'openExistingPort',
+      'pickPort',
+      'detect',
+      'closeEsptool',
+      'startStream',
+    ])
     expect(d.chip?.name).toBe('ESP32-S3')
     expect(d.isStreamOn).toBe(true)
   })
 
-  it('再次连接：复用已授权端口，不弹选择器', async () => {
+  it('再次连接：复用已授权端口，不弹选择器（同样先归还端口再开流）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = new DeviceManager(deps)
     await d.connect()
-    expect(rec.calls).toEqual(['openExistingPort', 'detect', 'startStream'])
+    expect(rec.calls).toEqual(['openExistingPort', 'detect', 'closeEsptool', 'startStream'])
     expect(d.state).toBe('ready')
   })
 
@@ -149,7 +155,9 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     const d = await connectReady(deps)
     rec.calls.length = 0
     await d.switchPort()
-    expect(rec.calls).toEqual(['stopStream', 'closeEsptool', 'pickPort', 'detect', 'startStream'])
+    expect(rec.calls).toEqual([
+      'stopStream', 'closeEsptool', 'pickPort', 'detect', 'closeEsptool', 'startStream',
+    ])
     expect(d.state).toBe('ready')
   })
 
