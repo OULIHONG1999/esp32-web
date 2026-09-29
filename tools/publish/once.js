@@ -60,7 +60,14 @@ export async function runOnce(args, opts = {}) {
       console.log(`[publish] ✓ 已发布 ${json.project}/${json.variant}/${json.release}`)
       return json
     } catch (err) {
-      lastErr = err
+      // 保留 cause（fetch failed 的真因在 err.cause：ECONNRESET/CERT 等）
+      const cause = err instanceof Error ? err.cause : null
+      lastErr =
+        cause && typeof cause === 'object'
+          ? new Error(
+              `${err instanceof Error ? err.message : String(err)} cause=[${'code' in cause ? cause.code : ''}] ${'message' in cause ? cause.message : ''}`,
+            )
+          : err
     }
   }
   throw lastErr
