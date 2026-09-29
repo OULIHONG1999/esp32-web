@@ -2,6 +2,10 @@ import { classifyError, type ClassifiedError, type SessionPhase } from './errors
 
 export interface ChipInfo {
   name: string
+  /** F-12 芯片详情（检测阶段读取，任一字段可缺省——旧数据/读取失败兼容） */
+  mac?: string
+  revision?: string
+  flashSize?: string
 }
 
 export interface FlashPart {

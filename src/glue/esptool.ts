@@ -55,7 +55,27 @@ export function openSession(port: SerialPort, log: Logger, baudrate = 115200): P
 
 export async function detectChip(session: PortSession): Promise<ChipInfo> {
   const name = await session.esploader.main()
-  return { name }
+  // F-12：检测阶段顺带读 MAC/Revision/Flash 容量（均失败可缺省，不阻塞连接）
+  const info: ChipInfo = { name }
+  try {
+    const mac = await session.esploader.chip?.readMac?.(session.esploader)
+    if (mac) info.mac = String(mac)
+  } catch {
+    /* 可选字段 */
+  }
+  try {
+    const rev = await session.esploader.chip?.getChipRevision?.(session.esploader)
+    if (rev !== undefined && rev !== null) info.revision = String(rev)
+  } catch {
+    /* 可选字段 */
+  }
+  try {
+    const size = await session.esploader.detectFlashSize()
+    if (size) info.flashSize = String(size)
+  } catch {
+    /* 可选字段 */
+  }
+  return info
 }
 
 export async function writeFlash(

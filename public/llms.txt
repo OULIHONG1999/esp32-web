@@ -7,6 +7,7 @@
 
 ## API 入口
 - 注册表: GET /api/registry
+- 服务状态: GET /api/status (项目/版本计数、数据占用、运行时长——公开只读)
 - 版本列表(SSE 实时推送): GET /api/registry/stream
 - 固件段下载: GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/parts/{file}
 - 发布固件: POST /api/publish (multipart/form-data，需 Bearer Token；字段 meta=JSON 元数据，file=固件段)

@@ -43,6 +43,59 @@ function collectBody(req, maxBytes) {
   })
 }
 
+function dirSize(dir) {
+  let total = 0
+  const walk = (d) => {
+    let entries = []
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else {
+        try {
+          total += fs.statSync(p).size
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+  walk(dir)
+  return total
+}
+
+/** GET /api/status 快照：项目/版本统计 + 数据目录占用 + 服务运行时长 */
+function statusSnapshot(dataDir) {
+  const reg = readRegistry(dataDir)
+  let projects = 0
+  let releases = 0
+  let latestAt = ''
+  for (const p of Object.values(reg.projects ?? {})) {
+    projects += 1
+    for (const v of Object.values(p.variants ?? {})) {
+      releases += (v.releases ?? []).length
+      for (const r of v.releases ?? []) {
+        if (r.createdAt && r.createdAt > latestAt) latestAt = r.createdAt
+      }
+    }
+  }
+  return {
+    service: 'firmware-server',
+    version: '0.1.0',
+    docs: '/llms.txt',
+    projects,
+    releases,
+    latestPublishAt: latestAt || null,
+    dataDirBytes: dirSize(path.join(dataDir, 'projects')),
+    uptimeSeconds: Math.round(process.uptime()),
+    now: new Date().toISOString(),
+  }
+}
+
 /** GET /api/registry —— 附 etag（mtime），供轮询降级用；_meta 为 AI/客户端自描述 */
 function serveRegistry(dataDir, res) {
   const p = registryPath(dataDir)
@@ -124,6 +177,10 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
       try {
         if (req.method === 'GET' && p === '/api/registry') {
           return serveRegistry(dataDir, res)
+        }
+        // 服务状态摘要卡（公开只读；AI 亦可读）
+        if (req.method === 'GET' && p === '/api/status') {
+          return send(res, 200, statusSnapshot(dataDir))
         }
         if (req.method === 'GET' && p === '/api/registry/stream') {
           return hub.handler(req, res)

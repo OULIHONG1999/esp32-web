@@ -13,6 +13,18 @@ import { createDeviceLock } from '../glue/deviceLocks'
 
 const DISPLAY_CAP = 500
 const FLUSH_MS = 120
+const HISTORY_KEY = 'fw.flashHistory'
+const HISTORY_CAP = 20
+
+/** 烧录历史条目（localStorage 持久，F 追加：排障/追溯） */
+export interface FlashHistoryItem {
+  ts: number
+  chip: string
+  parts: number
+  bytes: number
+  ok: boolean
+  error?: string
+}
 
 /** 设备管理 + Vue 接线：批量 flush（渲染性能）、暂停视图、方向1 状态镜像 */
 export function useSession() {
@@ -28,6 +40,34 @@ export function useSession() {
   const progress: Ref<Progress | null> = ref(null)
   const logs: Ref<LogEntry[]> = ref([])
   const viewPaused = ref(false)
+
+  // ---- 烧录历史（localStorage）----
+  const flashHistory = ref<FlashHistoryItem[]>(loadHistory())
+  function loadHistory(): FlashHistoryItem[] {
+    try {
+      const raw = globalThis.localStorage?.getItem(HISTORY_KEY)
+      const v = raw ? JSON.parse(raw) : []
+      return Array.isArray(v) ? v.slice(0, HISTORY_CAP) : []
+    } catch {
+      return []
+    }
+  }
+  function pushHistory(item: FlashHistoryItem): void {
+    flashHistory.value = [item, ...flashHistory.value].slice(0, HISTORY_CAP)
+    try {
+      globalThis.localStorage?.setItem(HISTORY_KEY, JSON.stringify(flashHistory.value))
+    } catch {
+      /* 私隐模式忽略 */
+    }
+  }
+  function clearHistory(): void {
+    flashHistory.value = []
+    try {
+      globalThis.localStorage?.removeItem(HISTORY_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
 
   device.setLineHandler((line) => {
     log.add({ level: 'device', source: 'device', text: line })
@@ -137,11 +177,30 @@ export function useSession() {
     connect: () => runWithLock(() => device.connect()),
     switchPort: () => runWithLock(() => device.switchPort()),
     disconnect: () => run(() => device.disconnect()),
-    flash: (parts: FlashPart[]) => run(() => device.flash(parts)),
+    flash: async (parts: FlashPart[]) => {
+      let ok = true
+      let errMsg: string | undefined
+      try {
+        await device.flash(parts)
+      } catch (e) {
+        ok = false
+        errMsg = e instanceof Error ? e.message : String(e)
+      }
+      pushHistory({
+        ts: Date.now(),
+        chip: device.chip?.name ?? '未连接芯片',
+        parts: parts.length,
+        bytes: parts.reduce((n, p) => n + p.data.byteLength, 0),
+        ok,
+        error: errMsg,
+      })
+    },
     erase: () => run(() => device.erase()),
     hardReset: () => run(() => device.hardReset()),
     clearError: () => device.clearError(),
     toggleViewPause,
+    flashHistory,
+    clearHistory,
     exportLogs: () => log.exportText(),
     clearLogs: () => {
       log.clear()

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
-import type { FlashPart } from '../core/device'
+import type { ChipInfo, FlashPart } from '../core/device'
 import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
 import {
   fetchRegistry,
@@ -38,6 +38,8 @@ const props = defineProps<{
   disabled: boolean
   percent: number | null
   chipName: string | null
+  /** F-12：芯片详情（烧录前二次确认用） */
+  chipDetail: ChipInfo | null
   buildRunning: boolean
   autoLoadSignal: number
   /** S3：待发布的 `${pid}/{vid}` 集合（NEW 角标） */
@@ -142,6 +144,20 @@ async function doFlash(): Promise<void> {
     parts.push({ label: r.label, address: r.address, data })
   }
   if (parts.length === 0) return
+  // F-12：烧录前二次确认（芯片 + 段摘要 + 地址清单）
+  const total = parts.reduce((n, p) => n + p.data.byteLength, 0)
+  const chipLine = props.chipDetail
+    ? `${props.chipDetail.name}${props.chipDetail.mac ? ' @ ' + props.chipDetail.mac : ''}${
+        props.chipDetail.flashSize ? ' · Flash ' + props.chipDetail.flashSize : ''
+      }`
+    : props.chipName ?? '未识别'
+  const addrList = parts
+    .map((p) => `  0x${p.address.toString(16).toUpperCase()}  ${p.label}（${p.data.byteLength} B）`)
+    .join('\n')
+  const ok = window.confirm(
+    `确认烧录到设备？\n\n芯片：${chipLine}\n段数：${parts.length}，共 ${total} 字节\n\n地址清单：\n${addrList}\n\n写错固件可能无法启动，确定继续？`,
+  )
+  if (!ok) return
   emit('flash', parts)
 }
 

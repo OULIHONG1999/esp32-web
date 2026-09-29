@@ -4,6 +4,8 @@ import EnvCheck from './components/EnvCheck.vue'
 import ConnectPanel from './components/ConnectPanel.vue'
 import FirmwarePanel from './components/FirmwarePanel.vue'
 import LogPanel from './components/LogPanel.vue'
+import FlashHistory from './components/FlashHistory.vue'
+import DashboardCard from './components/DashboardCard.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
 import { useIdfBuild } from './composables/useIdfBuild'
@@ -39,6 +41,8 @@ const {
   clearError,
   exportLogs,
   clearLogs,
+  flashHistory,
+  clearHistory,
   setFlashParams,
   toggleViewPause,
   log,
@@ -214,6 +218,8 @@ async function configureToken(): Promise<void> {
       <button class="banner__close" type="button" title="关闭" @click="banner = null">✕</button>
     </div>
 
+    <DashboardCard v-if="report.ok" />
+
     <main class="shell__main">
       <EnvCheck v-if="!report.ok" :report="report" @recheck="onRecheck" />
 
@@ -277,6 +283,7 @@ async function configureToken(): Promise<void> {
               :disabled="!canOperate"
               :percent="percent"
               :chip-name="chip?.name ?? null"
+              :chip-detail="chip"
               :build-running="idf.running.value"
               :auto-load-signal="autoLoadSignal"
               :new-releases="newReleases"
@@ -285,6 +292,8 @@ async function configureToken(): Promise<void> {
               @params="setFlashParams"
               @loaded="onReleaseLoaded"
             />
+
+            <FlashHistory :history="flashHistory" @clear="clearHistory" />
           </div>
 
           <!-- 右栏：日志常驻（宽屏钉住，内部滚动） -->

@@ -123,7 +123,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-09 状态机 | ✅ | DeviceManager 21 用例（方向1 模型 + D1/D2/D3） |
 | F-10 错误翻译 | ✅ | 10 用例（含 TimeoutError 分类） |
 | F-11 S3 三层复位 | ✅ | 实机自动进下载（未按 BOOT） |
-| F-12 芯片信息展示 | ✅ | ConnectPanel 显示 chip 名 |
+| F-12 芯片信息展示 | ✅ | 检测即读 MAC/Revision/Flash 容量入 ChipInfo（失败缺省）+ 设备面板详情卡 + **烧录前二次确认**（段数/字节/地址清单）——本轮补全 |
 | F-13 chipFamily 比对 | 🔄 | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 顺带验证 |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
@@ -151,6 +151,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（页面内容四件套）**：应"更丰富内容功能"全选四方向——① **F-12 芯片详情补全**：detectChip 顺读 MAC/Revision/detectFlashSize（ChipInfo 扩展、可选缺省）+ ConnectPanel 详情卡 + 烧录前二次确认（段数/字节/地址清单）；② **日志级别过滤**：LogPanel 全部/⚠警告+/✖错误/设备 四档 + 计数改 filtered/总；③ **烧录历史**：useSession pushHistory（localStorage 20 条，成败/芯片/段数/字节/错误）+ FlashHistory 折叠组件（左栏底部）；④ **服务状态摘要卡**：`GET /api/status`（项目/版本计数、数据占用、运行时长、最近发布）+ DashboardCard 全宽横条（60s 自动刷新）+ llms 索引。121 测试（+1 status）全绿，已部署（公网 status 实测：2 项目/12 版本——跨网发布已在真实使用）。
 - **2026-09-29（设备占用治理）**：五类占用方矩阵落地——① **Web Locks 跨标签互斥**（`glue/deviceLocks.ts`：连接/切换端口前抢 `esp32-web-device` 锁，拿不到=另一标签持有→日志明确警告；断开/拔线/error 归位自动释放、标签关闭浏览器级自动释放、无 Locks 环境降级放行）+ useSession 接入（runWithLock）；② **PortBusy 文案四步排查**（本标签→外部程序→另一浏览器→重插，DESIGN §4.4 同步）；③ **TROUBLESHOOTING §2 扩充为占用方矩阵**（5 类情况×症状×方案+机制说明+排查口诀）。锁逻辑单测 3 用例（获取/被占 false→释放恢复/降级）——**120 测试全绿**，已部署（bundle 含 esp32-web-device 锁名）。
 - **2026-09-29（日间/夜间主题 + 配色修正）**：base.css 双主题变量体系——暗色（默认，accent 由 #2ea87d 提亮为 #3fb950 修正暗底对比不足）+ 新增日间整套（GitHub Light 系：#f6f8fa 底/#1a7f5a 深绿 accent 保白底对比）；新增语义变量 `--accent-ink`（色块上文字）、`--info`（设备日志蓝）并清除 4 处硬编码色（3×#04150f、#79c0ff）与 bg fallback；切换机制：header ☀️/🌙 按钮 + localStorage `fw.theme` + index.html 内联脚本首屏预置（防闪烁）+ 默认跟随系统 `prefers-color-scheme`。117 测试+build 全绿，已部署（bundle index-Bh_7NxQg，防闪三关键字公网 ✓）。
 - **2026-09-29（布局优化：左右两栏）**：应用户"页面利用率优化"（选定方案：操作左/日志右）——App 改 `.shell__layout` grid（7fr/5fr），左栏=设备+IDF+擦除+固件，右栏=日志 `position: sticky` 钉住 + `--log-height: calc(100vh-150px)` 满高内部滚动（LogPanel 的 logbox 由固定 240px 改读 CSS 变量，窄屏 ≤960px 回退单列 240px）；页面 max-width 860→1280。117 测试 + build 全绿，已部署（bundle index-CXZv80QS 含新结构）。

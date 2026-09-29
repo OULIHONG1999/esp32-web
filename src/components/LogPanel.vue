@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { LogEntry } from '../core/log'
 
 const props = defineProps<{
@@ -10,6 +10,31 @@ const props = defineProps<{
 defineEmits<{ clear: []; togglePause: [] }>()
 
 const body = ref<HTMLElement | null>(null)
+
+// ---- 级别过滤（高频排障：只看警告以上/错误/设备输出）----
+type Filter = 'all' | 'warn' | 'error' | 'device'
+const filter = ref<Filter>('all')
+
+const FILTERS: { id: Filter; label: string; title: string }[] = [
+  { id: 'all', label: '全部', title: '显示所有级别' },
+  { id: 'warn', label: '⚠ 警告+', title: '仅 warn / error' },
+  { id: 'error', label: '✖ 错误', title: '仅 error' },
+  { id: 'device', label: '设备', title: '仅设备串口输出（device 级）' },
+]
+
+const filtered = computed<LogEntry[]>(() => {
+  const list = props.logs
+  switch (filter.value) {
+    case 'warn':
+      return list.filter((e) => e.level === 'warn' || e.level === 'error')
+    case 'error':
+      return list.filter((e) => e.level === 'error')
+    case 'device':
+      return list.filter((e) => e.level === 'device')
+    default:
+      return list as LogEntry[]
+  }
+})
 
 watch(
   () => props.logs.length,
@@ -45,15 +70,32 @@ function doExport(): void {
       </button>
       <button class="btn" type="button" @click="doExport">导出 .txt</button>
       <button class="btn" type="button" @click="$emit('clear')">清空</button>
-      <span class="logbar__count">{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}</span>
+      <span class="logbar__count">
+        {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
+      </span>
+    </div>
+    <div class="logbar logbar--filter">
+      <button
+        v-for="f in FILTERS"
+        :key="f.id"
+        class="btn btn--tiny"
+        :class="filter === f.id ? 'btn--on' : ''"
+        type="button"
+        :title="f.title"
+        @click="filter = f.id"
+      >
+        {{ f.label }}
+      </button>
     </div>
     <p v-if="viewPaused" class="logbar__hint">⏸ 视图已暂停——日志仍在后台收集，导出不受影响</p>
     <div ref="body" class="logbox">
-      <p v-for="e in logs" :key="e.seq" class="logline" :class="'logline--' + e.level">
+      <p v-for="e in filtered" :key="e.seq" class="logline" :class="'logline--' + e.level">
         <span class="logline__ts">{{ new Date(e.ts).toLocaleTimeString() }}</span>
         <span class="logline__text">{{ e.text }}</span>
       </p>
-      <p v-if="logs.length === 0" class="logbox__empty">（暂无日志）</p>
+      <p v-if="filtered.length === 0" class="logbox__empty">
+        {{ logs.length === 0 ? '（暂无日志）' : '（当前过滤条件下无匹配）' }}
+      </p>
     </div>
   </section>
 </template>

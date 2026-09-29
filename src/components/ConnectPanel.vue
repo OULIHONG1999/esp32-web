@@ -29,6 +29,13 @@ const LABEL: Record<DeviceState, string> = {
       <span v-if="chip" class="chip">{{ chip.name }}</span>
     </p>
 
+    <!-- F-12 芯片详情卡（MAC/Revision/Flash 容量，检测阶段读取） -->
+    <div v-if="chip && (chip.mac || chip.revision || chip.flashSize)" class="chipcard">
+      <span v-if="chip.mac" class="chipcard__item"><i>MAC</i>{{ chip.mac }}</span>
+      <span v-if="chip.revision" class="chipcard__item"><i>Rev</i>{{ chip.revision }}</span>
+      <span v-if="chip.flashSize" class="chipcard__item"><i>Flash</i>{{ chip.flashSize }}</span>
+    </div>
+
     <div class="panel__actions">
       <button
         class="btn btn--primary"
@@ -107,6 +114,25 @@ const LABEL: Record<DeviceState, string> = {
   margin-left: 12px;
   color: var(--accent);
   font-weight: 600;
+}
+.chipcard {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: -6px 0 12px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.chipcard__item i {
+  font-style: normal;
+  color: var(--muted);
+  margin-right: 6px;
+}
+.chipcard__item {
+  font-family: ui-monospace, monospace;
 }
 .panel__actions {
   display: flex;

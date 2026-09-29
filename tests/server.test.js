@@ -290,6 +290,17 @@ describe('GET /api/registry 与 parts 下载', () => {
     expect(res.status).toBe(404)
     expect((await res.json()).error).toMatch(/not built/)
   })
+
+  it('GET /api/status：统计与运行时长（公开只读）', async () => {
+    const res = await fetch(`${base}/api/status`)
+    expect(res.status).toBe(200)
+    const s = await res.json()
+    expect(s.service).toBe('firmware-server')
+    expect(typeof s.projects).toBe('number')
+    expect(typeof s.releases).toBe('number')
+    expect(typeof s.dataDirBytes).toBe('number')
+    expect(s.uptimeSeconds).toBeGreaterThanOrEqual(0)
+  })
 })
 
 // ---------- S3：SSE 订阅与 ★订阅状态（F-21） ----------
