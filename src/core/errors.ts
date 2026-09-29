@@ -22,8 +22,8 @@ export interface ClassifiedError {
 
 const COPY: Record<ErrorClass, { message: string; hint: string; retryable: boolean }> = {
   PortBusy: {
-    message: '串口打开失败：端口可能被其他程序或其他标签页占用',
-    hint: '关闭串口助手、Arduino 监视器或其他浏览器标签页后重试。',
+    message: '串口打开失败：端口被占用',
+    hint: '按顺序排查：①关闭本浏览器其它标签页对本工具的连接（本工具已有跨标签锁，若仍失败说明是外部占用）；②关闭串口助手/Arduino IDE/idf.py monitor；③关掉另一个可能占用的浏览器窗口；④仍不行则重插 USB 后重试。',
     retryable: true,
   },
   UserCancel: {

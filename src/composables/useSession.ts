@@ -9,6 +9,7 @@ import {
 } from '../core/device'
 import type { ClassifiedError } from '../core/errors'
 import { createDeviceOps } from '../glue/deviceOps'
+import { createDeviceLock } from '../glue/deviceLocks'
 
 const DISPLAY_CAP = 500
 const FLUSH_MS = 120
@@ -18,6 +19,8 @@ export function useSession() {
   const log = new Logger()
   const ops = createDeviceOps(log)
   const device = new DeviceManager(ops)
+  /** 跨标签设备互斥锁（Web Locks）：防多标签同时连一个串口 */
+  const deviceLock = createDeviceLock()
 
   const state: Ref<DeviceState> = ref(device.state)
   const chip: Ref<ChipInfo | null> = ref(null)
@@ -39,6 +42,10 @@ export function useSession() {
     chip.value = device.chip
     lastError.value = device.lastError
     progress.value = device.progress
+    // 回到 disconnected/error 即释放跨标签锁（拔线/断开/连接失败/错误归位）
+    if (device.state === 'disconnected' || device.state === 'error') {
+      deviceLock.release()
+    }
   })
 
   // ---- 批量 flush：串口高速输出时避免每行触发一次响应式渲染 ----
@@ -99,6 +106,20 @@ export function useSession() {
     }
   }
 
+  /** 连接/切换端口：先抢跨标签锁，抢不到给明确提示（设备占用治理） */
+  async function runWithLock(fn: () => Promise<void>): Promise<void> {
+    const ok = await deviceLock.tryAcquire()
+    if (!ok) {
+      log.add({
+        level: 'warn',
+        source: 'serial',
+        text: '⚠ 设备连接被本浏览器的其它标签页占用——请关闭那边的连接/页面后重试',
+      })
+      return
+    }
+    await run(fn)
+  }
+
   return {
     log,
     device,
@@ -113,8 +134,8 @@ export function useSession() {
     connected,
     canOperate,
     percent,
-    connect: () => run(() => device.connect()),
-    switchPort: () => run(() => device.switchPort()),
+    connect: () => runWithLock(() => device.connect()),
+    switchPort: () => runWithLock(() => device.switchPort()),
     disconnect: () => run(() => device.disconnect()),
     flash: (parts: FlashPart[]) => run(() => device.flash(parts)),
     erase: () => run(() => device.erase()),

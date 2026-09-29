@@ -153,7 +153,7 @@ interface FirmwareSet {
 
 | 内部错误类 | 典型来源 | 用户提示方向 | 恢复动作 |
 |---|---|---|---|
-| `PortBusy` | 打开失败/claimInterface 失败、他处占用 | "串口被占用，关闭串口助手/其他标签页后重试" | 回 disconnected/ready |
+| `PortBusy` | 打开失败/claimInterface 失败、他处占用 | "端口被占用：①本站其它标签（已有 Web Locks 跨标签锁预拦截）②串口助手/monitor ③另一浏览器 ④重插 USB" | 回 disconnected/ready；锁随 disconnected/error 自动释放 |
 | `UserCancel` | requestPort 取消 | 静默 | 回 disconnected |
 | `ResetFailed` | 复位序列无响应 | "无法进入下载模式：按住 BOOT 再点重试"（S3 USB 场景提示换对端口） | 停在 ready 前，可重试 |
 | `ChipDetectFail` | magic 不匹配等 | "芯片识别失败，升级内核/选择芯片型号强制模式" | 支持手动指定 chip |

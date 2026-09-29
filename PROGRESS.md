@@ -151,6 +151,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（设备占用治理）**：五类占用方矩阵落地——① **Web Locks 跨标签互斥**（`glue/deviceLocks.ts`：连接/切换端口前抢 `esp32-web-device` 锁，拿不到=另一标签持有→日志明确警告；断开/拔线/error 归位自动释放、标签关闭浏览器级自动释放、无 Locks 环境降级放行）+ useSession 接入（runWithLock）；② **PortBusy 文案四步排查**（本标签→外部程序→另一浏览器→重插，DESIGN §4.4 同步）；③ **TROUBLESHOOTING §2 扩充为占用方矩阵**（5 类情况×症状×方案+机制说明+排查口诀）。锁逻辑单测 3 用例（获取/被占 false→释放恢复/降级）——**120 测试全绿**，已部署（bundle 含 esp32-web-device 锁名）。
 - **2026-09-29（日间/夜间主题 + 配色修正）**：base.css 双主题变量体系——暗色（默认，accent 由 #2ea87d 提亮为 #3fb950 修正暗底对比不足）+ 新增日间整套（GitHub Light 系：#f6f8fa 底/#1a7f5a 深绿 accent 保白底对比）；新增语义变量 `--accent-ink`（色块上文字）、`--info`（设备日志蓝）并清除 4 处硬编码色（3×#04150f、#79c0ff）与 bg fallback；切换机制：header ☀️/🌙 按钮 + localStorage `fw.theme` + index.html 内联脚本首屏预置（防闪烁）+ 默认跟随系统 `prefers-color-scheme`。117 测试+build 全绿，已部署（bundle index-Bh_7NxQg，防闪三关键字公网 ✓）。
 - **2026-09-29（布局优化：左右两栏）**：应用户"页面利用率优化"（选定方案：操作左/日志右）——App 改 `.shell__layout` grid（7fr/5fr），左栏=设备+IDF+擦除+固件，右栏=日志 `position: sticky` 钉住 + `--log-height: calc(100vh-150px)` 满高内部滚动（LogPanel 的 logbox 由固定 240px 改读 CSS 变量，窄屏 ≤960px 回退单列 240px）；页面 max-width 860→1280。117 测试 + build 全绿，已部署（bundle index-CXZv80QS 含新结构）。
 - **2026-09-29（安全事件：token 公网泄露轮换）**：SERVER.md §4 曾将主 token 明文写入并挂公网 `/docs/`（与"秘密勿走 http 通道"自相矛盾，用户指出）。处置：① §4 改为指引式（见 env/向运维者索取）+ 三份拷贝与 dist 全量清理（全仓 grep 无残留）；② **主 token 已轮换**（改 env → restart，旧值 401 实测作废、新值 200 实测生效，新值不入文档）；③ SERVER.md 增加"任何 token 明文不得写入本仓库文档"纪律条。附注：DEPLOY §9 SSE"已实现"版其实已在服务器（用户所见疑为缓存）。git 仓库无远程，历史中的旧值随轮换失效。
