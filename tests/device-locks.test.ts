@@ -81,4 +81,31 @@ describe('deviceLock（跨标签设备互斥）', () => {
     expect(await lock.tryAcquire()).toBe(true)
     lock.release()
   })
+
+  it('幽灵锁回归防护：callback 延迟调度时判定仍正确（旧 setTimeout 判定会误报被占）', async () => {
+    // 模拟真实调度延迟：callback 在一个宏任务后才执行
+    let heldByOther = false
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: (_n: string, _o: unknown, cb: (l: unknown) => Promise<void>) =>
+          new Promise<void>((resolve, reject) => {
+            setTimeout(() => {
+              const lockObj = heldByOther ? null : { name: 'esp32-web-device' }
+              cb(lockObj).then(resolve, reject)
+            }, 5)
+          }),
+      },
+    })
+
+    const lock = createDeviceLock()
+    // 旧实现在 callback 尚未执行时就判定 → false 且幽灵持锁；新实现必须拿到
+    expect(await lock.tryAcquire()).toBe(true)
+    expect(lock.held).toBe(true)
+    // 重复获取幂等
+    expect(await lock.tryAcquire()).toBe(true)
+    lock.release()
+    await new Promise((r) => setTimeout(r, 40)) // 等释放链完成
+    expect(await lock.tryAcquire()).toBe(true)
+    lock.release()
+  })
 })

@@ -3,6 +3,12 @@
  * - 浏览器原生：跨标签互斥；标签关闭/崩溃/导航离开时**自动释放**（无需轮询）
  * - 无 Web Locks 的环境（老浏览器）降级为不拦（维持原 PortBusy 文案兜底）
  * 分层：浏览器 API，放 glue；core 不感知（纪律：core 零浏览器依赖）。
+ *
+ * 修复记录（2026-09-29 门2 后线上误报）：
+ * 旧实现用 setTimeout(0) 等 callback 决策——callback 调度晚于定时器时
+ * ①误报"被占"②锁已被拿到却记为失败（幽灵锁）→ 后续全部自锁失败。
+ * 新实现：granted/rejected 的 resolve 全部发生在 callback **内部**，零时序赌博；
+ * 另加一次短延迟重试，覆盖"自己刚 release、锁尚未回收"的重入窗口。
  */
 
 const LOCK_NAME = 'esp32-web-device'
@@ -12,13 +18,6 @@ function locksSupported(): boolean {
     return !!globalThis.navigator?.locks?.request
   } catch {
     return false
-  }
-}
-
-export class DeviceLockedError extends Error {
-  constructor() {
-    super('device locked by another tab')
-    this.name = 'DeviceLockedError'
   }
 }
 
@@ -35,6 +34,35 @@ export function createDeviceLock(): DeviceLock {
   let held = false
   let releaseFn: (() => void) | null = null
 
+  /** 单次 ifAvailable 尝试：结果在 callback 内确定性返回 */
+  function once(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (ok: boolean): void => {
+        if (settled) return
+        settled = true
+        resolve(ok)
+      }
+      let releaseResolve: (() => void) | null = null
+      const holdDone = new Promise<void>((r) => {
+        releaseResolve = r
+      })
+
+      globalThis.navigator.locks
+        .request(LOCK_NAME, { ifAvailable: true }, async (lock: unknown) => {
+          if (!lock) {
+            done(false) // 被其它标签持有
+            return
+          }
+          held = true
+          releaseFn = () => releaseResolve?.()
+          done(true) // 先通知调用方，再持锁等待释放
+          await holdDone
+        })
+        .catch(() => done(false))
+    })
+  }
+
   return {
     get held() {
       return held
@@ -44,35 +72,11 @@ export function createDeviceLock(): DeviceLock {
       if (held) return true
       if (!locksSupported()) return true // 降级：不拦，靠 PortBusy 文案兜底
 
-      let granted = false
-      let releaseResolve: (() => void) | null = null
-      const holdDone = new Promise<void>((resolve) => {
-        releaseResolve = resolve
-      })
-
-      // ifAvailable：锁被占时 callback(lock=null) 立即返回，不排队不阻塞
-      const req = globalThis.navigator.locks.request(
-        LOCK_NAME,
-        { ifAvailable: true },
-        async (lock: unknown) => {
-          if (!lock) return // 被其它标签持有
-          granted = true
-          await holdDone // 持锁直到 release()
-        },
-      )
-      req.catch(() => {
-        /* 安全等意外终止 */
-      })
-
-      // 等 callback 决策完成（ifAvailable 在微任务内裁决，留一个宏任务保险）
-      await new Promise((r) => setTimeout(r, 0))
-
-      if (granted) {
-        held = true
-        releaseFn = () => releaseResolve?.()
-        return true
-      }
-      return false
+      if (await once()) return true
+      // 防御窗口：本标签刚 release、锁尚未被浏览器回收 → 短延迟重试一次
+      await new Promise((r) => setTimeout(r, 30))
+      if (held) return true // 期间已被其它路径持有
+      return once()
     },
 
     release(): void {
