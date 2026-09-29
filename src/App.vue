@@ -195,78 +195,86 @@ async function configureToken(): Promise<void> {
       <EnvCheck v-if="!report.ok" :report="report" @recheck="onRecheck" />
 
       <template v-else>
-        <ConnectPanel
-          :state="state"
-          :chip="chip"
-          :last-error="lastError"
-          :busy="busy"
-          @connect="connect"
-          @switch-port="switchPort"
-          @disconnect="disconnect"
-          @dismiss-error="clearError"
-        />
+        <div class="shell__layout">
+          <!-- 左栏：操作区 -->
+          <div class="shell__col shell__col--left">
+            <ConnectPanel
+              :state="state"
+              :chip="chip"
+              :last-error="lastError"
+              :busy="busy"
+              @connect="connect"
+              @switch-port="switchPort"
+              @disconnect="disconnect"
+              @dismiss-error="clearError"
+            />
 
-        <div v-if="idf.available" class="toolbar toolbar--idf">
-          <span class="toolbar__label">IDF 命令：</span>
-          <button
-            class="btn"
-            type="button"
-            :disabled="idf.running.value"
-            title="在本机执行 idf.py build，输出见日志面板"
-            @click="idf.build"
-          >
-            🔨 编译
-          </button>
-          <button
-            class="btn"
-            type="button"
-            :disabled="idf.running.value"
-            title="idf.py fullclean 清理构建目录"
-            @click="idf.clean"
-          >
-            🧹 清理
-          </button>
-          <button
-            v-if="idf.running.value"
-            class="btn btn--danger"
-            type="button"
-            title="taskkill 中止编译（慎用，可能留下半个 build 目录）"
-            @click="idf.abort"
-          >
-            ■ 中止
-          </button>
-          <span v-if="idf.running.value" class="toolbar__hint">编译进行中…</span>
+            <div v-if="idf.available" class="toolbar toolbar--idf">
+              <span class="toolbar__label">IDF 命令：</span>
+              <button
+                class="btn"
+                type="button"
+                :disabled="idf.running.value"
+                title="在本机执行 idf.py build，输出见日志面板"
+                @click="idf.build"
+              >
+                🔨 编译
+              </button>
+              <button
+                class="btn"
+                type="button"
+                :disabled="idf.running.value"
+                title="idf.py fullclean 清理构建目录"
+                @click="idf.clean"
+              >
+                🧹 清理
+              </button>
+              <button
+                v-if="idf.running.value"
+                class="btn btn--danger"
+                type="button"
+                title="taskkill 中止编译（慎用，可能留下半个 build 目录）"
+                @click="idf.abort"
+              >
+                ■ 中止
+              </button>
+              <span v-if="idf.running.value" class="toolbar__hint">编译进行中…</span>
+            </div>
+
+            <div v-if="canOperate" class="toolbar">
+              <button class="btn btn--danger" type="button" :disabled="busy" @click="onErase">
+                完全擦除
+              </button>
+              <button class="btn" type="button" :disabled="busy" @click="hardReset">
+                硬复位
+              </button>
+            </div>
+
+            <FirmwarePanel
+              :disabled="!canOperate"
+              :percent="percent"
+              :chip-name="chip?.name ?? null"
+              :build-running="idf.running.value"
+              :auto-load-signal="autoLoadSignal"
+              :new-releases="newReleases"
+              :refresh-signal="refreshSignal"
+              @flash="flash"
+              @params="setFlashParams"
+              @loaded="onReleaseLoaded"
+            />
+          </div>
+
+          <!-- 右栏：日志常驻（宽屏钉住，内部滚动） -->
+          <aside class="shell__col shell__col--right">
+            <LogPanel
+              :logs="logs"
+              :export-text="exportLogs"
+              :view-paused="viewPaused"
+              @clear="clearLogs"
+              @toggle-pause="toggleViewPause"
+            />
+          </aside>
         </div>
-
-        <div v-if="canOperate" class="toolbar">
-          <button class="btn btn--danger" type="button" :disabled="busy" @click="onErase">
-            完全擦除
-          </button>
-          <button class="btn" type="button" :disabled="busy" @click="hardReset">
-            硬复位
-          </button>
-        </div>
-
-        <FirmwarePanel
-          :disabled="!canOperate"
-          :percent="percent"
-          :chip-name="chip?.name ?? null"
-          :build-running="idf.running.value"
-          :auto-load-signal="autoLoadSignal"
-          :new-releases="newReleases"
-          :refresh-signal="refreshSignal"
-          @flash="flash"
-          @params="setFlashParams"
-          @loaded="onReleaseLoaded"
-        />
-
-        <LogPanel
-          :logs="logs"
-          :export-text="exportLogs"
-          :view-paused="viewPaused"
-          @clear="clearLogs"
-          @toggle-pause="toggleViewPause"
-        />
       </template>
     </main>
   </div>
@@ -277,7 +285,7 @@ async function configureToken(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: 860px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 16px 20px 0;
 }
@@ -314,7 +322,7 @@ async function configureToken(): Promise<void> {
   align-items: center;
   gap: 10px;
   margin: 0 auto;
-  max-width: 860px;
+  max-width: 1280px;
   width: calc(100% - 40px);
   padding: 10px 14px;
   background: var(--panel);
@@ -345,8 +353,36 @@ async function configureToken(): Promise<void> {
   flex-direction: column;
   gap: 14px;
   padding: 20px;
-  max-width: 860px;
+  max-width: 1280px;
   margin: 0 auto;
+}
+/* 左右两栏：操作左、日志右（宽屏利用率；窄屏回退单列） */
+.shell__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 14px;
+  align-items: start;
+}
+.shell__col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.shell__col--right {
+  position: sticky;
+  top: 12px;
+  /* 日志盒高度 = 视口减去头部余量（LogPanel 读取此变量） */
+  --log-height: calc(100vh - 150px);
+}
+@media (max-width: 960px) {
+  .shell__layout {
+    grid-template-columns: 1fr;
+  }
+  .shell__col--right {
+    position: static;
+    --log-height: 240px;
+  }
 }
 .toolbar {
   display: flex;

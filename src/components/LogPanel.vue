@@ -104,7 +104,7 @@ function doExport(): void {
   font-size: 13px;
 }
 .logbox {
-  height: 240px;
+  height: var(--log-height, 240px);
   overflow-y: auto;
   background: var(--bg);
   border: 1px solid var(--border);
