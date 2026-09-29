@@ -48,11 +48,31 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
   }
 
   /**
+   * 连接/会话建立前强制归零端口句柄——上次会话异常残留（close 吞失败/拔线）
+   * 时兜底关闭，否则再次 open 报 already-open，用户被迫刷新页面（问题 23）。
+   */
+  const preparePort = async (): Promise<void> => {
+    if (lastPort && (lastPort.readable || lastPort.writable)) {
+      try {
+        await lastPort.close()
+        log.add({
+          level: 'debug',
+          source: 'app',
+          text: '清理残留端口句柄（上次会话未正常释放）',
+        })
+      } catch {
+        /* 已关/设备移除 */
+      }
+    }
+  }
+
+  /**
    * 会话首次使用前自动同步（main：复位+识别+加载 stub）。
    * 方向1 教训：connect 后 closeEsptool 归还端口，flash/erase/hardReset 新建的裸会话
    * 若直接发命令必超时失败——所有操作入口统一走这里（门2 实测暴露，2026-09-27）。
    */
   const ensureSynced = async (): Promise<PortSession> => {
+    await preparePort()
     const session = ensureEsptool()
     if (syncedName === null) {
       const info = await detectChip(session)
@@ -91,6 +111,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
     },
 
     async detect(): Promise<ChipInfo> {
+      await preparePort()
       const session = ensureEsptool()
       if (syncedName === null) {
         const info = await detectChip(session)
@@ -104,6 +125,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
     async startStream(handlers: StreamHandlers): Promise<void> {
       if (!lastPort) throw new Error('serial port not selected')
       if (monitor) return
+      await preparePort() // esptool 侧若残留句柄，先归零
       monitor = new SerialMonitor({
         onLine: handlers.onLine,
         onStopped: (reason, message) => {
@@ -170,6 +192,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
           ? `烧录失败，降速至 ${baudrate} 波特率，重建会话后重试（仅一次）`
           : `已达波特率下限 ${MIN_BAUD}，按原速率重建会话重试（仅一次）`,
       })
+      await preparePort()
       // 重新同步（芯片仍在下载模式）；失败会向上抛，由调用方归位报错
       const info = await detectChip(ensureEsptool())
       syncedName = info.name

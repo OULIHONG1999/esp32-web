@@ -47,6 +47,8 @@ export class SerialMonitor {
         }
       } catch (err) {
         if (this.running) {
+          // ★拔线/读取失败：立即自终止（否则 while 继续 → 循环风暴重复报错）
+          this.running = false
           this.stopReason = 'error'
           this.handlers.onStopped(
             'error',
@@ -62,7 +64,16 @@ export class SerialMonitor {
         this.reader = null
       }
     }
-    if (this.stopReason === 'user') {
+    // ★错误退出：必须关闭端口释放 Web Serial 句柄——否则残留导致
+    //   下次连接失败"必须刷新页面"（2026-09-29 用户实测）
+    if (this.stopReason === 'error') {
+      try {
+        await port.close()
+      } catch {
+        /* 设备已物理移除时 close 可能失败——本地状态仍需复位 */
+      }
+      this.port = null
+    } else if (this.stopReason === 'user') {
       for (const line of splitter.flush()) this.handlers.onLine(line)
     }
   }

@@ -94,6 +94,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 20. **watch 后台进程网络失败（未定位，backlog）**：`Start-Process` 起的 watch 持续 `fetch failed`（err.cause 为空、无代理 env、服务器无封禁痕迹、探针脚本同样挂起），而**同一 shell 前台 `publish once` 始终成功**（门4 期间 2019/2020/2027/2029 连发成功）。逻辑本身有 7 个单测守护——判断为**运行环境差异**（疑安全软件/进程会话网络策略）。**处置：发布一律用手动 once（可靠）**；watch 恢复自动化待查（S2 收尾/backlog）。
 21. **PowerShell 5.1 编码双坑（已踩，勿再犯）**：① `Get-Content` 不带 `-Encoding` 按 ANSI 读 UTF-8 中文 → `Set-Content` 写回=**双重编码写坏**；② `Set-Content -Encoding UTF8`=**带 BOM**，Node JSON.parse 报 `Unexpected token '﻿'`。**正解**：`[IO.File]::ReadAllText/WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))`，或用 Node/Write 工具写含中文的 JSON。
 22. **Web Locks 判定时序 bug（门2 后线上误报，已修）**：`tryAcquire` 用 `setTimeout(0)` 等锁 callback 决策——callback 调度晚于定时器时 ①误报"被其它标签占用"②锁已实际拿到却记为失败（**幽灵锁**）→ 后续每次重试都撞自己这把无人认领的锁 = **自锁死，连续连接必失败**（用户实测连续 3 次全拒）。**修复**：granted/rejected 的 resolve 全部移到 callback **内部**（零时序赌博）+ 失败后 30ms 短重试一次（覆盖"自己刚 release、锁未回收"重入窗口）+ 延迟调度回归测试。教训：**异步原语的判定必须发生在回调内，禁止用定时器赌调度顺序**。
+23. **拔线后句柄残留 → 重连必须刷新（已修）**：`SerialMonitor.readLoop` 出错路径 ①不置 `running=false`（循环风暴重复报错）②**从不 `port.close()`**——Web Serial 句柄残留，下次 `port.open()` 报错、只能刷新页面（用户 22:17 实测）。**修复双保险**：monitor 错误即自终止+关端口；deviceOps 加 `preparePort()`（detect/ensureSynced/startStream/reopenForRetry 四入口强制归零残留句柄，命中时打日志）。同轮按用户要求**移除 IDF 编译命令块**（🔨🧹■ + useIdfBuild 接线，⚡载入本地构建保留）。122 测试+build 全绿。注：烧录后仍无设备输出 = 问题 19（menuconfig 未做，非本 bug）。
 
 ### 门2 首轮实测问题记录（2026-09-27，真机烧录暴露）
 

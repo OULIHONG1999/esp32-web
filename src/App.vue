@@ -8,7 +8,6 @@ import FlashHistory from './components/FlashHistory.vue'
 import DashboardCard from './components/DashboardCard.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
-import { useIdfBuild } from './composables/useIdfBuild'
 import {
   generateWorkToken,
   getStoredToken,
@@ -28,7 +27,6 @@ const {
   lastError,
   logs,
   busy,
-  connected,
   canOperate,
   percent,
   viewPaused,
@@ -45,19 +43,7 @@ const {
   clearHistory,
   setFlashParams,
   toggleViewPause,
-  log,
 } = useSession()
-
-/** 编译完成 → 自动载入信号（FirmwarePanel watch 此值触发） */
-const autoLoadSignal = ref(0)
-
-const idf = useIdfBuild(log, () => {
-  if (connected.value) {
-    autoLoadSignal.value += 1
-  } else {
-    log.add({ level: 'info', source: 'app', text: '编译完成——设备未连接，连接后点「⚡ 载入本地构建」' })
-  }
-})
 
 function onRecheck(): void {
   report.value = checkEnvironment()
@@ -238,38 +224,6 @@ async function configureToken(): Promise<void> {
               @dismiss-error="clearError"
             />
 
-            <div v-if="idf.available" class="toolbar toolbar--idf">
-              <span class="toolbar__label">IDF 命令：</span>
-              <button
-                class="btn"
-                type="button"
-                :disabled="idf.running.value"
-                title="在本机执行 idf.py build，输出见日志面板"
-                @click="idf.build"
-              >
-                🔨 编译
-              </button>
-              <button
-                class="btn"
-                type="button"
-                :disabled="idf.running.value"
-                title="idf.py fullclean 清理构建目录"
-                @click="idf.clean"
-              >
-                🧹 清理
-              </button>
-              <button
-                v-if="idf.running.value"
-                class="btn btn--danger"
-                type="button"
-                title="taskkill 中止编译（慎用，可能留下半个 build 目录）"
-                @click="idf.abort"
-              >
-                ■ 中止
-              </button>
-              <span v-if="idf.running.value" class="toolbar__hint">编译进行中…</span>
-            </div>
-
             <div v-if="canOperate" class="toolbar">
               <button class="btn btn--danger" type="button" :disabled="busy" @click="onErase">
                 完全擦除
@@ -284,8 +238,8 @@ async function configureToken(): Promise<void> {
               :percent="percent"
               :chip-name="chip?.name ?? null"
               :chip-detail="chip"
-              :build-running="idf.running.value"
-              :auto-load-signal="autoLoadSignal"
+              :build-running="false"
+              :auto-load-signal="0"
               :new-releases="newReleases"
               :refresh-signal="refreshSignal"
               @flash="flash"
@@ -419,13 +373,6 @@ async function configureToken(): Promise<void> {
 .toolbar {
   display: flex;
   gap: 10px;
-}
-.toolbar--idf {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 16px;
 }
 .toolbar__label {
   color: var(--muted);
