@@ -1,14 +1,32 @@
 :root {
+  /* —— 夜间主题（默认）—— */
   color-scheme: dark;
   --bg: #0d1117;
   --panel: #161b22;
   --border: #30363d;
   --ink: #e6edf3;
   --muted: #8b949e;
-  --accent: #2ea87d;
+  --accent: #3fb950; /* 修正：原 #2ea87d 在暗底对比不足，提亮 */
+  --accent-ink: #04150f; /* accent 色块上的文字（按钮/徽标） */
+  --info: #79c0ff; /* 设备日志/信息行 */
   --warn: #d29922;
   --err: #f85149;
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+
+:root[data-theme='light'] {
+  /* —— 日间主题 —— */
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --border: #d0d7de;
+  --ink: #1f2328;
+  --muted: #59636e;
+  --accent: #1a7f5a; /* 深绿：白底达标对比度 */
+  --accent-ink: #ffffff;
+  --info: #0a5ecc;
+  --warn: #9a6700;
+  --err: #d1242f;
 }
 
 * {

@@ -133,7 +133,7 @@ function doExport(): void {
   color: var(--warn);
 }
 .logline--device {
-  color: #79c0ff;
+  color: var(--info);
 }
 .logline--transfer {
   color: var(--accent);

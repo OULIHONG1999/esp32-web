@@ -107,6 +107,21 @@ onUnmounted(() => {
   streamStatus.value = 'off'
 })
 
+// ---- 日间/夜间主题（localStorage 持久，首屏由 index.html 内联脚本预置防闪）----
+const theme = ref<string>(
+  document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+)
+
+function toggleTheme(): void {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  document.documentElement.dataset.theme = theme.value
+  try {
+    localStorage.setItem('fw.theme', theme.value)
+  } catch {
+    /* 私隐模式忽略 */
+  }
+}
+
 // ---- 发布 token：生成工作 token（主 token 换）或手动设置本机 ----
 const hasToken = ref(!!getStoredToken())
 
@@ -179,6 +194,14 @@ async function configureToken(): Promise<void> {
         @click="configureToken"
       >
         🔑 {{ hasToken ? 'Token 已设' : '设置 Token' }}
+      </button>
+      <button
+        class="shell__token"
+        type="button"
+        :title="theme === 'dark' ? '切换到日间主题' : '切换到夜间主题'"
+        @click="toggleTheme"
+      >
+        {{ theme === 'dark' ? '☀️ 日间' : '🌙 夜间' }}
       </button>
     </header>
 
@@ -340,7 +363,7 @@ async function configureToken(): Promise<void> {
   padding: 6px 14px;
   cursor: pointer;
   font-weight: 600;
-  color: #04150f;
+  color: var(--accent-ink);
 }
 .banner__close {
   background: none;

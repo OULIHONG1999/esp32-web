@@ -441,7 +441,7 @@ async function toggleSubscribe(): Promise<void> {
 .registry__select {
   flex: 1;
   min-width: 220px;
-  background: var(--bg, #0d1117);
+  background: var(--bg);
   color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -537,7 +537,7 @@ async function toggleSubscribe(): Promise<void> {
 .btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #04150f;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 .progress {

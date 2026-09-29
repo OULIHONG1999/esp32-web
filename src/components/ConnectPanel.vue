@@ -128,7 +128,7 @@ const LABEL: Record<DeviceState, string> = {
 .btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #04150f;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 .panel__error {

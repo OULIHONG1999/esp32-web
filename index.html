@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ESP32 Web Flasher</title>
+    <script>
+      // 主题预置（防首屏闪烁）：localStorage 优先，否则跟随系统
+      try {
+        var t = localStorage.getItem('fw.theme');
+        if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
     <!-- AI 可读的网站描述 -->
     <meta name="description" content="ESP32 固件在线管理和烧录服务" />
     <script type="application/ld+json">
