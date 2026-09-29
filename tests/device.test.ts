@@ -419,12 +419,27 @@ describe('手动监视开关（F-16 手动 · pause/resume）', () => {
   })
 
   it('手动暂停后烧录：临界区结束自动恢复日志流', async () => {
-    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const { deps } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
     await d.pauseMonitor()
     expect(d.isStreamOn).toBe(false)
     await d.flash(parts)
     expect(d.state).toBe('ready')
     expect(d.isStreamOn).toBe(true) // 烧录恢复编排覆盖手动状态（设计如此）
+  })
+})
+describe('手动开关 emit 同步（按钮切换依赖）', () => {
+  it('pause/resume 必须触发 subscribe（否则 UI 按钮不切换）', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    let ticks = 0
+    d.subscribe(() => ticks++)
+    const before = ticks
+    await d.pauseMonitor()
+    expect(ticks).toBeGreaterThan(before) // 暂停后必须通知
+    const afterPause = ticks
+    await d.resumeMonitor()
+    expect(ticks).toBeGreaterThan(afterPause) // 恢复也必须通知
+    expect(d.isStreamOn).toBe(true)
   })
 })

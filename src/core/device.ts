@@ -410,6 +410,7 @@ export class DeviceManager {
     if (this.state !== 'ready' || !this.streamOn) return
     await this.closeStream()
     this.noticeHandler('已手动暂停实时日志——串口已释放，可使用外部工具（如 idf.py monitor）')
+    this.emit() // 通知订阅方刷新 streamOn/按钮（缺此行则按钮不切换）
   }
 
   /** 手动恢复实时日志；ready 态且当前未开启时有效，幂等 */
@@ -417,5 +418,6 @@ export class DeviceManager {
     if (this.state !== 'ready' || this.streamOn) return
     await this.openStream()
     this.noticeHandler('实时日志已手动恢复')
+    this.emit() // 同上：恢复后按钮须切回"停止监视"
   }
 }
