@@ -48,8 +48,41 @@ const {
   toggleViewPause,
 } = useSession()
 
+// ---- 独立日志窗口模式（?panel=log：副屏日志页，数据由主窗口 BroadcastChannel 转发）----
+const isLogWindow = new URLSearchParams(location.search).get('panel') === 'log'
+const LOG_CHANNEL = 'fw-log'
+
+if (isLogWindow && typeof BroadcastChannel !== 'undefined') {
+  const ch = new BroadcastChannel(LOG_CHANNEL)
+  ch.addEventListener('message', (ev: MessageEvent) => {
+    const m = ev.data as { type?: string; logs?: unknown[]; entries?: unknown[] } | null
+    if (!m) return
+    if (m.type === 'sync' && Array.isArray(m.logs)) {
+      logs.value = m.logs as typeof logs.value
+    } else if (m.type === 'append' && Array.isArray(m.entries)) {
+      logs.value.push(...(m.entries as typeof logs.value))
+      if (logs.value.length > 500) logs.value.splice(0, logs.value.length - 500)
+    } else if (m.type === 'clear') {
+      logs.value = []
+    }
+  })
+  // 请求主窗口全量同步
+  ch.postMessage({ type: 'sync-req' })
+  // 主窗口若稍后才开，定期补请求（3s × 5 次收敛）
+  let tries = 0
+  const retry = setInterval(() => {
+    ch.postMessage({ type: 'sync-req' })
+    if (++tries >= 5) clearInterval(retry)
+  }, 3000)
+}
+
 function onRecheck(): void {
   report.value = checkEnvironment()
+}
+
+/** 独立日志窗口关闭（window.close 仅脚本打开的窗口允许） */
+function closeLogWindow(): void {
+  window.close()
 }
 
 function onErase(): void {
@@ -169,6 +202,30 @@ async function configureToken(): Promise<void> {
 
 <template>
   <div class="shell">
+    <!-- 独立日志窗口模式（?panel=log）：纯显示，数据由主窗口 BroadcastChannel 转发 -->
+    <template v-if="isLogWindow">
+      <header class="shell__header">
+        <span class="shell__brand">📋 实时日志</span>
+        <span class="shell__hint">独立窗口 · 连接与控制在主窗口</span>
+        <button class="shell__token" type="button" title="关闭窗口" @click="closeLogWindow">
+          ✕ 关闭
+        </button>
+      </header>
+      <main class="shell__main shell__main--logfull">
+        <LogPanel
+          :logs="logs"
+          :export-text="exportLogs"
+          :view-paused="viewPaused"
+          :stream-on="false"
+          :monitor-disabled="true"
+          :minimal="true"
+          @clear="clearLogs"
+          @toggle-pause="toggleViewPause"
+        />
+      </main>
+    </template>
+
+    <template v-else>
     <header class="shell__header">
       <span class="shell__brand">ESP32 Web Flasher</span>
       <span class="shell__hint">v0.2.0 · 设备常驻连接</span>
@@ -270,6 +327,7 @@ async function configureToken(): Promise<void> {
         </div>
       </template>
     </main>
+    </template><!-- /v-else 主界面 -->
   </div>
 </template>
 
@@ -278,7 +336,7 @@ async function configureToken(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: 1280px;
+  max-width: 1560px;
   margin: 0 auto;
   padding: 16px 20px 0;
 }
@@ -315,7 +373,7 @@ async function configureToken(): Promise<void> {
   align-items: center;
   gap: 10px;
   margin: 0 auto;
-  max-width: 1280px;
+  max-width: 1560px;
   width: calc(100% - 40px);
   padding: 10px 14px;
   background: var(--panel);
@@ -346,7 +404,7 @@ async function configureToken(): Promise<void> {
   flex-direction: column;
   gap: 14px;
   padding: 20px;
-  max-width: 1280px;
+  max-width: 1560px;
   margin: 0 auto;
 }
 /* 左右两栏：操作左、日志右（宽屏利用率；窄屏回退单列） */

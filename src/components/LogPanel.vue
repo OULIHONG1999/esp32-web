@@ -10,6 +10,8 @@ const props = defineProps<{
   streamOn: boolean
   /** 未连接/操作中禁用手动监视开关 */
   monitorDisabled: boolean
+  /** 独立日志窗口模式：隐藏监视开关（控制在主窗口） */
+  minimal?: boolean
 }>()
 defineEmits<{ clear: []; togglePause: []; pauseMonitor: []; resumeMonitor: [] }>()
 
@@ -64,6 +66,15 @@ function doExport(): void {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+/** 独立日志窗口（副屏）：主窗口连接，数据经 BroadcastChannel 实时同步 */
+function openLogWindow(): void {
+  window.open(
+    `${location.pathname}?panel=log`,
+    'fw-log-window',
+    'width=860,height=920,menubar=no,toolbar=no,location=no',
+  )
+}
 </script>
 
 <template>
@@ -79,28 +90,43 @@ function doExport(): void {
       >
         {{ viewPaused ? '▶ 恢复视图' : '⏸ 暂停视图' }}
       </button>
-      <button class="btn" type="button" @click="doExport">导出 .txt</button>
-      <button class="btn" type="button" @click="$emit('clear')">清空</button>
-      <button
-        v-if="streamOn"
-        class="btn"
-        type="button"
-        :disabled="monitorDisabled"
-        title="停止读取串口并释放端口——之后可运行本机 idf.py monitor 查看日志"
-        @click="$emit('pauseMonitor')"
-      >
-        ⏹ 停止监视（让出串口）
-      </button>
-      <button
-        v-else
-        class="btn btn--monitor"
-        type="button"
-        :disabled="monitorDisabled"
-        title="重新打开串口实时读取（等价于本机 idf.py monitor，页面内进行）"
-        @click="$emit('resumeMonitor')"
-      >
-        ▶ 开始监视
-      </button>
+      <template v-if="!minimal">
+        <button
+          v-if="streamOn"
+          class="btn"
+          type="button"
+          :disabled="monitorDisabled"
+          title="停止读取串口并释放端口——之后可运行本机 idf.py monitor 查看日志"
+          @click="$emit('pauseMonitor')"
+        >
+          ⏹ 停止监视
+        </button>
+        <button
+          v-else
+          class="btn btn--monitor"
+          type="button"
+          :disabled="monitorDisabled"
+          title="重新打开串口实时读取（等价于本机 idf.py monitor，页面内进行）"
+          @click="$emit('resumeMonitor')"
+        >
+          ▶ 开始监视
+        </button>
+        <button
+          class="btn"
+          type="button"
+          title="在新窗口打开日志（适合副屏常驻）"
+          @click="openLogWindow"
+        >
+          ⧉ 独立窗口
+        </button>
+        <details class="more">
+          <summary class="btn" title="更多操作">⋯</summary>
+          <div class="more__pop">
+            <button class="more__item" type="button" @click="doExport">导出 .txt</button>
+            <button class="more__item" type="button" @click="$emit('clear')">清空</button>
+          </div>
+        </details>
+      </template>
       <span class="logbar__count">
         {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
       </span>
