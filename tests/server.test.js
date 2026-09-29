@@ -291,3 +291,107 @@ describe('GET /api/registry 与 parts 下载', () => {
     expect((await res.json()).error).toMatch(/not built/)
   })
 })
+
+// ---------- S3：SSE 订阅与 ★订阅状态（F-21） ----------
+
+describe('SSE /api/registry/stream 与 publish 广播', () => {
+  const part = { file: 'sse.bin', data: Uint8Array.from([3, 3, 3]), address: 0x20000 }
+
+  function withTimeout(p, ms, what) {
+    return Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout: ${what}`)), ms)),
+    ])
+  }
+
+  it('publish 成功 → 订阅连接收到 event: publish（含 project/variant/release）', async () => {
+    const ac = new AbortController()
+    try {
+      const stream = await fetch(`${base}/api/registry/stream`, { signal: ac.signal })
+      expect(stream.status).toBe(200)
+      expect(stream.headers.get('content-type')).toContain('text/event-stream')
+      const reader = stream.body.getReader()
+      const dec = new TextDecoder()
+      const hello = dec.decode((await withTimeout(reader.read(), 2000, 'hello')).value)
+      expect(hello).toContain('retry')
+
+      const meta = makeMeta([part])
+      meta.release.id = '20260927-1800-sse1'
+      const r = await publish(meta, [part])
+      expect(r.status).toBe(200)
+
+      const chunk = await withTimeout(reader.read(), 3000, 'publish event')
+      const text = dec.decode(chunk.value)
+      expect(text).toContain('event: publish')
+      expect(text).toContain('hello-world')
+      expect(text).toContain('ESP32-S3')
+      expect(text).toContain('20260927-1800-sse1')
+    } finally {
+      ac.abort()
+    }
+  }, 8000)
+
+  it('心跳注释行（测试注入 60ms）防反代空闲断链', async () => {
+    const ac = new AbortController()
+    try {
+      // 独立 hub 实例走不了已建 server——经 app 不便注入；改为对 hub 单元直测
+      const { createSseHub } = await import('../server/stream.js')
+      const hub = createSseHub({ heartbeatMs: 50 })
+      const { PassThrough } = await import('node:stream')
+      const res = new PassThrough()
+      const req = new PassThrough()
+      res.write = res.write.bind(res)
+      const chunks = []
+      const origWrite = res.write.bind(res)
+      res.write = (c) => {
+        chunks.push(String(c))
+        return origWrite(c)
+      }
+      // headers：handler 用 writeHead——PassThrough 无此方法，打桩
+      res.writeHead = () => res
+      hub.handler(req, res)
+      await new Promise((r) => setTimeout(r, 140))
+      expect(chunks.join('')).toContain(': hb')
+      hub.closeAll()
+    } finally {
+      ac.abort()
+    }
+  }, 5000)
+})
+
+describe('POST /api/registry/projects/:id/subscribe（★订阅状态）', () => {
+  it('更新 subscribed 并持久化到 registry', async () => {
+    const res = await fetch(`${base}/api/registry/projects/hello-world/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscribed: false }),
+    })
+    expect(res.status).toBe(200)
+    const reg = await (await fetch(`${base}/api/registry`)).json()
+    expect(reg.projects['hello-world'].subscribed).toBe(false)
+
+    const up = await fetch(`${base}/api/registry/projects/hello-world/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscribed: true }),
+    })
+    expect(up.status).toBe(200)
+    const reg2 = await (await fetch(`${base}/api/registry`)).json()
+    expect(reg2.projects['hello-world'].subscribed).toBe(true)
+  })
+
+  it('未知项目 404；非法 body 400', async () => {
+    const nf = await fetch(`${base}/api/registry/projects/no-such/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscribed: true }),
+    })
+    expect(nf.status).toBe(404)
+    const bad = await fetch(`${base}/api/registry/projects/hello-world/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscribed: 'yes' }),
+    })
+    expect(bad.status).toBe(400)
+  })
+})

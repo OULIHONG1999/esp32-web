@@ -78,9 +78,10 @@ function parseMeta(raw) {
  * @param {string} opts.token
  * @param {Buffer} opts.body        已读全量正文
  * @param {import('node:http').IncomingHttpHeaders} opts.headers
+ * @param {(payload: object) => void} [opts.onPublished] 成功后回调（SSE 广播）
  * @returns {Promise<{status:number, json:object}>}
  */
-export async function handlePublish({ dataDir, token, body, headers }) {
+export async function handlePublish({ dataDir, token, body, headers, onPublished }) {
   if (publishing) {
     return { status: 409, json: { error: 'another publish in progress' } }
   }
@@ -181,7 +182,7 @@ export async function handlePublish({ dataDir, token, body, headers }) {
     })
     writeRegistryAtomic(dataDir, registry)
 
-    return {
+    const result = {
       status: 200,
       json: {
         ok: true,
@@ -191,6 +192,14 @@ export async function handlePublish({ dataDir, token, body, headers }) {
         files: meta.release.parts.map((p) => p.file),
       },
     }
+    // S3：发布成功 → SSE 广播（订阅方横幅/角标）
+    onPublished?.({
+      project: pid,
+      projectMeta: { id: pid, name: meta.project.name ?? pid },
+      variant,
+      release: { id: rid, type: meta.release.type, createdAt: registry.projects[pid].variants[variant].releases.find((r) => r.id === rid)?.createdAt },
+    })
+    return result
   } finally {
     publishing = false
   }

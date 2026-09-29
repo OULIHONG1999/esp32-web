@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import EnvCheck from './components/EnvCheck.vue'
 import ConnectPanel from './components/ConnectPanel.vue'
 import FirmwarePanel from './components/FirmwarePanel.vue'
@@ -7,6 +7,12 @@ import LogPanel from './components/LogPanel.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
 import { useIdfBuild } from './composables/useIdfBuild'
+import {
+  isSubscribed,
+  subscribeRegistry,
+  type PublishEvent,
+  type StreamStatus,
+} from './api/registry'
 
 const report = ref<EnvReport>(checkEnvironment())
 
@@ -53,6 +59,45 @@ function onErase(): void {
   const ok = window.confirm('确定要完全擦除设备 flash 吗？设备上所有数据将被清除，且不可恢复。')
   if (ok) void erase()
 }
+
+// ---- S3 订阅（F-21）：SSE 横幅 + NEW 角标 + 轮询降级 ----
+const streamStatus = ref<StreamStatus | 'off'>('off')
+const banner = ref<PublishEvent | null>(null)
+const newReleases = ref<Record<string, boolean>>({})
+const refreshSignal = ref(0)
+let unsubscribe: (() => void) | null = null
+
+function onStreamPublish(e: PublishEvent): void {
+  if (!isSubscribed(e.project)) return // ★未订阅项目不打扰
+  banner.value = e
+  const key = `${e.project}/${e.variant}`
+  newReleases.value = { ...newReleases.value, [key]: true }
+  refreshSignal.value += 1 // 项目库列表自动拉新 latest
+}
+
+function onBannerView(): void {
+  banner.value = null
+  refreshSignal.value += 1
+}
+
+function onReleaseLoaded(key: string): void {
+  const { [key]: _gone, ...rest } = newReleases.value
+  newReleases.value = rest
+}
+
+onMounted(() => {
+  unsubscribe = subscribeRegistry({
+    onPublish: onStreamPublish,
+    onStatus: (s) => {
+      streamStatus.value = s
+    },
+  })
+})
+onUnmounted(() => {
+  unsubscribe?.()
+  unsubscribe = null
+  streamStatus.value = 'off'
+})
 </script>
 
 <template>
@@ -60,7 +105,23 @@ function onErase(): void {
     <header class="shell__header">
       <span class="shell__brand">ESP32 Web Flasher</span>
       <span class="shell__hint">v0.2.0 · 设备常驻连接</span>
+      <span
+        class="shell__stream"
+        :class="'shell__stream--' + streamStatus"
+        :title="streamStatus === 'connected' ? 'SSE 订阅中：远端发布即时感知' : streamStatus === 'polling' ? 'SSE 断开，30s 轮询降级中' : '订阅未启动'"
+      >
+        {{ streamStatus === 'connected' ? '● 订阅中' : streamStatus === 'polling' ? '○ 轮询' : '○ 未订阅' }}
+      </span>
     </header>
+
+    <div v-if="banner" class="banner">
+      <span class="banner__text">
+        📢 <b>{{ banner.project }}</b> / {{ banner.variant }} 已发布
+        <code>{{ banner.release.id }}</code>
+      </span>
+      <button class="banner__btn" type="button" @click="onBannerView">查看</button>
+      <button class="banner__close" type="button" title="关闭" @click="banner = null">✕</button>
+    </div>
 
     <main class="shell__main">
       <EnvCheck v-if="!report.ok" :report="report" @recheck="onRecheck" />
@@ -125,8 +186,11 @@ function onErase(): void {
           :chip-name="chip?.name ?? null"
           :build-running="idf.running.value"
           :auto-load-signal="autoLoadSignal"
+          :new-releases="newReleases"
+          :refresh-signal="refreshSignal"
           @flash="flash"
           @params="setFlashParams"
+          @loaded="onReleaseLoaded"
         />
 
         <LogPanel
@@ -142,6 +206,55 @@ function onErase(): void {
 </template>
 
 <style scoped>
+.shell__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 16px 20px 0;
+}
+.shell__stream {
+  margin-left: auto;
+  font-size: 12px;
+}
+.shell__stream--connected {
+  color: var(--accent);
+}
+.shell__stream--polling {
+  color: var(--warn);
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 860px;
+  width: calc(100% - 40px);
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.banner__text {
+  flex: 1;
+}
+.banner__btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #04150f;
+}
+.banner__close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
 .shell__main {
   display: flex;
   flex-direction: column;

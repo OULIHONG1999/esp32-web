@@ -118,9 +118,9 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 4. ✅ watch 真机：本机挂 watch → 远端 registry 自动出现 → **本地浏览器 localhost:8787 页面载入 80m/2MB 注入（用户日志确认）**。
 **门3**：✅ 过（烧录核对随 D4 暂缓项一并）。尾巴：HTTPS/域名 DNS 解析（非阻塞）。
 
-### S3：订阅
+### S3：订阅——🔄 代码完成（2026-09-29），待门4 演示
 
-SSE 端点（心跳、断线重连）→ 前端订阅状态（localStorage+服务端）→ 横幅/角标 → 手动载入。**门4**：双开演示。
+SSE 端点（`server/stream.js`：心跳、断开清理、X-Accel-Buffering no）+ publish 成功广播 + subscribe 写接口 → 前端订阅状态（EventSource + localStorage/服务端双写 ★）→ 横幅/●NEW 角标/header 状态点 → 30s 轮询降级（快照 diff 纯函数）→ 手动载入清角标。服务器已部署 SSE 版（retry:3000 握手验证）。**门4**：双开页面演示"远端发布、本地即知"（待用户）。
 
 ### S4：版本管理
 

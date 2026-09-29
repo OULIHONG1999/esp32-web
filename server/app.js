@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { LIMITS } from './config.js'
 import { handlePublish } from './publish.js'
-import { readRegistry, registryPath } from './registry.js'
+import { readRegistry, registryPath, upsertSubscribed, writeRegistryAtomic } from './registry.js'
+import { createSseHub } from './stream.js'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -101,38 +102,63 @@ function serveStatic(distDir, urlPath, res) {
 }
 
 /** 创建 http 请求处理器（deps 注入便于单测） */
-export function createApp({ dataDir, token, distDir }) {
-  return async function app(req, res) {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const p = url.pathname
-    try {
-      if (req.method === 'GET' && p === '/api/registry') {
-        return serveRegistry(dataDir, res)
+export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
+  const hub = createSseHub({ heartbeatMs: sseHeartbeatMs })
+  return Object.assign(
+    async function app(req, res) {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const p = url.pathname
+      try {
+        if (req.method === 'GET' && p === '/api/registry') {
+          return serveRegistry(dataDir, res)
+        }
+        if (req.method === 'GET' && p === '/api/registry/stream') {
+          return hub.handler(req, res)
+        }
+        // F-21 ★订阅状态（读公开写公开，单用户；多用户命名空间为预留扩展点）
+        const subM = /^\/api\/registry\/projects\/([^/]+)\/subscribe$/.exec(p)
+        if (req.method === 'POST' && subM) {
+          if (!LIMITS.safeName.test(subM[1])) return send(res, 400, { error: 'unsafe project id' })
+          const body = await collectBody(req, 4 * 1024)
+          let subscribed
+          try {
+            subscribed = JSON.parse(body.toString('utf8')).subscribed
+          } catch {
+            return send(res, 400, { error: 'bad json' })
+          }
+          if (typeof subscribed !== 'boolean') return send(res, 400, { error: 'subscribed must be boolean' })
+          const reg = readRegistry(dataDir)
+          if (!reg.projects?.[subM[1]]) return send(res, 404, { error: 'project not found' })
+          writeRegistryAtomic(dataDir, upsertSubscribed(reg, subM[1], subscribed))
+          return send(res, 200, { ok: true, projectId: subM[1], subscribed })
+        }
+        if (req.method === 'POST' && p === '/api/publish') {
+          const body = await collectBody(req, LIMITS.maxBodyBytes)
+          const { status, json } = await handlePublish({
+            dataDir,
+            token,
+            body,
+            headers: req.headers,
+            onPublished: (payload) => hub.broadcast('publish', payload),
+          })
+          return send(res, status, json)
+        }
+        if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {
+          return servePart(dataDir, p, res)
+        }
+        if (req.method === 'GET' && p.startsWith('/api/')) {
+          return send(res, 404, { error: 'unknown api' })
+        }
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          return serveStatic(distDir, p, res)
+        }
+        send(res, 405, { error: 'method not allowed' })
+      } catch (err) {
+        const status = err?.status ?? 500
+        if (status >= 500) console.error('[server]', err)
+        send(res, status, { error: err?.message ?? 'internal error' })
       }
-      if (req.method === 'POST' && p === '/api/publish') {
-        const body = await collectBody(req, LIMITS.maxBodyBytes)
-        const { status, json } = await handlePublish({
-          dataDir,
-          token,
-          body,
-          headers: req.headers,
-        })
-        return send(res, status, json)
-      }
-      if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {
-        return servePart(dataDir, p, res)
-      }
-      if (req.method === 'GET' && p.startsWith('/api/')) {
-        return send(res, 404, { error: 'unknown api' })
-      }
-      if (req.method === 'GET' || req.method === 'HEAD') {
-        return serveStatic(distDir, p, res)
-      }
-      send(res, 405, { error: 'method not allowed' })
-    } catch (err) {
-      const status = err?.status ?? 500
-      if (status >= 500) console.error('[server]', err)
-      send(res, status, { error: err?.message ?? 'internal error' })
-    }
-  }
+    },
+    { hub },
+  )
 }

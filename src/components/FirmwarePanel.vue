@@ -6,6 +6,7 @@ import {
   fetchRegistry,
   fetchReleasePart,
   flattenLatest,
+  setSubscribed,
   toFlashParams,
   type RegistryOption,
 } from '../api/registry'
@@ -23,6 +24,8 @@ let nextId = 1
 const emit = defineEmits<{
   flash: [parts: FlashPart[]]
   'params': [params: FlashParams]
+  /** 载入完成（key=`pid/vid`）——父层据此清 NEW 角标 */
+  'loaded': [key: string]
 }>()
 
 const props = defineProps<{
@@ -31,6 +34,10 @@ const props = defineProps<{
   chipName: string | null
   buildRunning: boolean
   autoLoadSignal: number
+  /** S3：待发布的 `${pid}/{vid}` 集合（NEW 角标） */
+  newReleases: Record<string, boolean>
+  /** S3：远端有新版本时 +1，触发项目库自动刷新 */
+  refreshSignal: number
 }>()
 
 const localLoadMsg = ref<string | null>(null)
@@ -175,6 +182,7 @@ async function loadRegistryRelease(): Promise<void> {
     }
     rows.splice(0, rows.length, ...loaded)
     emit('params', toFlashParams(opt.release.flashParams))
+    emit('loaded', `${opt.projectId}/${opt.variant}`)
     registryMsg.value = `已载入 ${opt.projectName}/${opt.variant} ${opt.release.id}（${loaded.length} 段，烧录参数已注入）`
   } catch (e) {
     registryMsg.value = `载入失败：${e instanceof Error ? e.message : String(e)}`
@@ -184,6 +192,26 @@ async function loadRegistryRelease(): Promise<void> {
 onMounted(() => {
   void refreshRegistry()
 })
+
+// S3：远端 publish 到达 → 自动刷新 latest 列表
+watch(
+  () => props.refreshSignal,
+  (n) => {
+    if (n > 0) void refreshRegistry()
+  },
+)
+
+/** ★订阅开关（F-21）：切换选中项目的 subscribed（localStorage+服务端双写） */
+async function toggleSubscribe(): Promise<void> {
+  const opt = registryOptions.value[selectedIdx.value]
+  if (!opt) return
+  const next = !opt.subscribed
+  await setSubscribed(opt.projectId, next)
+  opt.subscribed = next
+  registryMsg.value = next
+    ? `已订阅 ${opt.projectName}（发布会横幅提醒）`
+    : `已取消订阅 ${opt.projectName}（发布会静默）`
+}
 </script>
 
 <template>
@@ -221,9 +249,18 @@ onMounted(() => {
       >
         <option :value="-1" disabled>— 点「刷新」加载 —</option>
         <option v-for="(o, i) in registryOptions" :key="o.projectId + '/' + o.variant" :value="i">
-          {{ o.projectName }} · {{ o.variant }} · {{ o.release.id }}{{ o.release.type === 'release' ? ' ★' : '' }}
+          {{ o.subscribed ? '★' : '☆' }}{{ newReleases[o.projectId + '/' + o.variant] ? ' ●NEW ' : ' ' }}{{ o.projectName }} · {{ o.variant }} · {{ o.release.id }}{{ o.release.type === 'release' ? ' ★' : '' }}
         </option>
       </select>
+      <button
+        class="btn"
+        type="button"
+        :disabled="selectedIdx < 0"
+        :title="selectedIdx >= 0 && registryOptions[selectedIdx]?.subscribed ? '取消订阅该项目（发布会静默）' : '订阅该项目（发布会横幅提醒）'"
+        @click="toggleSubscribe"
+      >
+        {{ selectedIdx >= 0 && registryOptions[selectedIdx]?.subscribed ? '★ 已订阅' : '☆ 订阅' }}
+      </button>
       <button
         class="btn"
         type="button"

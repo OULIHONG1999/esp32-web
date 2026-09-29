@@ -42,6 +42,7 @@ export function upsertRelease(registry, { project, variant, release }) {
     id: project.id,
     name: project.name ?? project.id,
     description: project.description ?? '',
+    subscribed: true, // ★ 默认订阅（单用户简化；F-21 订阅开关只改此字段）
     variants: {},
   })
   if (project.name) proj.name = project.name
@@ -52,5 +53,12 @@ export function upsertRelease(registry, { project, variant, release }) {
   else vars.releases.push(release)
   vars.releases.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
   vars.latest = release.id
+  return next
+}
+
+/** F-21：更新项目 ★订阅状态（服务端持久，跨设备一致；前端另有 localStorage 镜像） */
+export function upsertSubscribed(registry, projectId, subscribed) {
+  const next = structuredClone(registry)
+  next.projects[projectId].subscribed = subscribed
   return next
 }
