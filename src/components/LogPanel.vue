@@ -119,14 +119,15 @@ function openLogWindow(): void {
         >
           ⧉ 独立窗口
         </button>
-        <details class="more">
-          <summary class="btn" title="更多操作">⋯</summary>
-          <div class="more__pop">
-            <button class="more__item" type="button" @click="doExport">导出 .txt</button>
-            <button class="more__item" type="button" @click="$emit('clear')">清空</button>
-          </div>
-        </details>
       </template>
+      <!-- 导出/清空在副窗同样需要（始终显示） -->
+      <details class="more">
+        <summary class="btn" title="更多操作">⋯</summary>
+        <div class="more__pop">
+          <button class="more__item" type="button" @click="doExport">导出 .txt</button>
+          <button class="more__item" type="button" @click="$emit('clear')">清空</button>
+        </div>
+      </details>
       <span class="logbar__count">
         {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
       </span>

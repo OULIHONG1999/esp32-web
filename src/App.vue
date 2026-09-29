@@ -399,7 +399,24 @@ async function configureToken(): Promise<void> {
   color: var(--muted);
   cursor: pointer;
 }
-.shell__main {
+.shell__main--logfull {
+  max-width: none;
+  width: 100%;
+  min-height: calc(100vh - 60px);
+  padding: 10px 16px 16px;
+  /* 日志盒铺满副窗：LogPanel 的 logbox 读取此变量 */
+  --log-height: calc(100vh - 165px);
+}
+.shell__main--logfull .panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.shell__main--logfull .logbox {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}.shell__main {
   display: flex;
   flex-direction: column;
   gap: 14px;
