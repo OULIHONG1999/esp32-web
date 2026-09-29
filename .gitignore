@@ -8,3 +8,4 @@ server-data/
 *.log
 *.err
 
+/deploy-package.zip
