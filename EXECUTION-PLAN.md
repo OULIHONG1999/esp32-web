@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：**已批准；门1 已过（2026-09-27），S1 代码+本地 e2e 完成，门2 待真机** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准；门1 ✅、S1 ✅、门2 进行中（2026-09-27 复测 4 项修复真机验证过，剩 D4 核对 + console 切换闭环，编译归用户）** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）
@@ -108,7 +108,7 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 3. ✅ `tools/publish/`：`publish once`（解析 flash_args+config.assets→查缺→multipart 上传）；**单测**（解析、差集、fixtures 全集）；
 4. ✅ 前端：固件区"项目库"最小版——拉 registry、列 latest、点载入进现有表格（flashParams 注入）；vite proxy 已配；
 5. ✅ fixtures：`tests/fixtures/fake-build/`（计划原文 test/fixtures，实现统一进 tests/）四段假 bin；e2e 测试：CLI→server→registry→下载比对→幂等 0 上传→错 token 拒收，5 用例全过。
-**门2（核心）**：本地 fixtures 全链路自动通过 ✅ → **你的真机**：publish 真实 hello_world → 页面载入 → 烧录成功 → 同时核对 D4/D5 → 你在 PROGRESS 验收表勾 F-03/F-13 等（待执行）。
+**门2（核心）**：本地 fixtures 全链路自动通过 ✅ → 真机 publish hello_world ✅ → 页面载入 → 烧录成功（两轮实测，第二轮 4 项修复全过）✅ → **D5 校验 ✅**（三段 Hash of data verified）→ **D4 待核**（参数已注入 80m/2MB，boot banner 确认待 console 切换后页面日志完成）→ 验收表勾选待执行。附：F-17/F-18/F-19 同轮回归通过；"无设备日志"定位 console=UART0 配置（问题 19）。
 
 ### S2：自动发布 + 部署
 

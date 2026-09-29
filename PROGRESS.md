@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-27（S1 最小闭环代码+e2e 完成，门2 待真机）
+> 最后更新：2026-09-27（门2 复测：4 项修复真机验证通过；console 根因定位，编译交用户）
 
 ## 一句话
 
@@ -31,7 +31,7 @@
 | T9 文档同步 | ✅ done | DESIGN §4.1/§4.2、AGENTS、REQUIREMENTS（F-17/F-18）、本文 |
 | T10 IDF 命令按钮（F-19） | ✅ 代码完成 | dev 中间件 `/api/build`（build/fullclean/abort/轮询）+ 🔨🧹■ 按钮 + 编译成功自动载入；冒烟 exit 0；**待实机点按验证** |
 | **T11 阶段1 文档+实现债** | ✅ done | 门1 已过（2026-09-27 用户确认 5 项拍板） |
-| **T12 S1 最小闭环** | ✅ 代码完成 | server/（registry+publish+parts 下载+静态）+ tools/publish once + 前端项目库最小版 + vite proxy + fixtures e2e；**81 测试全绿** → 待门2 真机 |
+| **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；剩 D4 核对+console 切换闭环 |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -91,6 +91,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 16. **方向1 裸会话直接 writeFlash 必失败（已修）**：connect 后 `closeEsptool` 归还端口，flash/erase/hardReset 新建的会话从未 `main()` 同步就发命令 → esptool-js 不会自动同步 → 首把秒败；D1 重试的 `reopenForRetry` 恰好跑了完整 main() 兜底，造成"每次烧录先失败一次"的假象。方向1 后首次实机烧录才暴露（F-17 回归价值的直接证据）。**修复**：glue 加 `ensureSynced()`（新会话首次使用前自动同步），detect/flash/erase/hardReset 四入口全覆盖；`reopenForRetry` 同步维护 synced 状态。
 17. **⚡载入 flashParams 字段名失配——D4 疑云真根因（已修）**：dev 中间件返回 `{mode,freq,size}`，前端按 `{flashMode,flashFreq,flashSize}` 消费 → TS 类型撒谎抓不到（vite.config 不在 tsconfig include）→ 参数全落默认 **40m/4MB**，flash_args 的 80m/2MB **从未生效**——历史"80m vs 启动日志 40MHz"疑云即此（烧录实际就按 40m 烧的）。**修复**：中间件改返回 `flashMode/flashFreq/flashSize` + `buildArtifacts.normalizeFlashParams` 双形状归一兜底 + `tests/api.test.ts` 守护。项目库（toFlashParams）路径字段名本就正确。
 18. **重试首因不可见（已修）**：D1 重试成功后 `lastError` 被清、首败错误也不进日志——盲区。**修复**：core 重试前经 noticeHandler 写"首次写入失败（原因），自动重建会话重试…"进日志；useSession 不再硬编码"——请重新连接"后缀（拔线默认消息由 core 自带）。附带观察：⚡/项目库载入后**表格只显示段数不显示烧录参数**，参数生效性只能从日志行读——backlog：载入成功提示中带上 mode/freq/size。
+19. **"复位后无设备日志" = console 配置使然（非 bug）**：hello_world sdkconfig 为 `CONFIG_ESP_CONSOLE_UART_DEFAULT=y`（console=UART0），USB-Serial/JTAG 口上没有 app 输出——页面日志流开启本身正常。曾以文本替换直改 sdkconfig（备份 `sdkconfig.bak-console`）切到 `USB_SERIAL_JTAG`，`idf.py build` 在 KConfig 重配置阶段 FATAL（stderr 空消息，疑 SECONDARY_NONE/dead UART_NUM 依赖冲突）——**编译已交由用户接管**，后续经 `idf.py menuconfig` 交互修正为宜（工具自动处理 Kconfig 依赖，避免盲改文本）。D4 核对（boot banner 80MHz/2MB）待 console 切换后烧录时在页面日志完成。
 
 ## 外部环境快照
 
@@ -107,7 +108,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-02 文件选择 | ✅ | 手动多选 + ⚡一键载入双路径 |
 | F-03 选固件（服务器） | 🔄 | manifest 语义由 **registry 载入取代**（S6'）：项目库 UI+下载+参数注入完成，本地 e2e 过，**待真机** |
 | F-04 连接 | ✅ | 实机 COM3/原生 USB |
-| F-05 烧录 | ✅ | 实机三段烧录成功；**降速重试 D1 已实现**（单测覆盖；重试实机行为待门2 观察）；MD5 校验=门2 D5 |
+| F-05 烧录 | ✅ | 实机三段烧录成功；**门2 复测全过**：参数注入 80m/2MB（`Flash params set to 21f`）、首把直接成功（无重试）、D5 三段 `Hash of data verified.`；降速重试机制首轮实测触发成功 |
 | F-06 擦除 | ✅ | 用户实测通过（擦除→重烧→恢复） |
 | F-07 自动硬复位 | ✅ | 实机 `Hard resetting` 观测 + 单测断言 |
 | F-08 日志 | ✅ | 分级/导出/行切分单测 |
@@ -118,7 +119,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-13 chipFamily 比对 | ⬜ | 随 manifest |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
-| F-16 实时串口日志 | ✅ | 实机验证通过 |
+| F-16 实时串口日志 | 🔄 | 机制实测正常（烧录前后自动挂起/恢复）；**hello_world console=UART0（sdkconfig），USB 口无 app 输出**——待 console 改 USB Serial/JTAG 后闭环 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | 🔄 | 代码完成+冒烟 exit 0，**待实机点按** |
@@ -130,7 +131,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 下一步
 
-1. **门2 真机（核心目标）**：① 起服务 `npm run server`（或 `node server/index.js`，设 `FIRMWARE_PUBLISH_TOKEN`）；② 在真实 hello_world 工程根放 `publish.config.json`（参照 tests/fixtures），`$env:FIRMWARE_PUBLISH_TOKEN=...` 后 `npm run publish:once -- --build-dir <idf build目录>`；③ `npm run dev` 打开页面 → 项目库刷新 → 载入 → 烧录；④ 同批核对 **D4**（烧录参数生效：idf.py monitor 看启动日志）与 **D5**（日志出现 Hash verified）+ F-17/F-18/F-19 回归；⑤ 你在验收表勾 F-03/F-13 等。
+1. **门2 收尾（编译归用户）**：用户完成 hello_world console 切换编译（sdkconfig 已改/备份，KConfig 冲突见问题 19）→ 我 `publish once` 发新 release → 页面载入烧录 → 页面日志核对 **D4**（`boot: SPI Speed: 80MHz / Flash Size: 2MB`）+ 确认 Hello world 实时滚动 → 验收表勾 F-03 等，关门2。
 2. 门2 过后 → S2（--watch + Ubuntu 部署 runbook，门3）。
 3. 等用户拍板：主操作按钮方案（推荐映射 vs 字面三按钮，见会话记录 2026-09-26）。
 3. S1 最小闭环（T12）：server 骨架 + `publish once` + 前端项目库最小版 → **门2 真机**（含 D4 参数生效 / D5 MD5 核对、F-17/F-18/F-19 同批实机回归）。
@@ -140,6 +141,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-27（门2 复测通过 + console 根因）**：复测 4 项修复全部真机验证——参数注入 80m/2MB（`Flash params set to 21f`，此前错参数时 220）、首把直接成功（ensureSynced 生效，无重试）、D5 三段 `Hash of data verified.`。"复位后无设备日志"定位为 **console=UART0 配置使然**（非 bug，问题 19）：sdkconfig 已备份并改文本切 USB Serial/JTAG，KConfig 重配置失败，编译交用户接管（menuconfig 修正为宜）。F-05 验收表更新 ✅；F-16 改 🔄（待 console 切换闭环）；F-17/F-18/F-19 同轮真机回归通过。
 - **2026-09-27（门2 首轮实测修复）**：真机烧录链路走通（发布→载入→三段烧录→硬复位→D1 重试兜底成功），暴露并修复四问题（记录 16–18 + D5）：① 裸会话未 sync 首把必败——glue `ensureSynced` 四入口；② flashParams 字段名失配（D4 真根因，参数从未生效）——中间件改形状+normalize+单测；③ 重试首因不可见——notice 进日志；④ **D5 实现**——`core/md5.ts` 同步 MD5（node:crypto 对拍 13 长度 + RFC 向量）接入 `calculateMD5Hash`，日志将出现 File md5 / Flash md5 / Hash of data verified.。88 测试 + build 全绿（+@types/node）。烧录后无设备日志输出待查（疑 console=UART0，IDF-ENV §6）。
 - **2026-09-27（S1 最小闭环）**：跨设备下载本体（手动版）落地——`server/`（零依赖 node:http：registry 原子读写+ETag、POST publish 鉴权/白名单/SHA256/原子落位/幂等补传、parts 下载双检、静态 SPA、rebuild 自愈）；`tools/publish` once CLI（flash_args+assets 解析、差集查缺、multipart、--release-id）；前端项目库最小版（latest 列表+载入+flashParams 注入）+ vite proxy；fixtures e2e（发布→registry→下载比对→0 上传幂等→401 拒收）5 用例。**81 测试全绿 + build 通过**。新问题记录 11–15。门2 本地部分过，待真机。
 
@@ -163,4 +165,4 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 - **执行计划（唯一权威线路）：`EXECUTION-PLAN.md`** —— 分片路线 + 五道验收门 + 全量问题清单（S1'–S6' 结构性 / D1–D5 实现债 / 风险表）+ 每阶段实现流程。
 - 任务面板映射（面板跨会话会丢，以此为准）：**T11=阶段1（文档修订+D1–D3，门1）→ T12=S1 最小闭环（门2 含真机+D4/D5）→ T13=S2 watch+部署（门3）→ T14=S3 订阅（门4）→ T15=S4 版本管理（门5）→ T16=S5 可选（不排期）**。
-- 项目状态：v1 实机可用 + 阶段1（门1 ✅）+ **S1 代码与本地 e2e 完成（81 测试全绿）→ 门2 真机待执行**；过门2 进 S2。
+- 项目状态：阶段1（门1 ✅）+ S1 代码/本地 e2e ✅ + **门2 复测 4 项修复真机验证通过**；剩 D4 核对与 console 切换闭环（编译归用户）→ 过门2 进 S2。
