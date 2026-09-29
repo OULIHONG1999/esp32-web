@@ -44,14 +44,16 @@ nginx 配置：`/www/server/panel/vhost/nginx/firmware-server.conf`（备份 `.c
 
 ## 4. Token（发布/晋升/回滚/保留策略的写权限）
 
-| 项 | 值/位置 |
+| 项 | 位置/说明 |
 |---|---|
-| 主 token（master） | `[REDACTED 已轮换作废 2026-09-29]`（env `/etc/firmware-server.env`，永不失效，唯一可生成/撤销工作 token 的凭证） |
-| 工作 token（`wk_` 前缀） | 页面 🔑「生成」产生，持久化 `server-data/tokens.json`——**交给 AI/发布设备用**，可随时撤销 |
+| 主 token（master） | **不落任何文档**——见服务器 `/etc/firmware-server.env` 的 `FIRMWARE_PUBLISH_TOKEN`，或向运维者索取（曾于 2026-09-29 公网泄露后**已轮换**，旧值作废） |
+| 工作 token（`wk_` 前缀） | 页面 🔑「生成」产生（用主 token 换），持久化 `server-data/tokens.json`——**交给 AI/发布设备用**，可随时撤销 |
 | 接口 | `POST/GET/DELETE /api/token`（**仅主 token** 鉴权）；写业务接口接受主或任一有效工作 token |
 | 页面配置 | 右上角 🔑：生成（输主 token 换 wk_）或手动设置本机（localStorage `fw.token`） |
-| 轮换 | 主 token：改 env → restart；工作 token：页面/接口撤销即可，无需重启 |
+| 轮换 | 主 token：改 env → `systemctl restart firmware-server`（泄露时必须轮换）；工作 token：撤销即可，无需重启 |
 | 撤销示例 | `curl -X DELETE https://IP/api/token -H "Authorization: Bearer <主token>" -d '{"token":"wk_..."}'` |
+
+> ⚠️ 安全纪律：**任何 token 明文不得写入本仓库文档**（仓库文档会挂公网 `/docs/`）；秘密只存服务器 env 与本地安全位置。
 
 ## 5. 数据与运维
 
