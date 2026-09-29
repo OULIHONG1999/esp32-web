@@ -35,6 +35,7 @@
 - 方式B 官方 CLI（零依赖 Node）: 源码直接下载 /tools/publish/{index,once,lib,watch}.js，用法见 /docs/PUBLISH.md
 
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
+- 故障排查(实时日志无输出/连接/401): /docs/TROUBLESHOOTING.md
 - 发布指南(操作手册): /docs/PUBLISH.md
 - 当前部署状态详解(拓扑/通道/token/运维): /docs/SERVER.md
 - 部署运维(runbook): /docs/DEPLOY.md
