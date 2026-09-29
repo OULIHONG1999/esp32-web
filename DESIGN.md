@@ -73,7 +73,7 @@ ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notic
 
 规则：
 - **端口复用**：`lastPort` 长期保留，二次 connect/重连不弹系统选择器；「切换端口」才弹。
-- **日志自动**：进入 ready 即开实时日志流；进入 working 自动挂起、结束自动恢复（用户无感知）。
+- **日志自动**：进入 ready 即开实时日志流；进入 working 自动挂起、结束自动恢复（用户无感知）。**手动覆盖（F-16 增补）**：`pauseMonitor/resumeMonitor`（ready 态幂等）——停止即释放串口，供本机 `idf.py monitor` 等外部工具使用，再点恢复切回页面监视。
 - **互斥靠编排而非用户**：流（SerialMonitor）与 esptool 会话独占同一端口，切换顺序固定为 stopStream → esptool → closeEsptool → startStream。
 - **单飞行**：working 期间禁止一切其他命令（按钮灰化即由此而来）。
 - **拔线感知**：日志流 error 停止 → 自动回 disconnected 并出 notice。

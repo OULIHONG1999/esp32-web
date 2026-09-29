@@ -377,3 +377,54 @@ describe('D3 ready 态错误可见与清除', () => {
     expect(d.state).toBe('ready')
   })
 })
+
+describe('手动监视开关（F-16 手动 · pause/resume）', () => {
+  it('ready 态 pause：停流 + notice 提示让出端口；再次 pause 幂等', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    const notices: string[] = []
+    d.setNoticeHandler((m) => notices.push(m))
+    rec.calls.length = 0
+    await d.pauseMonitor()
+    expect(rec.calls).toContain('stopStream')
+    expect(d.isStreamOn).toBe(false)
+    expect(notices[0]).toContain('外部工具')
+    await d.pauseMonitor() // 幂等
+    expect(rec.calls.filter((c) => c === 'stopStream')).toHaveLength(1)
+  })
+
+  it('resume：重开流 + notice；未暂停时幂等', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    const notices: string[] = []
+    d.setNoticeHandler((m) => notices.push(m))
+    rec.calls.length = 0
+    await d.resumeMonitor() // 流已开 → 幂等无动作
+    expect(rec.calls).not.toContain('startStream')
+    await d.pauseMonitor()
+    rec.calls.length = 0
+    await d.resumeMonitor()
+    expect(rec.calls).toContain('startStream')
+    expect(d.isStreamOn).toBe(true)
+    expect(notices.some((n) => n.includes('恢复'))).toBe(true)
+  })
+
+  it('未连接态 pause/resume 不动作（守卫 ready）', async () => {
+    const { deps, rec } = makeDeps()
+    const d = new DeviceManager(deps)
+    rec.calls.length = 0
+    await d.pauseMonitor()
+    await d.resumeMonitor()
+    expect(rec.calls).toHaveLength(0)
+  })
+
+  it('手动暂停后烧录：临界区结束自动恢复日志流', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    await d.pauseMonitor()
+    expect(d.isStreamOn).toBe(false)
+    await d.flash(parts)
+    expect(d.state).toBe('ready')
+    expect(d.isStreamOn).toBe(true) // 烧录恢复编排覆盖手动状态（设计如此）
+  })
+})

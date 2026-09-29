@@ -35,6 +35,7 @@ export function useSession() {
   const deviceLock = createDeviceLock()
 
   const state: Ref<DeviceState> = ref(device.state)
+  const streamOn = ref<boolean>(device.isStreamOn)
   const chip: Ref<ChipInfo | null> = ref(null)
   const lastError: Ref<ClassifiedError | null> = ref(null)
   const progress: Ref<Progress | null> = ref(null)
@@ -79,6 +80,7 @@ export function useSession() {
 
   device.subscribe(() => {
     state.value = device.state
+    streamOn.value = device.isStreamOn
     chip.value = device.chip
     lastError.value = device.lastError
     progress.value = device.progress
@@ -197,6 +199,9 @@ export function useSession() {
     },
     erase: () => run(() => device.erase()),
     hardReset: () => run(() => device.hardReset()),
+    pauseMonitor: () => run(() => device.pauseMonitor()),
+    resumeMonitor: () => run(() => device.resumeMonitor()),
+    streamOn,
     clearError: () => device.clearError(),
     toggleViewPause,
     flashHistory,

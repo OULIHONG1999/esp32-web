@@ -401,4 +401,21 @@ export class DeviceManager {
   async hardReset(): Promise<void> {
     await this.runCritical('hardReset', () => this.deps.hardReset())
   }
+
+  /**
+   * 手动暂停实时日志（F-16 手动开关 · 2026-09-29）：
+   * 释放串口 → 本机 idf.py monitor 等外部工具可占用；ready 态有效，幂等。
+   */
+  async pauseMonitor(): Promise<void> {
+    if (this.state !== 'ready' || !this.streamOn) return
+    await this.closeStream()
+    this.noticeHandler('已手动暂停实时日志——串口已释放，可使用外部工具（如 idf.py monitor）')
+  }
+
+  /** 手动恢复实时日志；ready 态且当前未开启时有效，幂等 */
+  async resumeMonitor(): Promise<void> {
+    if (this.state !== 'ready' || this.streamOn) return
+    await this.openStream()
+    this.noticeHandler('实时日志已手动恢复')
+  }
 }

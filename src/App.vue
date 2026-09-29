@@ -41,6 +41,9 @@ const {
   clearLogs,
   flashHistory,
   clearHistory,
+  streamOn,
+  pauseMonitor,
+  resumeMonitor,
   setFlashParams,
   toggleViewPause,
 } = useSession()
@@ -256,8 +259,12 @@ async function configureToken(): Promise<void> {
               :logs="logs"
               :export-text="exportLogs"
               :view-paused="viewPaused"
+              :stream-on="streamOn"
+              :monitor-disabled="!canOperate"
               @clear="clearLogs"
               @toggle-pause="toggleViewPause"
+              @pause-monitor="pauseMonitor"
+              @resume-monitor="resumeMonitor"
             />
           </aside>
         </div>

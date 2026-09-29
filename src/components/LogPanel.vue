@@ -6,8 +6,12 @@ const props = defineProps<{
   logs: readonly LogEntry[]
   exportText: () => string
   viewPaused: boolean
+  /** 实时日志流是否开启（false=端口已释放，可交外部 idf.py monitor） */
+  streamOn: boolean
+  /** 未连接/操作中禁用手动监视开关 */
+  monitorDisabled: boolean
 }>()
-defineEmits<{ clear: []; togglePause: [] }>()
+defineEmits<{ clear: []; togglePause: []; pauseMonitor: []; resumeMonitor: [] }>()
 
 const body = ref<HTMLElement | null>(null)
 
@@ -77,6 +81,26 @@ function doExport(): void {
       </button>
       <button class="btn" type="button" @click="doExport">导出 .txt</button>
       <button class="btn" type="button" @click="$emit('clear')">清空</button>
+      <button
+        v-if="streamOn"
+        class="btn"
+        type="button"
+        :disabled="monitorDisabled"
+        title="停止读取串口并释放端口——之后可运行本机 idf.py monitor 查看日志"
+        @click="$emit('pauseMonitor')"
+      >
+        ⏹ 停止监视（让出串口）
+      </button>
+      <button
+        v-else
+        class="btn btn--monitor"
+        type="button"
+        :disabled="monitorDisabled"
+        title="重新打开串口实时读取（等价于本机 idf.py monitor，页面内进行）"
+        @click="$emit('resumeMonitor')"
+      >
+        ▶ 开始监视
+      </button>
       <span class="logbar__count">
         {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
       </span>
