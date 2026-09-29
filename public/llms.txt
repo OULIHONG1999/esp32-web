@@ -29,14 +29,19 @@
 - token 配置在服务端环境变量 FIRMWARE_PUBLISH_TOKEN
 - 读接口(registry/SSE/下载/预览) 公开无需鉴权
 
+## 发布方式（二选一）
+- 方式A 裸 HTTP（无需任何代码库）: POST /api/publish multipart，字段 meta=JSON 元数据 + file=固件段；完整 meta 样例与 curl 示例见 /docs/PUBLISH.md §2.1
+- 方式B 官方 CLI（零依赖 Node）: 源码直接下载 /tools/publish/{index,once,lib,watch}.js，用法见 /docs/PUBLISH.md
+
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
 - 发布指南(操作手册): /docs/PUBLISH.md
 - 部署运维(runbook): /docs/DEPLOY.md
 - 设计与数据模型: /docs/FIRMWARE-REGISTRY.md
 - 验收清单(F-01..F-24): /docs/REQUIREMENTS.md
+- CLI 源码: /tools/publish/index.js (及 once/lib/watch 同目录)
 
 ## 示例
 - curl http://firmware.example.com/llms.txt               # 本说明文件
 - curl http://firmware.example.com/api/registry            # 查看全部固件
-- curl http://firmware.example.com/docs/PUBLISH.md         # 发布操作手册
+- curl http://firmware.example.com/docs/PUBLISH.md         # 发布操作手册(含裸HTTP示例)
 - curl https://firmware.example.com/api/registry           # HTTPS 也可(自签证书)

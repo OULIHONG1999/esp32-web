@@ -55,6 +55,48 @@ node tools\publish\index.js once --config publish.config.json
 
 通用参数：`--help`
 
+**没有 CLI 也能发布**：CLI 源码可在本站下载（见 §7），或直接用裸 HTTP 发布（见 §2.1）。
+
+### 2.1 裸 HTTP 发布（curl / 任意语言，无 CLI 依赖）
+
+`POST /api/publish`，`multipart/form-data`，两个字段：
+- `meta`：JSON 字符串（元数据，见下）
+- `file`：可重复多个（本次上传的固件段；服务器已有同 SHA 的段可不传）
+
+`meta` 完整样例（`parts` 必须列**全部**段——缺的靠服务器已有的补，新增的随请求上传）：
+
+```json
+{
+  "project": { "id": "hello-world", "name": "Hello World", "description": "" },
+  "variant": "ESP32-S3",
+  "release": {
+    "id": "20260930-1000-abcd",
+    "type": "snapshot",
+    "chipFamily": "ESP32-S3",
+    "flashParams": { "mode": "dio", "freq": "80m", "size": "2MB" },
+    "note": "",
+    "createdAt": "2026-09-30T10:00:00.000Z",
+    "parts": [
+      { "label": "bootloader", "address": 0,       "file": "bootloader.bin",      "sha256": "<64位小写hex>", "size": 21120 },
+      { "label": "app",         "address": 65536,  "file": "hello_world.bin",     "sha256": "<64位小写hex>", "size": 150720, "type": "app", "subType": "factory" }
+    ]
+  }
+}
+```
+
+curl 示例：
+
+```bash
+curl -X POST http://firmware.example.com/api/publish \
+  -H "Authorization: Bearer ${FIRMWARE_PUBLISH_TOKEN}" \
+  -F 'meta={"project":{"id":"hello-world","name":"Hello World"},"variant":"ESP32-S3","release":{"id":"20260930-1000-abcd","type":"snapshot","chipFamily":"ESP32-S3","flashParams":{"mode":"dio","freq":"80m","size":"2MB"},"note":"","createdAt":"2026-09-30T10:00:00.000Z","parts":[{"label":"app","address":65536,"file":"hello_world.bin","sha256":"…","size":150720}]}}' \
+  -F "file=@hello_world.bin"
+```
+
+- 每个上传文件的 SHA256 必须与 meta.parts 声明一致，否则 400
+- 段地址/烧录参数的权威来源是构建机的 `build/flash_args`
+- 成功返回 `{ ok, project, variant, release, retentionRemoved }`
+
 ## 3. 发布了什么（数据模型速记）
 
 ```
@@ -89,10 +131,28 @@ Release {
 | 中文 JSON 报 `Unexpected token` | Windows PowerShell 写配置带了 BOM/双重编码——用编辑器存 UTF-8（无 BOM） |
 | 页面看不到新版本 | 项目库点「刷新」；或看横幅（SSE 推送） |
 
-## 6. 相关文档（本站点均可直接读取）
+## 6. CLI 源码下载（跨网设备免仓库克隆）
+
+CLI 零依赖（仅 Node 内置模块），4 个文件放下即用：
+
+```
+http://firmware.example.com/tools/publish/index.js
+http://firmware.example.com/tools/publish/once.js
+http://firmware.example.com/tools/publish/lib.js
+http://firmware.example.com/tools/publish/watch.js
+```
+
+```bash
+mkdir -p tools/publish && cd tools/publish
+for f in index once lib watch; do curl -O http://firmware.example.com/tools/publish/$f.js; done
+cd ../.. && node tools/publish/index.js once --config publish.config.json
+```
+
+## 7. 相关文档（本站点均可直接读取）
 
 - 本文件：`/docs/PUBLISH.md`
 - API 速查（AI 友好）：`/llms.txt`
 - 部署运维：`/docs/DEPLOY.md`
 - 设计与数据模型：`/docs/FIRMWARE-REGISTRY.md`
 - 验收清单：`/docs/REQUIREMENTS.md`
+- CLI 源码：`/tools/publish/*.js`（见 §6）
