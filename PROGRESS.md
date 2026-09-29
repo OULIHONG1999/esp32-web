@@ -15,8 +15,9 @@
 4. `AGENTS.md` — 接手纪律与命令
 5. `IDF-ENV.md` — IDF 环境激活/命令/坑（本机操作指南）
 6. `EXECUTION-PLAN.md` — 分片路线 + 五道验收门（唯一权威线路）
-7. `DEPLOY.md` — Ubuntu 部署 runbook（S2 交付，门3 依据）
-8. 本文 — 进度与下一步
+7. `SERVER.md` — 当前部署状态详解（拓扑/双通道/token/运维命令/已知限制）
+8. `DEPLOY.md` — Ubuntu 部署 runbook（S2 交付，门3 依据）
+9. 本文 — 进度与下一步
 
 ## 当前状态（任务面板同步）
 
@@ -150,6 +151,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（文档体系全量同步 + SERVER.md）**：补记此前未入日志的连续增强——① **发布指南** `PUBLISH.md`（config/命令/裸 HTTP curl 示例/meta 完整样例/FAQ）；② **跨网自助闭环**：CLI 四文件托管 `/tools/publish/`、llms.txt 加发布方式二选一与文档索引（陌生 AI 从 URL 到发布全程零先验，已 WebFetch 实测）；③ **token 便利化**：页面 🔑 显式设置/状态按钮 + config 明文 token 写法 + 获取三途径；④ **双通道定型**：http:80 只读 AI 通道（nginx `firmware-server.conf` 加 listen 80，server_name=IP 不碰域名站点，备份 .bak）+ https:443 浏览器自签；⑤ 文档迁 `public/docs/`（源头化，防 build 清 dist）；⑥ **新建 `SERVER.md`**（部署状态快照：拓扑/环境/通道表/token 轮换/运维命令与时间戳核对教训/已知限制清单）；DEPLOY.md 补 §10 站点结构、§11 双通道、S3 SSE 状态修正。**双份纪律：根目录文档为源，改后 Copy 至 public/docs/**。
 - **2026-09-29（AI 友好度增强）**：让 AI 智能体免 JS 获取站点信息——`public/llms.txt`（服务说明+真实 API 路由清单含 promote/latest/retention/订阅+数据结构含 type/subType+认证+curl 示例；**放 public/ 而非 dist/**，否则下次 build 被清）；根 `index.html` 加 meta description + JSON-LD(WebApplication) + 隐藏 `#ai-data` 说明块；`GET /api/registry` 响应加 `_meta{service,version,docs}`（向后兼容，spread 追加）。三条验证公网通过（llms.txt 200/_meta 正确/页面三标记齐）。115 测试 + build 全绿，服务器 20:53 重启上线。注：任务模板中 parts 下载路径与实际路由不符，已按真实路由写入 llms.txt（防 AI 照抄 404）。
 - **2026-09-29（S4 版本管理 + 分区类型）**：**S4**——server `releases.js`（promote 必填 note/setLatest 回滚/retention 设置+预览+publish 后自动清理，releases 永不删）+ 写操作 Bearer 鉴权（401 测试）+ CLI `promote <rid> --note`（registry 自动定位 variant）+ 前端 `VersionTimeline.vue`（时间线/晋升 prompt/回滚 confirm/保留数预览确认/401 引导输 token）+ F-13 芯片比对 confirm + SSE promote/latest 事件刷新。**插入需求（用户提出）**：parts 增加 `type/subType` 分区类型——CLI `parsePartitionTable`（0x50AA 条目/0x50EB 尾、app/data 子类型枚举）按地址匹配 + config.assets 显式声明 + 前端"分区"列徽标；**server 三文件零改动**（parts 整对象透传，`.meta.json`/rebuild 天然携带）；fixtures 换真实格式分区表。115 测试 + build 全绿。剩：部署+rebuild 实测 → 门5。
 - **2026-09-29（门4 过）**：用户在 `https://firmware.example.com` 实测确认横幅与 ●NEW（发布 20260929-2029 经 SSE 即时推送）——**"远端发布、本地即知"订阅形态达成**，F-21 关。同轮完善：公网直连部署（自签 IP 证书、Node 侧 `NODE_TLS_REJECT_UNAUTHORIZED=0`、SSE 经 nginx 无缓冲实测）、server/dist MD5 全 SYNC 校验、文档挂载 `/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS，200）。问题记录 20（watch 后台 fetch failed，前台 once 可靠）、21（PS5.1 编码双坑）。

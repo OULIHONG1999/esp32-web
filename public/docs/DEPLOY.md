@@ -1,6 +1,7 @@
 # DEPLOY — Ubuntu 部署 Runbook（S2 · 门3 交付物）
 
 > 2026-09-29 · 关联：EXECUTION-PLAN.md（S2）、FIRMWARE-REGISTRY.md §0
+> **当前实际部署的状态快照见 `SERVER.md`**（拓扑/通道/token/运维命令），本文是通用部署手册。
 > 目标：自含服务上 Ubuntu（registry + 发布 + SSE + 静态前端），零第三方运行时依赖。
 > 两种反代方案：**Caddy（推荐，自动 HTTPS）** 与 nginx（已有站点时用），SSE 缓冲配置都必须写对。
 
@@ -188,4 +189,27 @@ journalctl -u firmware-server -f
 
 ## 9. SSE（S3 预留）
 
-端点 `GET /api/registry/stream` 尚未实现（S3）；**反代的 `flush_interval -1` / `proxy_buffering off` 现在就配好**，S3 上线即通。客户端同时有 30s 轮询降级（设计如此），反代配错不会导致完全不可用，只会推送延迟。
+端点 `GET /api/registry/stream` **已实现（S3，门4 过）**；反代的 `flush_interval -1` / `proxy_buffering off` 必须配好，SSE 才能即时推送（响应头 `X-Accel-Buffering: no` 是服务端侧的双保险，nginx 读到会动态关闭该响应缓冲）。客户端同时有 30s 轮询降级，反代配错不会导致完全不可用，只会推送延迟。
+
+## 10. 站点结构（build 产物随 dist 部署）
+
+```
+dist/
+├── index.html            # 前端（含 AI 元数据 meta/JSON-LD/#ai-data）
+├── assets/               # JS/CSS bundle
+├── llms.txt              # AI 速查（API/数据结构/认证/文档索引）
+├── docs/                 # 详细文档站（源文件在 public/docs/）
+│   ├── PUBLISH.md        #   发布操作指南（含裸 HTTP curl 示例）
+│   ├── DEPLOY.md         #   本手册
+│   ├── FIRMWARE-REGISTRY.md / REQUIREMENTS.md / SERVER.md
+└── tools/publish/        # CLI 源码托管（index/once/lib/watch 四文件，零依赖可下载）
+```
+
+⚠️ **维护纪律**：`public/` 下的文件才是构建源头（vite build 会清空 dist 再拷入 public）——**改文档改根目录/public 的源文件，绝不要只改服务器上的 dist**。
+
+## 11. 双通道访问（本项目实际采用）
+
+| 通道 | 用途 | 说明 |
+|---|---|---|
+| `https://<IP>/`（443） | 浏览器（Web Serial 必须安全上下文） | 自签证书 `CN=<IP>`，浏览器信任一次 |
+| `http://<IP>/`（80） | **AI/爬虫只读**（llms.txt/docs/tools/registry） | 明文——token 相关写操作勿走此通道传秘密；配置见 nginx `firmware-server.conf`（`listen 80` + server_name=IP，不影响域名站点） |

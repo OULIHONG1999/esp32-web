@@ -36,6 +36,7 @@
 
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
 - 发布指南(操作手册): /docs/PUBLISH.md
+- 当前部署状态详解(拓扑/通道/token/运维): /docs/SERVER.md
 - 部署运维(runbook): /docs/DEPLOY.md
 - 设计与数据模型: /docs/FIRMWARE-REGISTRY.md
 - 验收清单(F-01..F-24): /docs/REQUIREMENTS.md
