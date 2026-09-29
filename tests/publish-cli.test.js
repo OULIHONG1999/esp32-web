@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   buildParts,
+  collectShaSet,
   parseAddress,
   parseConfig,
   parseFlashArgs,
@@ -102,6 +103,33 @@ describe('pickMissing（查缺差集）', () => {
   it('同名但 sha 不同 → 重传（覆盖）', () => {
     const server = { parts: [{ file: 'a.bin', sha256: 'cc'.repeat(32) }] }
     expect(pickMissing([a], server)).toHaveLength(1)
+  })
+
+  it('extraShaSet（S2 跨 release 增量）：服务器别处已有同 sha → 不传', () => {
+    const shaSet = new Set([b.sha256])
+    const missing = pickMissing([a, b], null, shaSet)
+    expect(missing.map((p) => p.file)).toEqual(['a.bin'])
+  })
+
+  it('collectShaSet 聚合 variant 下全部 release 的 sha', () => {
+    const registry = {
+      projects: {
+        p: {
+          variants: {
+            V: {
+              releases: [
+                { id: 'r1', parts: [{ file: 'x.bin', sha256: 'aa'.repeat(32) }] },
+                { id: 'r2', parts: [{ file: 'y.bin', sha256: 'bb'.repeat(32) }] },
+              ],
+            },
+          },
+        },
+      },
+    }
+    const set = collectShaSet(registry, 'p', 'V')
+    expect(set.has('aa'.repeat(32))).toBe(true)
+    expect(set.has('bb'.repeat(32))).toBe(true)
+    expect(collectShaSet(registry, 'nope', 'V').size).toBe(0)
   })
 })
 

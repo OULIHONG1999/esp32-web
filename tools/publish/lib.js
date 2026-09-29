@@ -135,10 +135,24 @@ export function buildParts({ cfg, dir, buildDir }) {
   return { parts, flashParams, variant }
 }
 
-/** 查缺：服务器已有同 file 且同 sha256 → 不传（FIRMWARE-REGISTRY §5.3 差集） */
-export function pickMissing(localParts, serverRelease) {
+/**
+ * 查缺：
+ * - 同 release（serverRelease）已有同 file 同 sha → 不传
+ * - extraShaSet（S2 增量）：服务器同 project/variant 跨 release 已有的 sha 集合 → 不传
+ */
+export function pickMissing(localParts, serverRelease, extraShaSet) {
   const have = new Map((serverRelease?.parts ?? []).map((p) => [p.file, p.sha256]))
-  return localParts.filter((p) => have.get(p.file) !== p.sha256)
+  return localParts.filter(
+    (p) => have.get(p.file) !== p.sha256 && !(extraShaSet && extraShaSet.has(p.sha256)),
+  )
+}
+
+/** 从 registry 收集某 project/variant 下全部 release 的 sha256 集合（增量查缺用） */
+export function collectShaSet(registry, projectId, variant) {
+  const rels = registry.projects?.[projectId]?.variants?.[variant]?.releases ?? []
+  const set = new Set()
+  for (const rel of rels) for (const p of rel.parts ?? []) set.add(p.sha256)
+  return set
 }
 
 /** release id：YYYYMMDD-HHmm-<commit短哈希|随机4hex>（FIRMWARE-REGISTRY §4.1） */

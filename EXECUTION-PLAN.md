@@ -110,10 +110,13 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 5. ✅ fixtures：`tests/fixtures/fake-build/`（计划原文 test/fixtures，实现统一进 tests/）四段假 bin；e2e 测试：CLI→server→registry→下载比对→幂等 0 上传→错 token 拒收，5 用例全过。
 **门2（核心）**：本地 fixtures 全链路自动通过 ✅ → 真机 publish hello_world ✅ → 页面载入 → 烧录成功（两轮实测，第二轮 4 项修复全过）✅ → **D5 校验 ✅**（三段 Hash of data verified）→ **D4 待核**（参数已注入 80m/2MB，boot banner 确认待 console 切换后页面日志完成）→ 验收表勾选待执行。附：F-17/F-18/F-19 同轮回归通过；"无设备日志"定位 console=UART0 配置（问题 19）。
 
-### S2：自动发布 + 部署
+### S2：自动发布 + 部署——🔄 进行中（2026-09-29）
 
-1. CLI `--watch`（防抖+重试）；2. 增量效率验证（第二次发布只传 app）；3. Ubuntu 部署 runbook（Caddy、systemd、SSE 配置、token 注入）+ 实际部署；4. 远端 Windows 配 token 真机挂 watch。
-**门3**：远端 build → 自动出现在 registry → 本地页面拉取 → 烧录成功。
+1. ✅ CLI `--watch`（防抖 5s + 失败退避 3 次 + pending 补传；发布输入签名盯 flash_args/产物/desc/assets）；
+2. ✅ 增量效率（跨 release 按 sha 复用：server `findPartBySha` + CLI `collectShaSet`，二次发布只传变化文件，单测覆盖）；
+3. ✅ Ubuntu 部署 runbook（`DEPLOY.md`：Caddy `flush_interval -1` / nginx `proxy_buffering off`、systemd、token 注入、watch 挂机、SSH 隧道回退、S3 SSE 预留）；
+4. ⬜ 实际部署 + 远端 Windows 配 token 真机挂 watch（**待用户提供服务器 SSH/域名**）。
+**门3**：远端 build → 自动出现在 registry → 本地页面拉取（烧录核对随 D4 暂缓项一并）。
 
 ### S3：订阅
 

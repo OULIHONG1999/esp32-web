@@ -238,6 +238,24 @@ describe('POST /api/publish（成功与幂等补传）', () => {
     expect((await publish(meta, [boot, appPart])).status).toBe(200)
     expect((await publish(meta, [boot, appPart])).status).toBe(200)
   })
+
+  it('跨 release 增量（S2）：新 release 只传变化文件，未传的按 sha 从旧 release 复用', async () => {
+    const rid2 = '20260927-1600-d00d'
+    const appChanged = { file: 'app.bin', data: Uint8Array.from([9, 9, 9, 9]), address: 0x10000 }
+    const meta = makeMeta([boot, appChanged]) // boot sha 与 1300-beef 相同
+    meta.release.id = rid2
+    // 只上传 app；bootloader 不传——服务器应跨 release 按 sha 复用
+    const r = await publish(meta, [appChanged])
+    expect(r.status).toBe(200)
+    const dir = path.join(dataDir, 'projects', 'hello-world', 'ESP32-S3', rid2)
+    expect(fs.readFileSync(path.join(dir, 'bootloader.bin'))).toEqual(Buffer.from([1, 2, 3]))
+    expect(fs.readFileSync(path.join(dir, 'app.bin'))).toEqual(Buffer.from([9, 9, 9, 9]))
+    // registry 两个 release 并存且 latest 指向新的
+    const reg = readRegistry(dataDir)
+    const v = reg.projects['hello-world'].variants['ESP32-S3']
+    expect(v.latest).toBe(rid2)
+    expect(v.releases.length).toBeGreaterThanOrEqual(3)
+  })
 })
 
 // ---------- GET API 与静态托管 ----------

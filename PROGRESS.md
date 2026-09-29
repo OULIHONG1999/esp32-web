@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-27（门2 复测：4 项修复真机验证通过；console 根因定位，编译交用户）
+> 最后更新：2026-09-29（S2：watch+增量+runbook 完成，门3 待服务器）
 
 ## 一句话
 
@@ -14,7 +14,9 @@
 3. `research/esp32-web-flash/REPORT.md` — 选型调研报告（为什么这么做）
 4. `AGENTS.md` — 接手纪律与命令
 5. `IDF-ENV.md` — IDF 环境激活/命令/坑（本机操作指南）
-6. 本文 — 进度与下一步
+6. `EXECUTION-PLAN.md` — 分片路线 + 五道验收门（唯一权威线路）
+7. `DEPLOY.md` — Ubuntu 部署 runbook（S2 交付，门3 依据）
+8. 本文 — 进度与下一步
 
 ## 当前状态（任务面板同步）
 
@@ -31,7 +33,8 @@
 | T9 文档同步 | ✅ done | DESIGN §4.1/§4.2、AGENTS、REQUIREMENTS（F-17/F-18）、本文 |
 | T10 IDF 命令按钮（F-19） | ✅ 代码完成 | dev 中间件 `/api/build`（build/fullclean/abort/轮询）+ 🔨🧹■ 按钮 + 编译成功自动载入；冒烟 exit 0；**待实机点按验证** |
 | **T11 阶段1 文档+实现债** | ✅ done | 门1 已过（2026-09-27 用户确认 5 项拍板） |
-| **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；剩 D4 核对+console 切换闭环 |
+| **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
+| **S2 自动发布+部署** | 🔄 进行中 | ✅ `--watch`（签名防抖+退避重试+失败补传，7 用例）✅ 跨 release 增量（sha 复用双端）✅ `DEPLOY.md` runbook；**剩 T19：服务器部署实测（门3，待用户提供 SSH）** |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -131,9 +134,10 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 下一步
 
-1. **门2 收尾（编译归用户）**：用户完成 hello_world console 切换编译（sdkconfig 已改/备份，KConfig 冲突见问题 19）→ 我 `publish once` 发新 release → 页面载入烧录 → 页面日志核对 **D4**（`boot: SPI Speed: 80MHz / Flash Size: 2MB`）+ 确认 Hello world 实时滚动 → 验收表勾 F-03 等，关门2。
-2. 门2 过后 → S2（--watch + Ubuntu 部署 runbook，门3）。
-3. 等用户拍板：主操作按钮方案（推荐映射 vs 字面三按钮，见会话记录 2026-09-26）。
+1. **门2 收尾**：D4/boot 日志核对与 console 切换——**用户暂缓**（现有编译结果可用、烧录结果先不管），挂起不阻塞；恢复时按问题 19 路径（menuconfig 切 USB Serial/JTAG → 我发布 → 页面核对）。
+2. **T19 部署实测（门3）**：用户提供 Ubuntu SSH（地址/用户/认证、有无域名）→ 按 `DEPLOY.md` §1–5 部署 → 远端 Windows 挂 `--watch` → 本地页面项目库看到新版本（烧录核对随 D4 恢复时一并）。
+3. S3：SSE 订阅（反代 SSE 配置已预写在 DEPLOY.md §9）。
+4. 等用户拍板：主操作按钮方案（见会话记录 2026-09-26）。
 3. S1 最小闭环（T12）：server 骨架 + `publish once` + 前端项目库最小版 → **门2 真机**（含 D4 参数生效 / D5 MD5 核对、F-17/F-18/F-19 同批实机回归）。
 4. S2 起：--watch + Ubuntu 部署 runbook（门3）；S3 SSE（门4）；S4 版本管理（门5）；S5 按需不排期。
 5. 打磨项归属：D4/D5→门2、连接超时→D2、部署方案（纯静态描述已 superseded，见 DESIGN §7 注）→S2 runbook。
@@ -141,6 +145,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（S2 自动发布+部署文档）**：**--watch**（`tools/publish/watch.js`：发布输入签名 flash_args+产物+project_description+assets、轮询防抖 5s、失败退避 3 次+pending 下轮补传、SIGINT 优雅退出；once 主体抽 `once.js` 供复用）+ **跨 release 增量**（server `findPartBySha` 按 sha 从旧 release 复用、CLI `collectShaSet` 差集，双端一致）+ **`DEPLOY.md` runbook**（systemd/Caddy `flush_interval -1`/nginx `proxy_buffering off`/token 注入/watch 挂机/SSH 隧道回退/验证清单/S3 SSE 预留）。98 测试 + build 全绿。剩 T19 服务器实测（门3，待 SSH 信息）。
 - **2026-09-27（门2 复测通过 + console 根因）**：复测 4 项修复全部真机验证——参数注入 80m/2MB（`Flash params set to 21f`，此前错参数时 220）、首把直接成功（ensureSynced 生效，无重试）、D5 三段 `Hash of data verified.`。"复位后无设备日志"定位为 **console=UART0 配置使然**（非 bug，问题 19）：sdkconfig 已备份并改文本切 USB Serial/JTAG，KConfig 重配置失败，编译交用户接管（menuconfig 修正为宜）。F-05 验收表更新 ✅；F-16 改 🔄（待 console 切换闭环）；F-17/F-18/F-19 同轮真机回归通过。
 - **2026-09-27（门2 首轮实测修复）**：真机烧录链路走通（发布→载入→三段烧录→硬复位→D1 重试兜底成功），暴露并修复四问题（记录 16–18 + D5）：① 裸会话未 sync 首把必败——glue `ensureSynced` 四入口；② flashParams 字段名失配（D4 真根因，参数从未生效）——中间件改形状+normalize+单测；③ 重试首因不可见——notice 进日志；④ **D5 实现**——`core/md5.ts` 同步 MD5（node:crypto 对拍 13 长度 + RFC 向量）接入 `calculateMD5Hash`，日志将出现 File md5 / Flash md5 / Hash of data verified.。88 测试 + build 全绿（+@types/node）。烧录后无设备日志输出待查（疑 console=UART0，IDF-ENV §6）。
 - **2026-09-27（S1 最小闭环）**：跨设备下载本体（手动版）落地——`server/`（零依赖 node:http：registry 原子读写+ETag、POST publish 鉴权/白名单/SHA256/原子落位/幂等补传、parts 下载双检、静态 SPA、rebuild 自愈）；`tools/publish` once CLI（flash_args+assets 解析、差集查缺、multipart、--release-id）；前端项目库最小版（latest 列表+载入+flashParams 注入）+ vite proxy；fixtures e2e（发布→registry→下载比对→0 上传幂等→401 拒收）5 用例。**81 测试全绿 + build 通过**。新问题记录 11–15。门2 本地部分过，待真机。

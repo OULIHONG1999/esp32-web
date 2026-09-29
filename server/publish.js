@@ -133,10 +133,16 @@ export async function handlePublish({ dataDir, token, body, headers }) {
     for (const p of meta.release.parts) {
       let data = byFile.get(p.file)
       if (!data) {
+        // ① 同 release 已有（幂等补传）
         const prev = prevParts.get(p.file)
         if (prev && prev.sha256 === p.sha256) {
           const prevFile = path.join(releaseDir(dataDir, pid, variant, rid), p.file)
           if (fs.existsSync(prevFile)) data = fs.readFileSync(prevFile)
+        }
+        // ② 跨 release 按 sha256 复用（增量：新 release 只传变化文件，S2）
+        if (!data) {
+          const src = findPartBySha(dataDir, pid, variant, p.sha256)
+          if (src) data = fs.readFileSync(src)
         }
       }
       if (!data) {
@@ -194,4 +200,17 @@ function prevReleaseParts(dataDir, pid, variant, rid) {
   const reg = readRegistry(dataDir)
   const rel = reg.projects?.[pid]?.variants?.[variant]?.releases?.find((r) => r.id === rid)
   return new Map((rel?.parts ?? []).map((p) => [p.file, p]))
+}
+
+/** 跨 release 按 sha256 找盘上已有文件（S2 增量复用）；找不到返回 null */
+function findPartBySha(dataDir, pid, variant, sha256Hex) {
+  const reg = readRegistry(dataDir)
+  const rels = reg.projects?.[pid]?.variants?.[variant]?.releases ?? []
+  for (const rel of rels) {
+    const p = (rel.parts ?? []).find((x) => x.sha256 === sha256Hex)
+    if (!p) continue
+    const abs = path.join(releaseDir(dataDir, pid, variant, rel.id), p.file)
+    if (fs.existsSync(abs)) return abs
+  }
+  return null
 }
