@@ -36,6 +36,13 @@ const filtered = computed<LogEntry[]>(() => {
   }
 })
 
+/** 监听中但无设备输出的引导提示：出现过「实时日志已自动开启」却从未有过 device 级行 */
+const listeningIdle = computed<boolean>(() => {
+  const opened = props.logs.some((e) => e.text.includes('实时日志已自动开启'))
+  const anyDevice = props.logs.some((e) => e.level === 'device')
+  return opened && !anyDevice
+})
+
 watch(
   () => props.logs.length,
   async () => {
@@ -95,6 +102,10 @@ function doExport(): void {
       </p>
       <p v-if="filtered.length === 0" class="logbox__empty">
         {{ logs.length === 0 ? '（暂无日志）' : '（当前过滤条件下无匹配）' }}
+      </p>
+      <p v-if="listeningIdle" class="logbox__hint">
+        日志流已监听但暂无设备输出——若烧录/复位后仍长时间空白，多半是固件 console 口问题（非网站故障），
+        见 <b>/docs/TROUBLESHOOTING.md §1</b>
       </p>
     </div>
   </section>
