@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-29（S3 SSE 代码完成+服务器部署，门4 双开演示待用户）
+> 最后更新：2026-09-29（**门4 已过**——横幅/●NEW 用户实测；进入 S4 版本管理）
 
 ## 一句话
 
@@ -35,7 +35,7 @@
 | **T11 阶段1 文档+实现债** | ✅ done | 门1 已过（2026-09-27 用户确认 5 项拍板） |
 | **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
 | **S2 自动发布+部署** | ✅ 门3 已过 | watch 自动发布+增量 0 上传+服务器部署+隧道全通；**浏览器确认：localhost:8787 页面载入远端版本、80m/2MB 注入（2026-09-29 用户日志）**；HTTPS/域名解析为尾巴（不阻塞） |
-| **S3 SSE 订阅** | 🔄 代码完成待门4 | server `stream.js` hub（心跳/断开清理）+publish 广播+subscribe 写接口；前端 EventSource+30s 轮询降级+横幅/●NEW/★开关+header 订阅状态点；**服务器已部署 SSE 版**（20:04 重启验证 retry:3000）；108 测试全绿；**剩门4 双开演示（用户）** |
+| **S3 SSE 订阅** | ✅ 门4 已过 | 用户确认横幅+●NEW（20260929-2029）；SSE hub/广播/subscribe/前端横幅/角标/★开关/轮询降级全实测；108 测试全绿；文档挂载公网 /docs/ |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -89,6 +89,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 13. **fixtures 路径归一**：EXECUTION-PLAN 原文写 `test/fixtures/`，项目测试目录实为 `tests/`——已统一为 `tests/fixtures/`（计划已同步修正）。
 14. **发布互斥锁 409 在当前实现下实际不可达**：`handlePublish` 主体为同步代码，node 单线程天然串行——锁保留为将来异步化的防御；e2e 用"连续两次发布均成功"代理验证无死锁。若未来加入异步步骤需重测 409。
 15. **vitest include 扩为 `*.{ts,js}`**：server/ 与 tools/publish 为零依赖纯 JS（不进 vue-tsc），配套测试用 `.js`；前端核心层保持 `.ts`。改 vite.config 的 test.include 时勿回退。
+20. **watch 后台进程网络失败（未定位，backlog）**：`Start-Process` 起的 watch 持续 `fetch failed`（err.cause 为空、无代理 env、服务器无封禁痕迹、探针脚本同样挂起），而**同一 shell 前台 `publish once` 始终成功**（门4 期间 2019/2020/2027/2029 连发成功）。逻辑本身有 7 个单测守护——判断为**运行环境差异**（疑安全软件/进程会话网络策略）。**处置：发布一律用手动 once（可靠）**；watch 恢复自动化待查（S2 收尾/backlog）。
+21. **PowerShell 5.1 编码双坑（已踩，勿再犯）**：① `Get-Content` 不带 `-Encoding` 按 ANSI 读 UTF-8 中文 → `Set-Content` 写回=**双重编码写坏**；② `Set-Content -Encoding UTF8`=**带 BOM**，Node JSON.parse 报 `Unexpected token '﻿'`。**正解**：`[IO.File]::ReadAllText/WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))`，或用 Node/Write 工具写含中文的 JSON。
 
 ### 门2 首轮实测问题记录（2026-09-27，真机烧录暴露）
 
@@ -128,17 +130,17 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | 🔄 | 代码完成+冒烟 exit 0，**待实机点按** |
 | F-20 项目/版本/多芯片变体 | 🔶 | 三层模型+variant 自动归类+latest 载入已实现（S1，e2e 过）；时间线/回滚 UI=S4 |
-| F-21 订阅推送 | 🔶 | **S3 实现完成**：SSE+轮询降级+横幅+NEW 角标+★开关（双写 localStorage/服务端）+心跳；单测覆盖，**待门4 双开演示** |
+| F-21 订阅推送 | ✅ | 门4 用户实测（横幅+查看+●NEW）：SSE+30s 轮询降级+★开关双写+心跳；nginx 经 IP HTTPS 实测无缓冲 |
 | F-22 任意烧录文件管理 | 🔶 | parts 统一建模+assets 随发布+SHA256 完整（S1）；页面补充上传=S5 |
 | F-23 发布 CLI 与自动触发 | ✅ | `once`+`--watch`+Bearer token+增量（跨 release 0 上传实测）+flash_args/assets 识别——门3 全链实测（2026-09-29） |
 | F-24 版本说明与保留策略 | ⬜ | S4（T15/门5） |
 
 ## 下一步
 
-1. **门4 双开演示（用户）**：两个 `http://localhost:8787` 标签页 → A 页 header `● 订阅中` → watch 触发发布（touch 产物或等自然触发）→ **A 页顶部横幅**"📢 hello-world / ESP32-S3 已发布"→「查看」→ 项目库 ●NEW → 载入清角标。过门4 → S4。
-2. **HTTPS 尾巴（非阻塞）**：certbot 等 dpkg 锁释放后签 `fw.panel.example.com`（需 DNS 加 A 记录 `fw → firmware.example.com`）；长期免隧道访问。
-3. **门2 挂起项（用户暂缓）**：D4/boot 日志核对 + console 切换（menuconfig）——恢复时一并做。
-4. S4：版本管理（promote/说明/retention/项目库时间线/F-13 比对）→ 门5。
+1. **S4 版本管理（T15）**：`--promote` 晋升发布版（手写 note）+ 前端版本时间线/晋升/回滚 UI + retention 清理（确认语义）+ F-13 芯片比对 + rebuild 实测 → **门5：晋升/回滚/清理各走一遍**。S4 过后 v1.5 核心关账（S5 可选不排期）。
+2. **watch 后台网络问题（问题 20，backlog）**：发布暂用手动 once；根因定位（疑进程会话网络策略/安全软件）。
+3. **HTTPS 尾巴**：文档已挂 `https://firmware.example.com/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS）；后续可加使用说明页。
+4. **门2 挂起项（用户暂缓）**：D4/boot 日志核对 + console 切换（menuconfig）——恢复时一并做。
 5. 等用户拍板：主操作按钮方案（见会话记录 2026-09-26）。
 3. S1 最小闭环（T12）：server 骨架 + `publish once` + 前端项目库最小版 → **门2 真机**（含 D4 参数生效 / D5 MD5 核对、F-17/F-18/F-19 同批实机回归）。
 4. S2 起：--watch + Ubuntu 部署 runbook（门3）；S3 SSE（门4）；S4 版本管理（门5）；S5 按需不排期。
@@ -147,7 +149,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
-- **2026-09-29（S3 SSE 订阅）**：server `stream.js`（SSE hub：retry 握手/15s 心跳/断开清理/closeAll 清 interval）+ `POST …/subscribe`（`upsertSubscribed` 持久化）+ publish `onPublished` 广播；前端 `subscribeRegistry`（EventSource+断线 30s 轮询降级、`snapshotLatest/diffLatest` 纯函数）+ App 横幅/`● 订阅中`状态点 + FirmwarePanel `●NEW` 角标/★开关（localStorage+服务端双写）/载入 emit 清角标/事件触发自动刷新。服务器重打包部署 SSE 版（**教训：unzip 成功≠进程重启——核对 `ExecMainStartTimestamp`**）。108 测试 + build 全绿。剩门4 双开演示。
+- **2026-09-29（门4 过）**：用户在 `https://firmware.example.com` 实测确认横幅与 ●NEW（发布 20260929-2029 经 SSE 即时推送）——**"远端发布、本地即知"订阅形态达成**，F-21 关。同轮完善：公网直连部署（自签 IP 证书、Node 侧 `NODE_TLS_REJECT_UNAUTHORIZED=0`、SSE 经 nginx 无缓冲实测）、server/dist MD5 全 SYNC 校验、文档挂载 `/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS，200）。问题记录 20（watch 后台 fetch failed，前台 once 可靠）、21（PS5.1 编码双坑）。剩 S4 → 门5。
+- **2026-09-29（S3 SSE 订阅）**：server `stream.js`（SSE hub：retry 握手/15s 心跳/断开清理/closeAll 清 interval）+ `POST …/subscribe`（`upsertSubscribed` 持久化）+ publish `onPublished` 广播；前端 `subscribeRegistry`（EventSource+断线 30s 轮询降级、`snapshotLatest/diffLatest` 纯函数）+ App 横幅/`● 订阅中`状态点 + FirmwarePanel `●NEW` 角标/★开关（localStorage+服务端双写）/载入 emit 清角标/事件触发自动刷新。服务器重打包部署 SSE 版（**教训：unzip 成功≠进程重启——核对 `ExecMainStartTimestamp`**）。108 测试 + build 全绿。
 - **2026-09-29（门3 过）**：浏览器确认 localhost:8787 页面载入远端版本（用户日志：连接远端前端成功、载入后 `烧录参数 mode=dio freq=80m size=2MB` 注入）——**"远端发布、本地即知"核心闭环达成**。门2/门3 状态落账（D4/console 挂起注明），F-23 转 ✅。下一步 S3 SSE。
 - **2026-09-29（门3 部署实测）**：服务器上线——Ubuntu 22.04（firmware.example.com，panel.example.com）装 Node 24.21、部署包上传（本机 ed25519 免密，passwd 重置后密码认证仍失败遂改密钥）、systemd `firmware-server` active、`/api/registry` 返回 `{"projects":{}}`。**SSH 隧道 `localhost:8787` 全通**（nginx+certbot 因 unattended-upgr 占 dpkg 锁暂缓——DEPLOY §5 方案 B）。**watch 实测**：本机 `--watch` → 隧道 → 远端 registry 出现 `hello-world/ESP32-S3/20260929-1949-fff989`（80m/2MB）；touch 产物防抖后新 release **`上传=0（服务器已有，秒回）`**——跨 release 增量实证。
 

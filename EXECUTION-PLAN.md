@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：**已批准；门1 ✅ 门2 ✅（D4/console 用户暂缓挂起）门3 ✅（2026-09-29 远端发布→本地页面拉取实测）——进行 S3** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准；门1 ✅ 门2 ✅（D4 挂起）门3 ✅ 门4 ✅（2026-09-29 横幅/●NEW 实测）——进行 S4 版本管理（门5 最后一道）** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）
@@ -118,9 +118,9 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 4. ✅ watch 真机：本机挂 watch → 远端 registry 自动出现 → **本地浏览器 localhost:8787 页面载入 80m/2MB 注入（用户日志确认）**。
 **门3**：✅ 过（烧录核对随 D4 暂缓项一并）。尾巴：HTTPS/域名 DNS 解析（非阻塞）。
 
-### S3：订阅——🔄 代码完成（2026-09-29），待门4 演示
+### S3：订阅——✅ 已过门4（2026-09-29）
 
-SSE 端点（`server/stream.js`：心跳、断开清理、X-Accel-Buffering no）+ publish 成功广播 + subscribe 写接口 → 前端订阅状态（EventSource + localStorage/服务端双写 ★）→ 横幅/●NEW 角标/header 状态点 → 30s 轮询降级（快照 diff 纯函数）→ 手动载入清角标。服务器已部署 SSE 版（retry:3000 握手验证）。**门4**：双开页面演示"远端发布、本地即知"（待用户）。
+SSE 端点（`server/stream.js`：心跳、断开清理）+ publish 广播 + subscribe 写接口 → 前端订阅（EventSource + 轮询降级 + localStorage/服务端双写 ★）→ 横幅/●NEW 角标/header 状态点 → 手动载入清角标。部署走公网 `https://firmware.example.com`（自签 IP 证书 + `NODE_TLS_REJECT_UNAUTHORIZED=0`；SSE 经 nginx 实测无缓冲；文档挂载 `/docs/`）。**门4**：✅ 用户实测横幅+●NEW。遗留：watch 后台 fetch failed（问题 20，前台 once 可靠替代）。
 
 ### S4：版本管理
 
