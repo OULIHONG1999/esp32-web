@@ -46,11 +46,12 @@ nginx 配置：`/www/server/panel/vhost/nginx/firmware-server.conf`（备份 `.c
 
 | 项 | 值/位置 |
 |---|---|
-| 当前值 | `[REDACTED 已轮换作废 2026-09-29]` |
-| 服务端存储 | `/etc/firmware-server.env`（`FIRMWARE_PUBLISH_TOKEN=…`，chmod 600） |
-| 页面配置 | 右上角 🔑 按钮（localStorage `fw.token`，仅本机浏览器） |
-| 发布端写法 | 环境变量 `${FIRMWARE_PUBLISH_TOKEN}` 引用 **或** config 明文直写（勿提交公开仓库） |
-| 轮换 | 改 env 文件 → `systemctl restart firmware-server` → 页面 🔑 更新 → 各发布端同步 |
+| 主 token（master） | `[REDACTED 已轮换作废 2026-09-29]`（env `/etc/firmware-server.env`，永不失效，唯一可生成/撤销工作 token 的凭证） |
+| 工作 token（`wk_` 前缀） | 页面 🔑「生成」产生，持久化 `server-data/tokens.json`——**交给 AI/发布设备用**，可随时撤销 |
+| 接口 | `POST/GET/DELETE /api/token`（**仅主 token** 鉴权）；写业务接口接受主或任一有效工作 token |
+| 页面配置 | 右上角 🔑：生成（输主 token 换 wk_）或手动设置本机（localStorage `fw.token`） |
+| 轮换 | 主 token：改 env → restart；工作 token：页面/接口撤销即可，无需重启 |
+| 撤销示例 | `curl -X DELETE https://IP/api/token -H "Authorization: Bearer <主token>" -d '{"token":"wk_..."}'` |
 
 ## 5. 数据与运维
 

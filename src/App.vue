@@ -8,10 +8,12 @@ import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
 import { useIdfBuild } from './composables/useIdfBuild'
 import {
+  generateWorkToken,
   getStoredToken,
   isSubscribed,
   setStoredToken,
   subscribeRegistry,
+  UnauthorizedError,
   type PublishEvent,
   type StreamStatus,
 } from './api/registry'
@@ -105,15 +107,50 @@ onUnmounted(() => {
   streamStatus.value = 'off'
 })
 
-// ---- 发布 token 设置（显式入口，不再只靠 401 时才弹窗）----
+// ---- 发布 token：生成工作 token（主 token 换）或手动设置本机 ----
 const hasToken = ref(!!getStoredToken())
 
-function configureToken(): void {
+async function configureToken(): Promise<void> {
   const current = getStoredToken()
-  const tip = current
-    ? `当前已配置（尾号 ${current.slice(-4)}）。\n粘贴新 token 替换，留空取消：`
-    : '首次设置：粘贴服务器的 FIRMWARE_PUBLISH_TOKEN：'
-  const input = window.prompt(tip, '')
+  const wantGenerate = window.confirm(
+    (current ? `本机已配置 token（尾号 ${current.slice(-4)}）。\n` : '') +
+      '【确定】= 生成新的工作 token（用于交给 AI/其它设备发布，需输入主 token）\n' +
+      '【取消】= 手动设置本机 token',
+  )
+
+  if (wantGenerate) {
+    const master = window.prompt('输入【主 token】（服务器 FIRMWARE_PUBLISH_TOKEN）以生成：')
+    if (!master || !master.trim()) return
+    try {
+      const entry = await generateWorkToken(master.trim(), '页面生成')
+      const swap = !getStoredToken()
+      if (swap) {
+        // 本机还没有 token → 顺手设为新工作 token，页面操作立即可用
+        setStoredToken(entry.token)
+        hasToken.value = true
+      }
+      window.alert(
+        `✅ 新工作 token 已生成${swap ? '（已设为本机 token）' : '（本机仍用原 token）'}：\n\n` +
+          `${entry.token}\n\n` +
+          `用途：复制给 AI 或其它发布设备做 Authorization: Bearer\n` +
+          `备注：${entry.note || '—'}\n` +
+          `撤销：用主 token 调 DELETE /api/token`,
+      )
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        window.alert('❌ 主 token 不正确——只有服务器的 FIRMWARE_PUBLISH_TOKEN 能生成。')
+      } else {
+        window.alert(`生成失败：${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    return
+  }
+
+  // 手动设置本机
+  const input = window.prompt(
+    current ? `当前尾号 ${current.slice(-4)}。\n粘贴新 token 替换，留空取消：` : '粘贴 token（主或工作均可）：',
+    '',
+  )
   if (input === null) return
   const t = input.trim()
   if (!t) return
@@ -211,7 +248,6 @@ function configureToken(): void {
         </div>
 
         <FirmwarePanel
-          v-if="connected"
           :disabled="!canOperate"
           :percent="percent"
           :chip-name="chip?.name ?? null"

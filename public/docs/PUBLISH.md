@@ -37,10 +37,12 @@ node tools\publish\index.js once --config publish.config.json
 }
 ```
 
-- **token 获取（三选一）**：
-  1. 服务器上查看：`cat /etc/firmware-server.env`（root，`FIRMWARE_PUBLISH_TOKEN=` 后面的值）
-  2. 页面右上角 🔑 按钮可查看**是否已配置**（尾号提示），点击可设置/更换（存本机浏览器，不上传）
-  3. 服务运维者直接告知（本项目单用户自用场景）
+- **token 获取（四选一）**：
+  1. **页面生成工作 token（推荐，最方便）**：网站右上角 🔑 →「生成」→ 输入主 token → 得到 `wk_` 开头的工作 token——**复制交给 AI/其它发布设备**；可随时用主 token 撤销
+  2. 服务器上查看主 token：`cat /etc/firmware-server.env`（root，`FIRMWARE_PUBLISH_TOKEN=` 后面的值）
+  3. 页面 🔑 手动设置本机 token（存浏览器 localStorage，不上传）
+  4. 服务运维者直接告知（本项目单用户自用场景）
+- **主 token vs 工作 token**：主 token = env 值（永不失效，唯一能生成/撤销的凭证）；工作 token = `wk_` 前缀（页面生成，持久化在服务器 `server-data/tokens.json`，可撤销）——两者对写接口等效
 - **token 写法（二选一）**：
   - 环境变量引用（推荐进 git 的配置）：`"token": "${FIRMWARE_PUBLISH_TOKEN}"`，运行前 `$env:FIRMWARE_PUBLISH_TOKEN="<值>"`
   - **明文直写**（跨网设备/一次性任务最省事）：`"token": "<64位hex>"`——注意**别把带明文 token 的 config 提交到公开仓库**

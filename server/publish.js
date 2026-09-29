@@ -5,6 +5,7 @@ import { LIMITS } from './config.js'
 import { parseMultipart } from './multipart.js'
 import { readRegistry, upsertRelease, writeRegistryAtomic } from './registry.js'
 import { applyRetention } from './releases.js'
+import { isValidToken } from './tokens.js'
 
 /** 进程内发布互斥锁（单进程服务；并发发布 409） */
 let publishing = false
@@ -88,9 +89,9 @@ export async function handlePublish({ dataDir, token, body, headers, onPublished
   }
   publishing = true
   try {
-    // ---- 鉴权（写操作 Bearer token；读取公开）----
-    const auth = headers.authorization ?? ''
-    if (auth !== `Bearer ${token}`) {
+    // ---- 鉴权（写操作：主 token 或动态工作 token；读取公开）----
+    const auth = (headers.authorization ?? '').replace(/^Bearer /, '')
+    if (!isValidToken(dataDir, auth, token)) {
       return { status: 401, json: { error: 'unauthorized' } }
     }
     if (body.length > LIMITS.maxBodyBytes) {

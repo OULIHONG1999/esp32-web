@@ -258,13 +258,16 @@ async function toggleSubscribe(): Promise<void> {
     <p class="panel__hint">
       多选 bin 后地址按文件名自动填（bootloader / partition-table / app），可手改。
       当前芯片：<code>{{ chipName ?? '未连接' }}</code>
+      <template v-if="!chipName">
+        —— <b>未连接也可浏览项目库/版本时间线并载入</b>，仅「烧录」需要先连接设备。
+      </template>
     </p>
 
     <div class="loadrow">
       <button
         class="btn btn--load"
         type="button"
-        :disabled="disabled || buildRunning"
+        :disabled="buildRunning"
         :title="buildRunning ? '编译进行中，完成后会自动载入' : '从 IDF build 目录自动载入 flash_args 中的全部固件段与烧录参数'"
         @click="loadLocalBuild"
       >
@@ -311,8 +314,8 @@ async function toggleSubscribe(): Promise<void> {
       <button
         class="btn btn--load"
         type="button"
-        :disabled="disabled || selectedIdx < 0"
-        title="下载该版本全部段并填入下方表格（含烧录参数）"
+        :disabled="selectedIdx < 0 || buildRunning"
+        title="下载该版本全部段并填入下方表格（含烧录参数）——无需连接设备"
         @click="loadRegistryRelease"
       >
         载入此版本
@@ -320,13 +323,14 @@ async function toggleSubscribe(): Promise<void> {
     </div>
     <p v-if="registryMsg" class="loadmsg">{{ registryMsg }}</p>
 
-    <!-- S4 版本时间线（F-20 回滚 / F-24 晋升与 retention / F-13 比对共用载入入口） -->
+    <!-- S4 版本时间线（F-20 回滚 / F-24 晋升与 retention / F-13 比对共用载入入口）
+         全部为数据操作，未连接设备同样可用 -->
     <VersionTimeline
       v-if="selectedIdx >= 0 && registryOptions[selectedIdx]"
       :option="registryOptions[selectedIdx]"
       :registry="rawRegistry"
       :chip-name="chipName"
-      :disabled="disabled"
+      :disabled="buildRunning"
       @load="(rel) => loadRelease(registryOptions[selectedIdx], rel)"
       @changed="refreshRegistry"
     />

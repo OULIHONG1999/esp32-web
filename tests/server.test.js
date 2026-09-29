@@ -519,3 +519,62 @@ describe('S4 promote / setLatest / retention', () => {
     expect(bad.status).toBe(400)
   })
 })
+
+// ---------- 动态工作 token（页面手动生成 → 交给发布端/AI） ----------
+
+describe('POST/GET/DELETE /api/token（仅主 token 可管理）', () => {
+  const masterH = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
+
+  it('非主 token / 无 token → 401', async () => {
+    expect((await fetch(`${base}/api/token`)).status).toBe(401)
+    const wrong = await fetch(`${base}/api/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wk_wrong' },
+      body: '{}',
+    })
+    expect(wrong.status).toBe(401)
+  })
+
+  it('主 token 生成 → wk_ 前缀 → 可用于写接口（promote）→ 列表可见 → 撤销后失效', async () => {
+    const created = await fetch(`${base}/api/token`, {
+      method: 'POST',
+      headers: masterH,
+      body: JSON.stringify({ note: '门5 工作token' }),
+    })
+    expect(created.status).toBe(200)
+    const entry = (await created.json()).token
+    expect(entry.token).toMatch(/^wk_[0-9a-f]{48}$/)
+    expect(entry.note).toBe('门5 工作token')
+
+    // 工作 token 应能通过写接口鉴权（先撤销一个已晋升目标：用未晋升的 ret1）
+    const useWk = await fetch(
+      `${base}/api/registry/projects/hello-world/variants/ESP32-S3/releases/20260927-1900-ret1/promote`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${entry.token}` },
+        body: JSON.stringify({ note: '工作 token 晋升演示' }),
+      },
+    )
+    expect(useWk.status).toBe(200)
+
+    const list = await (await fetch(`${base}/api/token`, { headers: masterH })).json()
+    expect(list.tokens.some((t) => t.token === entry.token)).toBe(true)
+
+    const del = await fetch(`${base}/api/token`, {
+      method: 'DELETE',
+      headers: masterH,
+      body: JSON.stringify({ token: entry.token }),
+    })
+    expect(del.status).toBe(200)
+
+    const afterRevoke = await fetch(
+      `${base}/api/registry/projects/hello-world/variants/ESP32-S3/latest`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${entry.token}` },
+        body: JSON.stringify({ releaseId: '20260927-1900-ret1' }),
+      },
+    )
+    expect(afterRevoke.status).toBe(401)
+  })
+})

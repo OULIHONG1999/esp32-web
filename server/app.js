@@ -5,6 +5,7 @@ import { handlePublish } from './publish.js'
 import { applyRetention, previewRetention, promoteRelease, setLatest, setRetention } from './releases.js'
 import { readRegistry, registryPath, upsertSubscribed, writeRegistryAtomic } from './registry.js'
 import { createSseHub } from './stream.js'
+import { createToken, isMasterToken, isValidToken, listTokens, revokeToken } from './tokens.js'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -110,8 +111,12 @@ function serveStatic(distDir, urlPath, res) {
 /** 创建 http 请求处理器（deps 注入便于单测） */
 export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
   const hub = createSseHub({ heartbeatMs: sseHeartbeatMs })
-  /** 写操作鉴权（FIRMWARE-REGISTRY §8：发布/晋升/回滚/retention 属写） */
-  const authOk = (req) => req.headers.authorization === `Bearer ${token}`
+  /** 写操作鉴权：主 token 或任一动态工作 token（FIRMWARE-REGISTRY §8 扩展） */
+  const authOk = (req) =>
+    isValidToken(dataDir, (req.headers.authorization ?? '').replace(/^Bearer /, ''), token)
+  /** 仅主 token：生成/撤销工作 token */
+  const masterOk = (req) =>
+    isMasterToken((req.headers.authorization ?? '').replace(/^Bearer /, ''), token)
   return Object.assign(
     async function app(req, res) {
       const url = new URL(req.url ?? '/', 'http://localhost')
@@ -139,6 +144,40 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           if (!reg.projects?.[subM[1]]) return send(res, 404, { error: 'project not found' })
           writeRegistryAtomic(dataDir, upsertSubscribed(reg, subM[1], subscribed))
           return send(res, 200, { ok: true, projectId: subM[1], subscribed })
+        }
+
+        // ---- Token 管理（生成/列表/撤销；仅主 token）----
+        if (p === '/api/token') {
+          if (req.method === 'GET') {
+            if (!masterOk(req)) return send(res, 401, { error: 'master token required' })
+            return send(res, 200, { tokens: listTokens(dataDir) })
+          }
+          if (req.method === 'POST') {
+            if (!masterOk(req)) return send(res, 401, { error: 'master token required' })
+            const body = await collectBody(req, 4 * 1024)
+            let note
+            try {
+              note = JSON.parse(body.toString('utf8')).note
+            } catch {
+              note = undefined
+            }
+            const entry = createToken(dataDir, note)
+            return send(res, 200, { ok: true, token: entry })
+          }
+          if (req.method === 'DELETE') {
+            if (!masterOk(req)) return send(res, 401, { error: 'master token required' })
+            const body = await collectBody(req, 4 * 1024)
+            let revoke
+            try {
+              revoke = JSON.parse(body.toString('utf8')).token
+            } catch {
+              revoke = null
+            }
+            if (typeof revoke !== 'string') return send(res, 400, { error: 'token required' })
+            const removed = revokeToken(dataDir, revoke)
+            return send(res, removed ? 200 : 404, { ok: removed })
+          }
+          return send(res, 405, { error: 'method not allowed' })
         }
 
         // ---- S4 版本管理（F-20 回滚 / F-24 晋升与 retention）----

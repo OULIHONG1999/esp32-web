@@ -10,6 +10,8 @@
 - 版本列表(SSE 实时推送): GET /api/registry/stream
 - 固件段下载: GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/parts/{file}
 - 发布固件: POST /api/publish (multipart/form-data，需 Bearer Token；字段 meta=JSON 元数据，file=固件段)
+- 生成工作 token: POST /api/token (仅主 token；body {"note":"用途"}，返回 wk_ 前缀 token)
+- 管理工作 token: GET /api/token (列表)、DELETE /api/token (body {"token":"wk_..."} 撤销)——均需主 token
 - 晋升发布版: POST /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/promote (需 Token，body: {"note":"说明"})
 - 回滚(切换 latest): POST /api/registry/projects/{projectId}/variants/{variant}/latest (需 Token，body: {"releaseId":"..."})
 - 订阅状态: POST /api/registry/projects/{projectId}/subscribe (body: {"subscribed": true|false})
@@ -25,10 +27,11 @@
 - type/subType 由发布端解析 partition-table.bin 按地址匹配得出（如 app/factory、data/littlefs）
 
 ## 认证
-- 发布/晋升/回滚/保留策略等写接口需要 Authorization: Bearer {token}
-- token 配置在服务端环境变量 FIRMWARE_PUBLISH_TOKEN（运维者提供给发布方）
+- 写接口(发布/晋升/回滚/保留策略)需要 Authorization: Bearer {token}
+- 双层 token：主 token(服务端 FIRMWARE_PUBLISH_TOKEN) + 工作 token(wk_ 前缀，页面 🔑 生成后分发，可撤销)
+- 主 token 可调 POST /api/token 生成工作 token 交给 AI/发布设备
 - 读接口(registry/SSE/下载/预览) 公开无需鉴权
-- 页面可通过右上角 🔑 按钮设置本机 token（localStorage，不上传）
+- 页面可通过右上角 🔑 按钮生成工作 token 或设置本机 token（localStorage，不上传）
 
 ## 发布方式（二选一）
 - 方式A 裸 HTTP（无需任何代码库）: POST /api/publish multipart，字段 meta=JSON 元数据 + file=固件段；完整 meta 样例与 curl 示例见 /docs/PUBLISH.md §2.1

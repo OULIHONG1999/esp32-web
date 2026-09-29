@@ -375,3 +375,35 @@ export function collectReleases(
     (a, b) => (a.createdAt < b.createdAt ? 1 : -1),
   )
 }
+
+// ---------- Token 管理（主 token 生成工作 token，交给发布端/AI） ----------
+
+export interface WorkTokenEntry {
+  token: string
+  note: string
+  createdAt: string
+}
+
+/** 用主 token 生成工作 token（服务端持久化；非主 token → 401） */
+export async function generateWorkToken(
+  masterToken: string,
+  note?: string,
+): Promise<WorkTokenEntry> {
+  const r = await fetch('/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${masterToken}`,
+    },
+    body: JSON.stringify({ note: note ?? '页面生成' }),
+  })
+  if (r.status === 401) throw new UnauthorizedError()
+  const json = (await r.json().catch(() => ({}))) as {
+    token?: WorkTokenEntry
+    error?: string
+  }
+  if (!r.ok || !json.token) {
+    throw new Error(`HTTP ${r.status}: ${json.error ?? ''}`)
+  }
+  return json.token
+}
