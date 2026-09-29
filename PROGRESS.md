@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-29（S2：watch+增量+runbook 完成，门3 待服务器）
+> 最后更新：2026-09-29（门3：服务器已部署、watch 自动发布到远端实测通，剩浏览器页面确认）
 
 ## 一句话
 
@@ -34,7 +34,7 @@
 | T10 IDF 命令按钮（F-19） | ✅ 代码完成 | dev 中间件 `/api/build`（build/fullclean/abort/轮询）+ 🔨🧹■ 按钮 + 编译成功自动载入；冒烟 exit 0；**待实机点按验证** |
 | **T11 阶段1 文档+实现债** | ✅ done | 门1 已过（2026-09-27 用户确认 5 项拍板） |
 | **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
-| **S2 自动发布+部署** | 🔄 进行中 | ✅ `--watch`（签名防抖+退避重试+失败补传，7 用例）✅ 跨 release 增量（sha 复用双端）✅ `DEPLOY.md` runbook；**剩 T19：服务器部署实测（门3，待用户提供 SSH）** |
+| **S2 自动发布+部署** | 🔄 门3 进行中 | ✅ --watch ✅ 跨 release 增量（实测"上传=0 秒回"）✅ DEPLOY.md ✅ **服务器已部署**（腾讯云 firmware.example.com：Node 24.21 + systemd active + 本机免密 + SSH 隧道 localhost:8787 通）✅ **watch 实测自动发布到远端 registry**；剩：浏览器页面拉取确认（第⑥步）+ HTTPS/域名（dpkg 锁占用暂缓，隧道已覆盖门3） |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -145,6 +145,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（门3 部署实测）**：服务器上线——Ubuntu 22.04（firmware.example.com，panel.example.com）装 Node 24.21、部署包上传（本机 ed25519 免密，passwd 重置后密码认证仍失败遂改密钥）、systemd `firmware-server` active、`/api/registry` 返回 `{"projects":{}}`。**SSH 隧道 `localhost:8787` 全通**（nginx+certbot 因 unattended-upgr 占 dpkg 锁暂缓，HTTPS 不阻塞门3——DEPLOY §5 方案 B）。**watch 实测**：本机 `--watch` → 隧道 → 远端 registry 出现 `hello-world/ESP32-S3/20260929-1949-fff989`（80m/2MB）；touch 产物防抖后新 release **`上传=0（服务器已有，秒回）`**——跨 release 增量实证。剩第⑥步浏览器页面拉取确认。
 - **2026-09-29（S2 自动发布+部署文档）**：**--watch**（`tools/publish/watch.js`：发布输入签名 flash_args+产物+project_description+assets、轮询防抖 5s、失败退避 3 次+pending 下轮补传、SIGINT 优雅退出；once 主体抽 `once.js` 供复用）+ **跨 release 增量**（server `findPartBySha` 按 sha 从旧 release 复用、CLI `collectShaSet` 差集，双端一致）+ **`DEPLOY.md` runbook**（systemd/Caddy `flush_interval -1`/nginx `proxy_buffering off`/token 注入/watch 挂机/SSH 隧道回退/验证清单/S3 SSE 预留）。98 测试 + build 全绿。剩 T19 服务器实测（门3，待 SSH 信息）。
 - **2026-09-27（门2 复测通过 + console 根因）**：复测 4 项修复全部真机验证——参数注入 80m/2MB（`Flash params set to 21f`，此前错参数时 220）、首把直接成功（ensureSynced 生效，无重试）、D5 三段 `Hash of data verified.`。"复位后无设备日志"定位为 **console=UART0 配置使然**（非 bug，问题 19）：sdkconfig 已备份并改文本切 USB Serial/JTAG，KConfig 重配置失败，编译交用户接管（menuconfig 修正为宜）。F-05 验收表更新 ✅；F-16 改 🔄（待 console 切换闭环）；F-17/F-18/F-19 同轮真机回归通过。
 - **2026-09-27（门2 首轮实测修复）**：真机烧录链路走通（发布→载入→三段烧录→硬复位→D1 重试兜底成功），暴露并修复四问题（记录 16–18 + D5）：① 裸会话未 sync 首把必败——glue `ensureSynced` 四入口；② flashParams 字段名失配（D4 真根因，参数从未生效）——中间件改形状+normalize+单测；③ 重试首因不可见——notice 进日志；④ **D5 实现**——`core/md5.ts` 同步 MD5（node:crypto 对拍 13 长度 + RFC 向量）接入 `calculateMD5Hash`，日志将出现 File md5 / Flash md5 / Hash of data verified.。88 测试 + build 全绿（+@types/node）。烧录后无设备日志输出待查（疑 console=UART0，IDF-ENV §6）。
