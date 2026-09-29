@@ -122,9 +122,9 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 
 SSE 端点（`server/stream.js`：心跳、断开清理）+ publish 广播 + subscribe 写接口 → 前端订阅（EventSource + 轮询降级 + localStorage/服务端双写 ★）→ 横幅/●NEW 角标/header 状态点 → 手动载入清角标。部署走公网 `https://firmware.example.com`（自签 IP 证书 + `NODE_TLS_REJECT_UNAUTHORIZED=0`；SSE 经 nginx 实测无缓冲；文档挂载 `/docs/`）。**门4**：✅ 用户实测横幅+●NEW。遗留：watch 后台 fetch failed（问题 20，前台 once 可靠替代）。
 
-### S4：版本管理
+### S4：版本管理——🔄 代码完成（2026-09-29），待部署+rebuild 实测 → 门5
 
-`--promote`（手写 note）→ 前端版本时间线/晋升/回滚 → retention 清理+确认语义 → F-13 芯片比对 → rebuild 工具实测。**门5**：晋升/回滚/清理各走一遍。
+`--promote <rid> --note`（CLI+页面，Bearer 鉴权）→ 前端版本时间线/晋升/回滚（setLatest）→ retention 清理+确认语义（preview 弹层→POST 策略→下次 publish 执行，releases 永不删）→ F-13 芯片比对（载入 confirm 不阻断）。**插入需求**：parts `type/subType` 分区类型（CLI 解析 partition-table + assets 声明 + 前端分区列；server 零改动透传，向后兼容缺省）。115 测试全绿。**门5**：晋升/回滚/清理各走一遍 + rebuild 实测。
 
 ### S5：按需增强
 AI notes（endpoint 配置化）、页面上传、多芯片 UI。

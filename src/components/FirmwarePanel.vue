@@ -8,14 +8,20 @@ import {
   flattenLatest,
   setSubscribed,
   toFlashParams,
+  type Registry,
   type RegistryOption,
+  type RegistryRelease,
 } from '../api/registry'
+import VersionTimeline from './VersionTimeline.vue'
 
 interface Row {
   id: number
   label: string
   address: number
   file: File | null
+  /** F-22 分区类型元数据（旧数据/手动添加缺省 undefined） */
+  type?: string
+  subType?: string
 }
 
 const rows = reactive<Row[]>([])
@@ -145,6 +151,7 @@ function reset(): void {
 
 // ---- 项目库（v1.5 F-20 最小版：拉 registry、列 latest、载入进同一表格）----
 const registryOptions = ref<RegistryOption[]>([])
+const rawRegistry = ref<Registry | null>(null)
 const registryMsg = ref<string | null>(null)
 const registryLoading = ref(false)
 const selectedIdx = ref(-1)
@@ -154,6 +161,7 @@ async function refreshRegistry(): Promise<void> {
   registryMsg.value = null
   try {
     const reg = await fetchRegistry()
+    rawRegistry.value = reg
     registryOptions.value = flattenLatest(reg)
     registryMsg.value =
       registryOptions.value.length === 0 ? '服务器暂无已发布项目' : null
@@ -170,20 +178,50 @@ async function refreshRegistry(): Promise<void> {
 async function loadRegistryRelease(): Promise<void> {
   const opt = registryOptions.value[selectedIdx.value]
   if (!opt) return
+  await loadRelease(opt, opt.release)
+}
+
+/**
+ * 载入任意版本到烧录表格（项目库 latest 与时间线共用入口）。
+ * F-13：实测芯片与固件 chipFamily 不符 → 警告（不阻断）。
+ */
+async function loadRelease(
+  opt: Pick<RegistryOption, 'projectId' | 'projectName' | 'variant'>,
+  rel: RegistryRelease,
+): Promise<void> {
   registryMsg.value = null
+  // F-13 芯片比对（不阻断）
+  if (
+    props.chipName &&
+    rel.chipFamily &&
+    rel.chipFamily !== props.chipName &&
+    !window.confirm(
+      `⚠ 芯片不匹配：固件为 ${rel.chipFamily}，实测设备为 ${props.chipName}。\n仍要载入吗？（烧错芯片固件可能无法启动）`,
+    )
+  ) {
+    registryMsg.value = `已取消载入（chipFamily 不符：${rel.chipFamily} ≠ ${props.chipName}）`
+    return
+  }
   try {
     const loaded: Row[] = []
-    for (const p of opt.release.parts) {
-      const bytes = await fetchReleasePart(opt.projectId, opt.variant, opt.release.id, p.file)
+    for (const p of rel.parts) {
+      const bytes = await fetchReleasePart(opt.projectId, opt.variant, rel.id, p.file)
       const file = new File([bytes as BlobPart], p.file, {
         type: 'application/octet-stream',
       })
-      loaded.push({ id: nextId++, label: p.label, address: p.address, file })
+      loaded.push({
+        id: nextId++,
+        label: p.label,
+        address: p.address,
+        file,
+        type: (p as { type?: string }).type,
+        subType: (p as { subType?: string }).subType,
+      })
     }
     rows.splice(0, rows.length, ...loaded)
-    emit('params', toFlashParams(opt.release.flashParams))
+    emit('params', toFlashParams(rel.flashParams))
     emit('loaded', `${opt.projectId}/${opt.variant}`)
-    registryMsg.value = `已载入 ${opt.projectName}/${opt.variant} ${opt.release.id}（${loaded.length} 段，烧录参数已注入）`
+    registryMsg.value = `已载入 ${opt.projectName}/${opt.variant} ${rel.id}（${loaded.length} 段，烧录参数已注入）`
   } catch (e) {
     registryMsg.value = `载入失败：${e instanceof Error ? e.message : String(e)}`
   }
@@ -282,14 +320,31 @@ async function toggleSubscribe(): Promise<void> {
     </div>
     <p v-if="registryMsg" class="loadmsg">{{ registryMsg }}</p>
 
+    <!-- S4 版本时间线（F-20 回滚 / F-24 晋升与 retention / F-13 比对共用载入入口） -->
+    <VersionTimeline
+      v-if="selectedIdx >= 0 && registryOptions[selectedIdx]"
+      :option="registryOptions[selectedIdx]"
+      :registry="rawRegistry"
+      :chip-name="chipName"
+      :disabled="disabled"
+      @load="(rel) => loadRelease(registryOptions[selectedIdx], rel)"
+      @changed="refreshRegistry"
+    />
+
     <table v-if="rows.length" class="tbl">
       <thead>
-        <tr><th>段</th><th>文件</th><th>地址</th><th></th></tr>
+        <tr><th>段</th><th>文件</th><th>分区</th><th>地址</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="r in rows" :key="r.id">
           <td><code>{{ r.label }}</code></td>
           <td class="tbl__file">{{ r.file?.name }}</td>
+          <td class="tbl__part">
+            <span v-if="r.type" class="tbl__part-badge" :title="r.type === 'app' ? '固件分区' : '数据分区'">
+              {{ r.type }}<template v-if="r.subType">/{{ r.subType }}</template>
+            </span>
+            <span v-else class="tbl__part-none" title="未识别分区类型（旧版本数据或手动添加）">—</span>
+          </td>
           <td>
             <input
               class="tbl__addr"
@@ -424,10 +479,24 @@ async function toggleSubscribe(): Promise<void> {
   font-weight: 500;
 }
 .tbl__file {
-  max-width: 260px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tbl__part {
+  white-space: nowrap;
+}
+.tbl__part-badge {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.tbl__part-none {
+  color: var(--muted);
+  opacity: 0.5;
 }
 .tbl__addr {
   width: 90px;

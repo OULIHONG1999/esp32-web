@@ -91,6 +91,10 @@ onMounted(() => {
     onStatus: (s) => {
       streamStatus.value = s
     },
+    onGovern: () => {
+      // 晋升/回滚 → 项目库与时间线自动刷新（不弹横幅，操作者自己就在页面）
+      refreshSignal.value += 1
+    },
   })
 })
 onUnmounted(() => {

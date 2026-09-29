@@ -36,6 +36,7 @@
 | **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
 | **S2 自动发布+部署** | ✅ 门3 已过 | watch 自动发布+增量 0 上传+服务器部署+隧道全通；**浏览器确认：localhost:8787 页面载入远端版本、80m/2MB 注入（2026-09-29 用户日志）**；HTTPS/域名解析为尾巴（不阻塞） |
 | **S3 SSE 订阅** | ✅ 门4 已过 | 用户确认横幅+●NEW（20260929-2029）；SSE hub/广播/subscribe/前端横幅/角标/★开关/轮询降级全实测；108 测试全绿；文档挂载公网 /docs/ |
+| **S4 版本管理** | 🔄 代码完成待门5 | server promote/回滚/retention（Bearer 鉴权）+CLI `promote --note`+前端时间线（晋升/回滚/保留数确认/F-13 芯片比对）+SSE promote/latest 刷新；**插入需求：parts 分区类型 type/subType**（CLI 解析 partition-table 按地址匹配+assets 声明+前端分区列，server 零改动透传）；115 测试+build 全绿；剩部署+rebuild 实测+门5 |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -122,18 +123,18 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-10 错误翻译 | ✅ | 10 用例（含 TimeoutError 分类） |
 | F-11 S3 三层复位 | ✅ | 实机自动进下载（未按 BOOT） |
 | F-12 芯片信息展示 | ✅ | ConnectPanel 显示 chip 名 |
-| F-13 chipFamily 比对 | ⬜ | 随 manifest |
+| F-13 chipFamily 比对 | 🔄 | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 顺带验证 |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
 | F-16 实时串口日志 | 🔄 | 机制实测正常（烧录前后自动挂起/恢复）；**hello_world console=UART0（sdkconfig），USB 口无 app 输出**——待 console 改 USB Serial/JTAG 后闭环 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | 🔄 | 代码完成+冒烟 exit 0，**待实机点按** |
-| F-20 项目/版本/多芯片变体 | 🔶 | 三层模型+variant 自动归类+latest 载入已实现（S1，e2e 过）；时间线/回滚 UI=S4 |
+| F-20 项目/版本/多芯片变体 | 🔄 | S4 代码完成：三层+latest 载入+**回滚(设 latest)+版本时间线**；晋升/retention 随 F-24；待门5 实测 |
 | F-21 订阅推送 | ✅ | 门4 用户实测（横幅+查看+●NEW）：SSE+30s 轮询降级+★开关双写+心跳；nginx 经 IP HTTPS 实测无缓冲 |
-| F-22 任意烧录文件管理 | 🔶 | parts 统一建模+assets 随发布+SHA256 完整（S1）；页面补充上传=S5 |
+| F-22 任意烧录文件管理 | 🔄 | S4 增强：parts 统一建模+assets 随发布+**分区类型 type/subType**（partition-table 解析/声明/前端列，向后兼容缺省）；页面补充上传=S5 |
 | F-23 发布 CLI 与自动触发 | ✅ | `once`+`--watch`+Bearer token+增量（跨 release 0 上传实测）+flash_args/assets 识别——门3 全链实测（2026-09-29） |
-| F-24 版本说明与保留策略 | ⬜ | S4（T15/门5） |
+| F-24 版本说明与保留策略 | 🔄 | S4 代码完成：promote 必填 note（CLI+页面）+retention 设置/预览/发布后自动清理（releases 永不删）；待门5 实测 |
 
 ## 下一步
 
@@ -149,7 +150,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
-- **2026-09-29（门4 过）**：用户在 `https://firmware.example.com` 实测确认横幅与 ●NEW（发布 20260929-2029 经 SSE 即时推送）——**"远端发布、本地即知"订阅形态达成**，F-21 关。同轮完善：公网直连部署（自签 IP 证书、Node 侧 `NODE_TLS_REJECT_UNAUTHORIZED=0`、SSE 经 nginx 无缓冲实测）、server/dist MD5 全 SYNC 校验、文档挂载 `/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS，200）。问题记录 20（watch 后台 fetch failed，前台 once 可靠）、21（PS5.1 编码双坑）。剩 S4 → 门5。
+- **2026-09-29（S4 版本管理 + 分区类型）**：**S4**——server `releases.js`（promote 必填 note/setLatest 回滚/retention 设置+预览+publish 后自动清理，releases 永不删）+ 写操作 Bearer 鉴权（401 测试）+ CLI `promote <rid> --note`（registry 自动定位 variant）+ 前端 `VersionTimeline.vue`（时间线/晋升 prompt/回滚 confirm/保留数预览确认/401 引导输 token）+ F-13 芯片比对 confirm + SSE promote/latest 事件刷新。**插入需求（用户提出）**：parts 增加 `type/subType` 分区类型——CLI `parsePartitionTable`（0x50AA 条目/0x50EB 尾、app/data 子类型枚举）按地址匹配 + config.assets 显式声明 + 前端"分区"列徽标；**server 三文件零改动**（parts 整对象透传，`.meta.json`/rebuild 天然携带）；fixtures 换真实格式分区表。115 测试 + build 全绿。剩：部署+rebuild 实测 → 门5。
+- **2026-09-29（门4 过）**：用户在 `https://firmware.example.com` 实测确认横幅与 ●NEW（发布 20260929-2029 经 SSE 即时推送）——**"远端发布、本地即知"订阅形态达成**，F-21 关。同轮完善：公网直连部署（自签 IP 证书、Node 侧 `NODE_TLS_REJECT_UNAUTHORIZED=0`、SSE 经 nginx 无缓冲实测）、server/dist MD5 全 SYNC 校验、文档挂载 `/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS，200）。问题记录 20（watch 后台 fetch failed，前台 once 可靠）、21（PS5.1 编码双坑）。
 - **2026-09-29（S3 SSE 订阅）**：server `stream.js`（SSE hub：retry 握手/15s 心跳/断开清理/closeAll 清 interval）+ `POST …/subscribe`（`upsertSubscribed` 持久化）+ publish `onPublished` 广播；前端 `subscribeRegistry`（EventSource+断线 30s 轮询降级、`snapshotLatest/diffLatest` 纯函数）+ App 横幅/`● 订阅中`状态点 + FirmwarePanel `●NEW` 角标/★开关（localStorage+服务端双写）/载入 emit 清角标/事件触发自动刷新。服务器重打包部署 SSE 版（**教训：unzip 成功≠进程重启——核对 `ExecMainStartTimestamp`**）。108 测试 + build 全绿。
 - **2026-09-29（门3 过）**：浏览器确认 localhost:8787 页面载入远端版本（用户日志：连接远端前端成功、载入后 `烧录参数 mode=dio freq=80m size=2MB` 注入）——**"远端发布、本地即知"核心闭环达成**。门2/门3 状态落账（D4/console 挂起注明），F-23 转 ✅。下一步 S3 SSE。
 - **2026-09-29（门3 部署实测）**：服务器上线——Ubuntu 22.04（firmware.example.com，panel.example.com）装 Node 24.21、部署包上传（本机 ed25519 免密，passwd 重置后密码认证仍失败遂改密钥）、systemd `firmware-server` active、`/api/registry` 返回 `{"projects":{}}`。**SSH 隧道 `localhost:8787` 全通**（nginx+certbot 因 unattended-upgr 占 dpkg 锁暂缓——DEPLOY §5 方案 B）。**watch 实测**：本机 `--watch` → 隧道 → 远端 registry 出现 `hello-world/ESP32-S3/20260929-1949-fff989`（80m/2MB）；touch 产物防抖后新 release **`上传=0（服务器已有，秒回）`**——跨 release 增量实证。

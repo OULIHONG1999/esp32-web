@@ -99,7 +99,10 @@ Release（不可变快照，一次烧录的完整文件全集）{
   commit?: string, gitDirty?: boolean,
   createdAt,
   parts: [                                 // ★ N8：任意烧录文件统一建模
-    { label, address, file, sha256, size }
+    { label, address, file, sha256, size,
+      type?, subType? }                    // ★ 分区类型（2026-09-29 增强）：CLI 解析
+    // partition-table.bin 按地址匹配填入（app/factory、data/littlefs 等）；config.assets 可显式声明
+    // 缺省 undefined=旧数据/未识别（bootloader/表/手动添加），前端显示 —，向后兼容
     // 编译产物：来自 flash_args；字体/资源：来自 publish.config.json；页面补充上传同入此数组
   ]
 }

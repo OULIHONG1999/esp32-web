@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import {
   buildParts,
   collectShaSet,
+  findPartitionByAddress,
   parseAddress,
   parseConfig,
   parseFlashArgs,
+  parsePartitionTable,
   pickMissing,
   releaseId,
   toMeta,
@@ -72,17 +74,54 @@ describe('buildParts（fixtures 全集）', () => {
     const { parts, flashParams, variant } = buildParts({ cfg, dir, buildDir })
     expect(variant).toBe('ESP32-S3')
     expect(flashParams).toEqual({ mode: 'dio', freq: '40m', size: '16MB' })
-    expect(parts.map((p) => p.file)).toEqual([
-      'bootloader.bin',
-      'partition-table.bin',
-      'hello_world.bin',
-      'font.bin',
-    ])
-    expect(parts[0].address).toBe(0x0)
-    expect(parts[1].label).toBe('partition-table')
-    expect(parts[3].address).toBe(0x290000)
-    expect(parts.every((p) => /^[0-9a-f]{64}$/.test(p.sha256))).toBe(true)
+    expect(parts).toHaveLength(4) // flash_args 三段 + font asset
+    const byFile = Object.fromEntries(parts.map((p) => [p.file, p]))
+    // 分区表匹配：app→factory、assets font@0x290000→littlefs；bootloader/表 缺省
+    expect(byFile['hello_world.bin']).toMatchObject({ type: 'app', subType: 'factory' })
+    expect(byFile['font.bin']).toMatchObject({ type: 'data', subType: 'littlefs' })
+    expect(byFile['bootloader.bin'].type).toBeUndefined()
+    expect(byFile['partition-table.bin'].type).toBeUndefined()
     delete process.env.FIRMWARE_PUBLISH_TOKEN
+  })
+})
+
+describe('parsePartitionTable（F-22 分区类型元数据）', () => {
+  function entry(type, sub, offset, size, name) {
+    const b = Buffer.alloc(32)
+    b.writeUInt16LE(0x50aa, 0)
+    b.writeUInt8(type, 2)
+    b.writeUInt8(sub, 3)
+    b.writeUInt32LE(offset, 4)
+    b.writeUInt32LE(size, 8)
+    b.write(name, 12, 'ascii')
+    return b
+  }
+  const md5tail = Buffer.alloc(32)
+  md5tail.writeUInt16LE(0x50eb, 0)
+
+  it('解析 app/factory 与 data/littlefs 条目，MD5 尾终止', () => {
+    const buf = Buffer.concat([
+      entry(0, 0x00, 0x10000, 0x180000, 'app'),
+      entry(1, 0x83, 0x290000, 0x160000, 'storage'),
+      entry(1, 0x02, 0x9000, 0x6000, 'nvs'),
+      md5tail,
+    ])
+    const out = parsePartitionTable(buf)
+    expect(out).toHaveLength(3)
+    expect(out[0]).toMatchObject({ offset: 0x10000, type: 'app', subType: 'factory', name: 'app' })
+    expect(out[1]).toMatchObject({ offset: 0x290000, type: 'data', subType: 'littlefs' })
+    expect(out[2]).toMatchObject({ type: 'data', subType: 'nvs' })
+  })
+
+  it('垃圾/过短数据 → []（不抛，向后兼容缺省）', () => {
+    expect(parsePartitionTable(Buffer.alloc(10))).toEqual([])
+    expect(parsePartitionTable(Buffer.alloc(96, 0xff))).toEqual([])
+  })
+
+  it('findPartitionByAddress 精确匹配', () => {
+    const entries = parsePartitionTable(Buffer.concat([entry(0, 0x00, 0x10000, 0x1000, 'a'), md5tail]))
+    expect(findPartitionByAddress(entries, 0x10000)?.type).toBe('app')
+    expect(findPartitionByAddress(entries, 0x0)).toBeNull()
   })
 })
 

@@ -7,6 +7,9 @@ export interface RegistryPart {
   file: string
   sha256: string
   size: number
+  /** F-22 分区类型（CLI 由 partition-table 解析；旧数据无此字段=缺省兼容） */
+  type?: 'app' | 'data'
+  subType?: string
 }
 
 export interface RegistryFlashParams {
@@ -113,6 +116,8 @@ export type StreamStatus = 'connected' | 'polling'
 export interface StreamHandlers {
   onPublish: (e: PublishEvent) => void
   onStatus: (s: StreamStatus) => void
+  /** S4：晋升/回滚事件（时间线刷新） */
+  onGovern?: (kind: 'promote' | 'latest', e: PublishEvent) => void
 }
 
 /** `${pid}/${vid}` → latest id 快照（轮询降级的 diff 基线） */
@@ -202,6 +207,16 @@ export function subscribeRegistry(h: StreamHandlers): () => void {
         /* 坏帧忽略 */
       }
     })
+    for (const kind of ['promote', 'latest'] as const) {
+      es.addEventListener(kind, (ev) => {
+        h.onStatus('connected')
+        try {
+          h.onGovern?.(kind, JSON.parse((ev as MessageEvent).data) as PublishEvent)
+        } catch {
+          /* 坏帧忽略 */
+        }
+      })
+    }
     es.onerror = () => {
       // EventSource 自动重连期间用轮询兜底
       startPoll()
@@ -262,4 +277,101 @@ export async function setSubscribed(projectId: string, subscribed: boolean): Pro
   } catch (e) {
     console.warn('[subscribe] offline, local only', e)
   }
+}
+
+// ---------- S4 版本管理写操作（F-20 回滚 / F-24 晋升与 retention；Bearer token） ----------
+
+const TOKEN_KEY = 'fw.token'
+
+export function getStoredToken(): string | null {
+  try {
+    return globalThis.localStorage?.getItem(TOKEN_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(token: string): void {
+  try {
+    globalThis.localStorage?.setItem(TOKEN_KEY, token)
+  } catch {
+    /* ignore */
+  }
+}
+
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('401 unauthorized')
+    this.name = 'UnauthorizedError'
+  }
+}
+
+/** 带鉴权的写请求；401 抛 UnauthorizedError（组件层引导输入 token） */
+async function authWrite(url: string, body: unknown): Promise<unknown> {
+  const token = getStoredToken()
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (r.status === 401) throw new UnauthorizedError()
+  const json = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${String(json.error ?? '')}`)
+  return json
+}
+
+/** F-24 晋升 snapshot → release（note 必填） */
+export function promoteRelease(
+  pid: string,
+  vid: string,
+  rid: string,
+  note: string,
+): Promise<unknown> {
+  return authWrite(
+    `/api/registry/projects/${encodeURIComponent(pid)}/variants/${encodeURIComponent(vid)}/releases/${encodeURIComponent(rid)}/promote`,
+    { note },
+  )
+}
+
+/** F-20 回滚：latest 指向指定版本 */
+export function setLatestRelease(pid: string, vid: string, rid: string): Promise<unknown> {
+  return authWrite(
+    `/api/registry/projects/${encodeURIComponent(pid)}/variants/${encodeURIComponent(vid)}/latest`,
+    { releaseId: rid },
+  )
+}
+
+/** F-24 retention 策略（下次 publish 生效） */
+export function setProjectRetention(
+  pid: string,
+  snapshots: number | 'all',
+): Promise<unknown> {
+  return authWrite(`/api/registry/projects/${encodeURIComponent(pid)}/retention`, {
+    snapshots,
+  })
+}
+
+/** retention 预览：下次发布将被删除的 snapshot 清单（确认弹层） */
+export async function previewRetention(
+  pid: string,
+  snapshots?: number,
+): Promise<{ snapshots: number | string; doomed: { variant: string; release: string }[] }> {
+  const q = snapshots === undefined ? '' : `?snapshots=${snapshots}`
+  const r = await fetch(`/api/registry/projects/${encodeURIComponent(pid)}/retention/preview${q}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()) as { snapshots: number | string; doomed: { variant: string; release: string }[] }
+}
+
+/** 时间线数据：指定 project/variant 的全部版本（新→旧） */
+export function collectReleases(
+  registry: Registry,
+  projectId: string,
+  variant: string,
+): RegistryRelease[] {
+  return [...(registry.projects?.[projectId]?.variants?.[variant]?.releases ?? [])].sort(
+    (a, b) => (a.createdAt < b.createdAt ? 1 : -1),
+  )
 }

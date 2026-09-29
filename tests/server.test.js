@@ -395,3 +395,127 @@ describe('POST /api/registry/projects/:id/subscribe（★订阅状态）', () =>
     expect(bad.status).toBe(400)
   })
 })
+
+// ---------- S4 版本管理（F-20 回滚 / F-24 晋升与 retention） ----------
+
+describe('S4 promote / setLatest / retention', () => {
+  // 惰性拼接：describe 收集阶段 base 尚未赋值（beforeAll 未跑）
+  const relUrl = (suffix) =>
+    `${base}/api/registry/projects/hello-world/variants/ESP32-S3/${suffix}`
+  // S4 写操作带 Bearer（FIRMWARE-REGISTRY §8）
+  const H = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
+
+  it('promote：snapshot → release（note 必填）；重复晋升 409；无 note 400；不存在 404；无 token 401', async () => {
+    const noAuth = await fetch(relUrl('releases/20260927-1800-sse1/promote'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'x' }),
+    })
+    expect(noAuth.status).toBe(401)
+
+    const ok = await fetch(relUrl('releases/20260927-1800-sse1/promote'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ note: '首个正式版（门5 晋升演示）' }),
+    })
+    expect(ok.status).toBe(200)
+    const rel = (await ok.json()).release
+    expect(rel.type).toBe('release')
+    expect(rel.noteSource).toBe('manual')
+
+    const again = await fetch(relUrl('releases/20260927-1800-sse1/promote'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ note: '再来一次' }),
+    })
+    expect(again.status).toBe(409)
+
+    const noNote = await fetch(relUrl('releases/20260927-1800-sse1/promote'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ note: '   ' }),
+    })
+    expect(noNote.status).toBe(400)
+
+    const missing = await fetch(relUrl('releases/no-such/promote'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ note: 'x' }),
+    })
+    expect(missing.status).toBe(404)
+  })
+
+  it('回滚：setLatest 把 latest 指向旧版本（纯指针）', async () => {
+    const r = await fetch(relUrl('latest'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ releaseId: '20260927-1300-beef' }),
+    })
+    expect(r.status).toBe(200)
+    const reg = await (await fetch(`${base}/api/registry`)).json()
+    expect(reg.projects['hello-world'].variants['ESP32-S3'].latest).toBe('20260927-1300-beef')
+
+    const bad = await fetch(relUrl('latest'), {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ releaseId: '../evil' }),
+    })
+    expect(bad.status).toBe(400)
+  })
+
+  it('retention：设置 1 → preview 列将删 → 新发布自动清理最旧 snapshot，release 不删', async () => {
+    // 设置策略（不立即删）
+    const set = await fetch(`${base}/api/registry/projects/hello-world/retention`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ snapshots: 1 }),
+    })
+    expect(set.status).toBe(200)
+
+    // 预览将删清单
+    const prev = await (await fetch(`${base}/api/registry/projects/hello-world/retention/preview?snapshots=1`)).json()
+    expect(prev.snapshots).toBe(1)
+    expect(prev.doomed.length).toBeGreaterThanOrEqual(1)
+
+    // 新发布 → 服务端按策略清理
+    const part = { file: 'ret.bin', data: Uint8Array.from([7, 7]), address: 0x30000 }
+    const meta = makeMeta([part])
+    meta.release.id = '20260927-1900-ret1'
+    meta.release.createdAt = new Date().toISOString() // 用真实时间，避免与固定时间戳并列导致排序歧义
+    const pub = await publish(meta, [part])
+    expect(pub.status).toBe(200)
+    expect(pub.json.retentionRemoved.length).toBeGreaterThanOrEqual(1)
+
+    const reg = await (await fetch(`${base}/api/registry`)).json()
+    const vars = reg.projects['hello-world'].variants['ESP32-S3']
+    const snaps = vars.releases.filter((x) => x.type === 'snapshot')
+    expect(snaps.length).toBeLessThanOrEqual(1)
+    // 发布版（promote 的 sse1）必须还在
+    expect(vars.releases.find((x) => x.id === '20260927-1800-sse1').type).toBe('release')
+    // 被删 snapshot 的磁盘目录应不存在
+    const firstDoomed = prev.doomed.find((d) => d.variant === 'ESP32-S3')
+    if (firstDoomed) {
+      const exists = await fetch(
+        `${base}/api/registry/projects/hello-world/variants/ESP32-S3/releases/${firstDoomed.release}/parts/whatever.bin`,
+      )
+      expect([404, 400]).toContain(exists.status)
+    }
+
+    // 恢复 all（避免影响后续手工验收）
+    const restore = await fetch(`${base}/api/registry/projects/hello-world/retention`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ snapshots: 'all' }),
+    })
+    expect(restore.status).toBe(200)
+  })
+
+  it('非法 retention 值 400', async () => {
+    const bad = await fetch(`${base}/api/registry/projects/hello-world/retention`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ snapshots: -5 }),
+    })
+    expect(bad.status).toBe(400)
+  })
+})

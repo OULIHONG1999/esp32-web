@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { LIMITS } from './config.js'
 import { handlePublish } from './publish.js'
+import { applyRetention, previewRetention, promoteRelease, setLatest, setRetention } from './releases.js'
 import { readRegistry, registryPath, upsertSubscribed, writeRegistryAtomic } from './registry.js'
 import { createSseHub } from './stream.js'
 
@@ -104,6 +105,8 @@ function serveStatic(distDir, urlPath, res) {
 /** 创建 http 请求处理器（deps 注入便于单测） */
 export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
   const hub = createSseHub({ heartbeatMs: sseHeartbeatMs })
+  /** 写操作鉴权（FIRMWARE-REGISTRY §8：发布/晋升/回滚/retention 属写） */
+  const authOk = (req) => req.headers.authorization === `Bearer ${token}`
   return Object.assign(
     async function app(req, res) {
       const url = new URL(req.url ?? '/', 'http://localhost')
@@ -131,6 +134,57 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           if (!reg.projects?.[subM[1]]) return send(res, 404, { error: 'project not found' })
           writeRegistryAtomic(dataDir, upsertSubscribed(reg, subM[1], subscribed))
           return send(res, 200, { ok: true, projectId: subM[1], subscribed })
+        }
+
+        // ---- S4 版本管理（F-20 回滚 / F-24 晋升与 retention）----
+        const relM =
+          /^\/api\/registry\/projects\/([^/]+)\/variants\/([^/]+)\/releases\/([^/]+)\/promote$/.exec(p)
+        if (req.method === 'POST' && relM) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const body = await collectBody(req, 64 * 1024)
+          let note
+          try {
+            note = JSON.parse(body.toString('utf8')).note
+          } catch {
+            return send(res, 400, { error: 'bad json' })
+          }
+          const rel = promoteRelease(dataDir, relM[1], relM[2], relM[3], note)
+          hub.broadcast('promote', { project: relM[1], variant: relM[2], release: { id: rel.id, type: rel.type } })
+          return send(res, 200, { ok: true, release: rel })
+        }
+        const latestM =
+          /^\/api\/registry\/projects\/([^/]+)\/variants\/([^/]+)\/latest$/.exec(p)
+        if (req.method === 'POST' && latestM) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const body = await collectBody(req, 16 * 1024)
+          let releaseId
+          try {
+            releaseId = JSON.parse(body.toString('utf8')).releaseId
+          } catch {
+            return send(res, 400, { error: 'bad json' })
+          }
+          if (typeof releaseId !== 'string' || !LIMITS.safeName.test(releaseId)) {
+            return send(res, 400, { error: 'bad releaseId' })
+          }
+          setLatest(dataDir, latestM[1], latestM[2], releaseId)
+          hub.broadcast('latest', { project: latestM[1], variant: latestM[2], release: { id: releaseId } })
+          return send(res, 200, { ok: true, latest: releaseId })
+        }
+        const retM = /^\/api\/registry\/projects\/([^/]+)\/retention(\/preview)?$/.exec(p)
+        if (retM && req.method === 'GET' && retM[2]) {
+          const n = url.searchParams.get('snapshots')
+          return send(res, 200, previewRetention(dataDir, retM[1], n ?? undefined))
+        }
+        if (retM && req.method === 'POST' && !retM[2]) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const body = await collectBody(req, 4 * 1024)
+          let snapshots
+          try {
+            snapshots = JSON.parse(body.toString('utf8')).snapshots
+          } catch {
+            return send(res, 400, { error: 'bad json' })
+          }
+          return send(res, 200, { ok: true, retention: setRetention(dataDir, retM[1], snapshots) })
         }
         if (req.method === 'POST' && p === '/api/publish') {
           const body = await collectBody(req, LIMITS.maxBodyBytes)

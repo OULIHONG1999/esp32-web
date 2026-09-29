@@ -172,6 +172,9 @@ curl -s https://firmware.example.com/api/registry | grep hello-world
 ```bash
 # registry 自愈（损坏/丢失时）
 cd /opt/firmware-server && sudo -u fwserver node server/rebuild.js
+# ⚠️ rebuild 从各 Release 的 .meta.json 重建版本树——project 级字段
+#    （★订阅 subscribed、retention 策略、description）会丢失；
+#    重要时先备份：cp server-data/registry.json /tmp/ && rebuild && 对照恢复
 # 数据备份（整个目录即全部状态）
 sudo tar czf firmware-server-data.tgz /opt/firmware-server/server-data
 # 磁盘检查

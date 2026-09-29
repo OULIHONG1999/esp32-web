@@ -4,6 +4,7 @@ import path from 'node:path'
 import { LIMITS } from './config.js'
 import { parseMultipart } from './multipart.js'
 import { readRegistry, upsertRelease, writeRegistryAtomic } from './registry.js'
+import { applyRetention } from './releases.js'
 
 /** 进程内发布互斥锁（单进程服务；并发发布 409） */
 let publishing = false
@@ -182,6 +183,9 @@ export async function handlePublish({ dataDir, token, body, headers, onPublished
     })
     writeRegistryAtomic(dataDir, registry)
 
+    // F-24：发布后按项目 retention 清理超限 snapshot（releases 永不删）
+    const retentionResult = applyRetention(dataDir, pid)
+
     const result = {
       status: 200,
       json: {
@@ -190,6 +194,7 @@ export async function handlePublish({ dataDir, token, body, headers, onPublished
         variant,
         release: rid,
         files: meta.release.parts.map((p) => p.file),
+        retentionRemoved: retentionResult.removed,
       },
     }
     // S3：发布成功 → SSE 广播（订阅方横幅/角标）

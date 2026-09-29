@@ -78,6 +78,69 @@ export function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex')
 }
 
+// ---------- 分区类型元数据（F-22 增强：parts[].type / subType） ----------
+
+/** ESP-IDF 分区子类型名（与 partition 表规范对齐；未知保留数字） */
+const APP_SUBTYPES = { 0x00: 'factory' }
+for (let i = 0; i < 16; i++) APP_SUBTYPES[0x10 + i] = `ota_${i}`
+APP_SUBTYPES[0x20] = 'test'
+const DATA_SUBTYPES = {
+  0x01: 'otadata',
+  0x02: 'nvs',
+  0x03: 'phy_init',
+  0x04: 'nvs_keys',
+  0x05: 'efuse',
+  0x81: 'fatfs',
+  0x82: 'spiffs',
+  0x83: 'littlefs',
+}
+
+/**
+ * 解析 ESP-IDF partition-table.bin（32 字节/条，magic 0x50AA；尾部 0x50EB=MD5）。
+ * 解析失败返回 []（前端/CLI 对缺失字段做缺省处理——向后兼容）。
+ */
+export function parsePartitionTable(bytes) {
+  const out = []
+  if (!bytes || bytes.length < 32) return out
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  for (let off = 0; off + 32 <= bytes.length; off += 32) {
+    const magic = dv.getUint16(off, true)
+    if (magic === 0x50eb) break // MD5 结尾
+    if (magic !== 0x50aa) continue
+    const rawType = dv.getUint8(off + 2)
+    const rawSub = dv.getUint8(off + 3)
+    const offset = dv.getUint32(off + 4, true)
+    const size = dv.getUint32(off + 8, true)
+    const nameBytes = bytes.subarray(off + 12, off + 28)
+    const end = nameBytes.indexOf(0)
+    const name = new TextDecoder()
+      .decode(end >= 0 ? nameBytes.subarray(0, end) : nameBytes)
+      .trim()
+    let type = null
+    let subTypeName = null
+    if (rawType === 0x00) {
+      type = 'app'
+      subTypeName = APP_SUBTYPES[rawSub] ?? String(rawSub)
+    } else if (rawType === 0x01) {
+      type = 'data'
+      subTypeName = DATA_SUBTYPES[rawSub] ?? String(rawSub)
+      // 兜底：subtype 未知但名字可辨识
+      if (DATA_SUBTYPES[rawSub] === undefined && /littlefs|spiffs|fatfs/i.test(name)) {
+        subTypeName = name.toLowerCase()
+      }
+    } else {
+      continue // 0xFF 空槽
+    }
+    out.push({ offset, size, name, type, subType: subTypeName })
+  }
+  return out
+}
+
+/** 按烧录地址匹配分区条目（app/data 才有；bootloader/表不匹配属预期） */
+export function findPartitionByAddress(entries, address) {
+  return entries.find((e) => e.offset === address) ?? null
+}
+
 /**
  * 构建本地 parts 全集（flash_args 权威地址 + config 附加 assets）。
  * @returns {{ parts: Array<{label,address,file,sha256,size,data:Buffer}>, flashParams: object, variant: string }}
@@ -100,6 +163,19 @@ export function buildParts({ cfg, dir, buildDir }) {
   if (!variant) variant = 'unknown'
 
   const parts = []
+  // 先解析分区表（若有）→ 为匹配地址的段填 type/subType（F-22 增强）
+  let partitionEntries = []
+  const tableEntry = entries.find((e) => /partition/i.test(path.basename(e.rel)))
+  if (tableEntry) {
+    try {
+      const tableAbs = path.resolve(buildDir, tableEntry.rel)
+      if (fs.existsSync(tableAbs)) {
+        partitionEntries = parsePartitionTable(fs.readFileSync(tableAbs))
+      }
+    } catch {
+      /* 分区表异常不阻塞发布（type 缺省，前端兼容） */
+    }
+  }
   for (const e of entries) {
     const abs = path.resolve(buildDir, e.rel)
     if (!abs.startsWith(path.resolve(buildDir) + path.sep)) {
@@ -107,14 +183,20 @@ export function buildParts({ cfg, dir, buildDir }) {
     }
     if (!fs.existsSync(abs)) throw new Error(`build artifact missing: ${e.rel}`)
     const data = fs.readFileSync(abs)
-    parts.push({
+    const part = {
       label: guessLabel(e.rel),
       address: e.address,
       file: path.basename(e.rel),
       sha256: sha256(data),
       size: data.length,
       data,
-    })
+    }
+    const hit = findPartitionByAddress(partitionEntries, e.address)
+    if (hit) {
+      part.type = hit.type
+      part.subType = hit.subType
+    }
+    parts.push(part)
   }
 
   const assets = [...(cfg.assets ?? []), ...(cfg.assetsByVariant?.[variant] ?? [])]
@@ -122,14 +204,25 @@ export function buildParts({ cfg, dir, buildDir }) {
     const abs = path.resolve(dir, a.file)
     if (!fs.existsSync(abs)) throw new Error(`asset missing: ${a.file}`)
     const data = fs.readFileSync(abs)
-    parts.push({
+    const part = {
       label: a.label ?? path.basename(a.file),
       address: parseAddress(a.address),
       file: path.basename(a.file),
       sha256: sha256(data),
       size: data.length,
       data,
-    })
+    }
+    // config 可显式声明分区类型（未声明时按地址查分区表兜底）
+    if (a.type) part.type = a.type
+    if (a.subType) part.subType = a.subType
+    if (!part.type) {
+      const hit = findPartitionByAddress(partitionEntries, part.address)
+      if (hit) {
+        part.type = hit.type
+        part.subType = hit.subType
+      }
+    }
+    parts.push(part)
   }
 
   return { parts, flashParams, variant }
@@ -194,6 +287,9 @@ export function toMeta({ cfg, parts, flashParams, variant, id }) {
         file: p.file,
         sha256: p.sha256,
         size: p.size,
+        // 分区类型元数据（F-22 增强；undefined 不序列化，旧消费方缺省兼容）
+        ...(p.type ? { type: p.type } : {}),
+        ...(p.subType ? { subType: p.subType } : {}),
       })),
     },
   }
