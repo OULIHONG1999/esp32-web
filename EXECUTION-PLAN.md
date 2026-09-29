@@ -1,6 +1,6 @@
 # 执行计划 — 跨设备固件下载服务（防烂尾定稿）
 
-> 状态：**已批准；门1 ✅、S1 ✅、门2 进行中（2026-09-27 复测 4 项修复真机验证过，剩 D4 核对 + console 切换闭环，编译归用户）** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
+> 状态：**已批准；门1 ✅ 门2 ✅（D4/console 用户暂缓挂起）门3 ✅（2026-09-29 远端发布→本地页面拉取实测）——进行 S3** · 关联：FIRMWARE-REGISTRY.md（设计）、DESIGN.md、PROGRESS.md
 > 本文回答四件事：最终方案、执行线路、全部已知问题、每个步骤的具体实现与验收流程。
 
 ## 0. 一句话方案（不再变）
@@ -110,13 +110,13 @@ S5  可选增强（AI 说明/页面上传/多芯片 UI）——按需，可永�
 5. ✅ fixtures：`tests/fixtures/fake-build/`（计划原文 test/fixtures，实现统一进 tests/）四段假 bin；e2e 测试：CLI→server→registry→下载比对→幂等 0 上传→错 token 拒收，5 用例全过。
 **门2（核心）**：本地 fixtures 全链路自动通过 ✅ → 真机 publish hello_world ✅ → 页面载入 → 烧录成功（两轮实测，第二轮 4 项修复全过）✅ → **D5 校验 ✅**（三段 Hash of data verified）→ **D4 待核**（参数已注入 80m/2MB，boot banner 确认待 console 切换后页面日志完成）→ 验收表勾选待执行。附：F-17/F-18/F-19 同轮回归通过；"无设备日志"定位 console=UART0 配置（问题 19）。
 
-### S2：自动发布 + 部署——🔄 进行中（2026-09-29）
+### S2：自动发布 + 部署——✅ 已过门3（2026-09-29）
 
 1. ✅ CLI `--watch`（防抖 5s + 失败退避 3 次 + pending 补传；发布输入签名盯 flash_args/产物/desc/assets）；
-2. ✅ 增量效率（跨 release 按 sha 复用：server `findPartBySha` + CLI `collectShaSet`，二次发布只传变化文件，单测覆盖）；
-3. ✅ Ubuntu 部署 runbook（`DEPLOY.md`：Caddy `flush_interval -1` / nginx `proxy_buffering off`、systemd、token 注入、watch 挂机、SSH 隧道回退、S3 SSE 预留）；
-4. ⬜ 实际部署 + 远端 Windows 配 token 真机挂 watch（**待用户提供服务器 SSH/域名**）。
-**门3**：远端 build → 自动出现在 registry → 本地页面拉取（烧录核对随 D4 暂缓项一并）。
+2. ✅ 增量效率（跨 release 按 sha 复用：server `findPartBySha` + CLI `collectShaSet`，**实测"上传=0 秒回"**）；
+3. ✅ Ubuntu 部署（腾讯云 firmware.example.com：Node 24.21 + systemd + 免密 + SSH 隧道；nginx/certbot 待 dpkg 锁释放补 HTTPS——DEPLOY §5 隧道方案已覆盖验收）；
+4. ✅ watch 真机：本机挂 watch → 远端 registry 自动出现 → **本地浏览器 localhost:8787 页面载入 80m/2MB 注入（用户日志确认）**。
+**门3**：✅ 过（烧录核对随 D4 暂缓项一并）。尾巴：HTTPS/域名 DNS 解析（非阻塞）。
 
 ### S3：订阅
 
