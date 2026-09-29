@@ -42,7 +42,7 @@ function collectBody(req, maxBytes) {
   })
 }
 
-/** GET /api/registry —— 附 etag（mtime），供轮询降级用 */
+/** GET /api/registry —— 附 etag（mtime），供轮询降级用；_meta 为 AI/客户端自描述 */
 function serveRegistry(dataDir, res) {
   const p = registryPath(dataDir)
   const registry = fs.existsSync(p) ? readRegistry(dataDir) : { projects: {} }
@@ -52,7 +52,12 @@ function serveRegistry(dataDir, res) {
     'Cache-Control': 'no-cache',
     ETag: etag,
   })
-  res.end(JSON.stringify(registry))
+  res.end(
+    JSON.stringify({
+      _meta: { service: 'firmware-server', version: '0.1.0', docs: '/llms.txt' },
+      ...registry,
+    }),
+  )
 }
 
 /**

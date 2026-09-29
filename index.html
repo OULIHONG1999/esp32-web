@@ -4,8 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ESP32 Web Flasher</title>
+    <!-- AI 可读的网站描述 -->
+    <meta name="description" content="ESP32 固件在线管理和烧录服务" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "ESP32 Web Flasher",
+        "description": "ESP32 固件在线管理和烧录",
+        "url": "https://firmware.example.com",
+        "applicationCategory": "DeveloperApplication"
+      }
+    </script>
   </head>
   <body>
+    <!-- AI 可读的网站描述（无 JS 渲染时也可读） -->
+    <pre id="ai-data" style="display: none" aria-hidden="true">
+此网站为 ESP32 固件管理服务。
+API 文档见 /llms.txt。
+固件列表可通过 GET /api/registry 获取。
+    </pre>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

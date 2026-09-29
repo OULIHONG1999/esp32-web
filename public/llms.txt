@@ -1,0 +1,34 @@
+# firmware-server - ESP32 固件管理服务
+
+## 网站信息
+- 名称: ESP32 Web Flasher
+- 用途: ESP32 固件在线管理和烧录
+- 地址: https://firmware.example.com
+
+## API 入口
+- 注册表: GET /api/registry
+- 版本列表(SSE 实时推送): GET /api/registry/stream
+- 固件段下载: GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/parts/{file}
+- 发布固件: POST /api/publish (multipart/form-data，需 Bearer Token；字段 meta=JSON 元数据，file=固件段)
+- 晋升发布版: POST /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/promote (需 Token，body: {"note":"说明"})
+- 回滚(切换 latest): POST /api/registry/projects/{projectId}/variants/{variant}/latest (需 Token，body: {"releaseId":"..."})
+- 订阅状态: POST /api/registry/projects/{projectId}/subscribe (body: {"subscribed": true|false})
+- 保留策略: POST /api/registry/projects/{projectId}/retention (需 Token，body: {"snapshots": 数字或 "all"})
+- 保留预览: GET /api/registry/projects/{projectId}/retention/preview?snapshots=N
+
+## 数据结构
+- 注册表: { _meta, projects: { [id]: Project } }
+- Project: { id, name, description, subscribed, retention, variants: { [variant]: Variant } }
+- Variant: { latest: ReleaseId, releases: [Release] }
+- Release: { id, type: "snapshot"|"release", chipFamily, flashParams: { mode, freq, size }, note, createdAt, parts: [Part] }
+- Part: { label, address, file, sha256, size, type?: "app"|"data", subType?: string }
+- type/subType 由发布端解析 partition-table.bin 按地址匹配得出（如 app/factory、data/littlefs）
+
+## 认证
+- 发布/晋升/回滚/保留策略等写接口需要 Authorization: Bearer {token}
+- token 配置在服务端环境变量 FIRMWARE_PUBLISH_TOKEN
+- 读接口(registry/SSE/下载/预览) 公开无需鉴权
+
+## 示例
+- curl https://firmware.example.com/api/registry          # 查看全部固件
+- curl https://firmware.example.com/llms.txt              # 本说明文件
