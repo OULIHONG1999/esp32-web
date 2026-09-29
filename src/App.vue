@@ -8,7 +8,9 @@ import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
 import { useIdfBuild } from './composables/useIdfBuild'
 import {
+  getStoredToken,
   isSubscribed,
+  setStoredToken,
   subscribeRegistry,
   type PublishEvent,
   type StreamStatus,
@@ -102,6 +104,22 @@ onUnmounted(() => {
   unsubscribe = null
   streamStatus.value = 'off'
 })
+
+// ---- 发布 token 设置（显式入口，不再只靠 401 时才弹窗）----
+const hasToken = ref(!!getStoredToken())
+
+function configureToken(): void {
+  const current = getStoredToken()
+  const tip = current
+    ? `当前已配置（尾号 ${current.slice(-4)}）。\n粘贴新 token 替换，留空取消：`
+    : '首次设置：粘贴服务器的 FIRMWARE_PUBLISH_TOKEN：'
+  const input = window.prompt(tip, '')
+  if (input === null) return
+  const t = input.trim()
+  if (!t) return
+  setStoredToken(t)
+  hasToken.value = true
+}
 </script>
 
 <template>
@@ -116,6 +134,15 @@ onUnmounted(() => {
       >
         {{ streamStatus === 'connected' ? '● 订阅中' : streamStatus === 'polling' ? '○ 轮询' : '○ 未订阅' }}
       </span>
+      <button
+        class="shell__token"
+        :class="hasToken ? 'shell__token--on' : 'shell__token--off'"
+        type="button"
+        :title="hasToken ? '发布 token 已配置（点击可更换）——晋升/回滚等操作用' : '设置发布 token——晋升/回滚等操作需要'"
+        @click="configureToken"
+      >
+        🔑 {{ hasToken ? 'Token 已设' : '设置 Token' }}
+      </button>
     </header>
 
     <div v-if="banner" class="banner">
@@ -226,6 +253,24 @@ onUnmounted(() => {
   color: var(--accent);
 }
 .shell__stream--polling {
+  color: var(--warn);
+}
+.shell__token {
+  margin-left: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.shell__token--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.shell__token--off {
+  border-color: var(--warn);
   color: var(--warn);
 }
 .banner {

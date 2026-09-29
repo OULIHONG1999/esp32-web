@@ -37,7 +37,13 @@ node tools\publish\index.js once --config publish.config.json
 }
 ```
 
-- **token**：服务器 `/etc/firmware-server.env` 里的 `FIRMWARE_PUBLISH_TOKEN` 值
+- **token 获取（三选一）**：
+  1. 服务器上查看：`cat /etc/firmware-server.env`（root，`FIRMWARE_PUBLISH_TOKEN=` 后面的值）
+  2. 页面右上角 🔑 按钮可查看**是否已配置**（尾号提示），点击可设置/更换（存本机浏览器，不上传）
+  3. 服务运维者直接告知（本项目单用户自用场景）
+- **token 写法（二选一）**：
+  - 环境变量引用（推荐进 git 的配置）：`"token": "${FIRMWARE_PUBLISH_TOKEN}"`，运行前 `$env:FIRMWARE_PUBLISH_TOKEN="<值>"`
+  - **明文直写**（跨网设备/一次性任务最省事）：`"token": "<64位hex>"`——注意**别把带明文 token 的 config 提交到公开仓库**
 - **地址权威**：段地址/烧录参数来自 `build/flash_args`（idf.py 产出），config 不用写
 - **分区类型**：发布端自动解析 `partition-table.bin` 按地址匹配（app/factory、data/littlefs 等）；assets 可用 `type/subType` 显式声明
 
