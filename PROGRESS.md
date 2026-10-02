@@ -12,6 +12,7 @@
 1. `REQUIREMENTS.md` — 6 项决策（D1–D6）+ v1 验收清单（F-01…F-18）
 2. `DESIGN.md` — 三层架构、设备状态机（§4.1）、错误分类（§4.4）、部署（§7）
 3. `research/esp32-web-flash/REPORT.md` — 选型调研报告（为什么这么做）
+4. `research/serial-monitor-reset/REPORT.md` — Web 串口日志与「不掉 COM 复位」调研（监视中复位立项依据）
 4. `AGENTS.md` — 接手纪律与命令
 5. `IDF-ENV.md` — IDF 环境激活/命令/坑（本机操作指南）
 6. `EXECUTION-PLAN.md` — 分片路线 + 五道验收门（唯一权威线路）
