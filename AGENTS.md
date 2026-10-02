@@ -30,8 +30,9 @@
 4. **改错误文案/分类**同步 `DESIGN.md` §4.4 与 `tests/errors.test.ts`。
 5. 提交信息用中文，正文引用对应 `F-xx` 验收项。
 6. 实机相关改动（T4+）不能只靠单测：在 `PROGRESS.md` 记录人工清单执行结果。
-7. 不做的事（见 REQUIREMENTS）：读取备份、ELF 转换、espefuse/espsecure、多用户鉴权、Safari 支持。（串口监视已入 v1：F-16，且方向1 下**连接后自动开启**，没有手动开关。）
+7. 不做的事（见 REQUIREMENTS）：读取备份、ELF 转换、espefuse/espsecure、多用户鉴权、Safari 支持。（串口监视已入 v1：F-16，**2026-10-02 起默认关闭、手动 ▶ 开始**；独立日志窗口已移除。）
 8. **日志渲染纪律**（实测洪峰卡页教训）：LogEntry 必须带 `seq` 作稳定 key；批量 flush（120ms）后才推视图；显示上限 500；不得恢复"每行一次响应式更新/索引 key 全量 diff"的写法。
+9. **自动发布（2026-10-02 用户授权）**：`test` + `run build` 全绿并提交后，**直接按 SERVER.md 流程发布云端，不再询问**；发布后必核对 `ExecMainStartTimestamp` 与外网入口 bundle 名，失败必须报告。
 
 ## 目录约定
 
