@@ -16,9 +16,6 @@ const FLUSH_MS = 120
 const HISTORY_KEY = 'fw.flashHistory'
 const HISTORY_CAP = 20
 
-/** 跨窗口日志同步频道（主窗口=数据源；?panel=log 独立日志窗口=订阅者） */
-const LOG_CHANNEL = 'fw-log'
-
 /** 烧录历史条目（localStorage 持久，F 追加：排障/追溯） */
 export interface FlashHistoryItem {
   ts: number
@@ -34,16 +31,6 @@ export function useSession() {
   const log = new Logger()
   const ops = createDeviceOps(log)
   const device = new DeviceManager(ops)
-  /** 跨窗口日志同步：本窗口（数据源）向 ?panel=log 独立窗口广播 */
-  const logChannel: BroadcastChannel | null =
-    typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(LOG_CHANNEL) : null
-  logChannel?.addEventListener('message', (ev: MessageEvent) => {
-    const m = ev.data as { type?: string } | null
-    if (m?.type === 'sync-req') {
-      // 独立窗口请求全量同步
-      logChannel.postMessage({ type: 'sync', logs: logs.value })
-    }
-  })
   /** 跨标签设备互斥锁（Web Locks）：防多标签同时连一个串口 */
   const deviceLock = createDeviceLock()
 
@@ -117,8 +104,6 @@ export function useSession() {
     if (logs.value.length > DISPLAY_CAP) {
       logs.value.splice(0, logs.value.length - DISPLAY_CAP)
     }
-    // 独立日志窗口同步（append 本批）
-    logChannel?.postMessage({ type: 'append', entries: batch })
   }
 
   function scheduleFlush(): void {
@@ -227,7 +212,6 @@ export function useSession() {
       log.clear()
       logs.value = []
       pending.length = 0
-      logChannel?.postMessage({ type: 'clear' })
     },
   }
 }

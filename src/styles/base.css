@@ -14,6 +14,9 @@
   --info: #569cd6; /* 设备日志/信息行（VS Code 蓝） */
   --warn: #cca700;
   --err: #f14c4c;
+  /* N3：可拖拽尺寸（Sidebar/BottomPanel 拖拽条写入，localStorage fw.sbW/fw.bpH 持久） */
+  --sb-w: 250px;
+  --bp-h: 264px;
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 

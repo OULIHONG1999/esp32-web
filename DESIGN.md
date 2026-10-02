@@ -61,14 +61,14 @@ disconnected
       ├─(用户取消)→ disconnected（静默）
       └─ → detecting                  （esptool main()：自动复位 + 检测芯片）
            ├─(识别失败)→ error ─disconnect()→ disconnected
-           └─ ok → ready              （已连接 · 日志监视中：startStream 自动开启）
-                ├─ flash()   → working（stopStream → 写入 → closeEsptool → startStream）→ ready
+           └─ ok → ready              （已连接 · 日志监视**默认关闭** N4：streamWanted=false；▶手动开启后保持，重连自动恢复）
+                ├─ flash()   → working（stopStream(仅监视开着时) → 写入 → closeEsptool → 按 streamWanted 恢复流）→ ready
                 ├─ erase()   → working（同上临界区）→ ready
                 ├─ hardReset() → working → ready
                 ├─ switchPort() → 停流关会话 → requesting（强制弹选择器）
                 └─ disconnect() → disconnected
 ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notice
-任意临界区失败 → 恢复日志流回 ready（lastError 置位）；恢复失败 → error
+任意临界区失败 → 按 streamWanted 恢复日志流回 ready（lastError 置位）；恢复失败 → error
 ```
 
 规则：
@@ -170,26 +170,33 @@ interface FirmwareSet {
 > 蓝本：`public/design-preview/b-ide.html`（选型记录见 PAGE-REDESIGN.md）；accent 选型定案=**品牌绿**（状态栏为深绿色条 `--status`）。
 
 ```
-区1 活动栏 48px   ▣设备 ⬚固件 ◷版本时间线(NEW红点) 📁项目库 ▤历史 ◉服务 …(底)⚙切换主题
-                  选中态=左侧 accent 指示条；点击=切工作区标签 / 滚动侧栏定位 / 主题
-区2 侧栏 250px    「资源管理器」树（全部 TreeItem 树行，无卡片按钮）：
+区1 活动栏 48px   ▣设备 ⬚固件 ◷版本(NEW红点) 📁项目 ▤历史 ◉服务 …(底)⚙设置
+                  图标下带中文小标签（N6）；选中态=左侧 accent 指示条；点击=切标签/定位/历史开面板/主题
+区2 侧栏 250px    「资源管理器」树（TreeItem 树行；右缘可拖拽 N3 → --sb-w / fw.sbW）：
                   ▾ 设备 —— 信息行(芯片/MAC/Flash/状态灯) + 操作树行(▶连接(accent)/⇄切换/⏏断开)
                              + 错误条(D3)
-                  ▾ 项目库 —— 📁项目/变体（☆订阅/↻刷新在节头）→ 版本行(★发布/快照/NEW 徽标)
-                               点版本行 = 下载载入并切到固件标签
+                  ▾ 项目库 —— 📁项目/变体（折叠 N1：📁/📂 +「N 版本」；点文件夹=选中+折叠切换）
+                               → 版本行(★发布=绿底徽标 · 快照=灰淡 · NEW=红) 点版本行=下载载入
                   ▾ 快捷操作 —— ＋添加 bin… / ⌫完全擦除 / ↻硬复位（后两个仅 canOperate 可见）
-                  底部 side-card（单张卡）：烧录历史(N)常显列表 ── 服务在线·项目/版本·数据·↻
+                  底部 side-card：服务在线 · 项目/版本/数据 · ↻（烧录历史已移入区4）
 区3 工作区        SSE 横幅（顶部）+ 标签页 [固件 · <文件名> | 版本时间线]（EditorTabs 注册式）
                   固件 = 面包屑 + 参数卡(FLASH MODE/FREQ/SIZE/CHIP FAMILY/合计)
-                        + 操作行(⚡烧录/擦除/硬复位/重新载入/添加bin) + 烧录表格 + 进度条
+                        + 操作行(⚡烧录/擦除/硬复位/重新载入/添加bin/**⬇导出固件包 N7**)
+                        + 烧录表格 + 进度条
+                  导出固件包 = 当前清单全部段 + flash_args + README.txt → zip（core/zip STORE 零依赖）
                   时间线 = 选中项目后：晋升/回滚/保留数（VersionTimeline 原组件）
-区4 底部面板 264px 三标签 [问题 | 输出 | 日志监视器]（问题=warn/error 行、输出=device 行，真实过滤）
-                  头部右侧控制行：级别▾(v-model 过滤) ⏸暂停视图 ⏹/▶监视 ⧉独立窗口 导出 清空 [+▾收起]
-                  日志监视器=LogPanel embedded 模式（行号/❯闪烁光标；数据流与渲染纪律不动）
+区4 底部面板      高度上缘可拖拽（N3 → --bp-h / fw.bpH，默认 264px）
+                  四标签 [问题 | 输出 | 日志监视器 | 烧录历史 N5]
+                  （问题=warn/error、输出=device 真实过滤；历史=原侧栏模块移入，手动点击查看）
+                  头部右侧控制行：级别▾(v-model 过滤) ⏸暂停视图 ⏹/▶监视 导出 清空 [+▾收起]
+                  （⧉ 独立窗口已整链移除 N2：按钮/?panel=log/fw-log 协议）
+                  日志监视器 = LogPanel 纯终端体（行号/❯闪烁光标；渲染纪律不动）
+                  **日志监视默认关闭（N4）**：连接后手动「▶ 开始监视」；streamWanted 意图跨重连保持，
+                  烧录临界区只按意图恢复（手动暂停后烧录不再抢串口）
 区5 状态栏 26px    accent 绿色条通栏：● state · 芯片 · ⌀MAC · 品牌 ‖ 右:烧录参数 · ★订阅N · ◉服务在线 x/y · 订阅 · 🔑 · 版本
 ```
 
-**数据层**：`useFirmwareWorkspace`（单例）共享「烧录表格 rows + 项目库 registry 状态」——侧栏树 / 固件标签 / 时间线标签三处同源；`useServiceStatus`（单例）供 side-card 与状态栏共用 /api/status 快照。依赖注入（getChipName/onParams/onLoaded）。**core/glue 零改动**，日志渲染纪律（seq key/批量 flush/500 上限/暂停视图）与 `?panel=log` 独立窗口保持原样。
+**数据层**：`useFirmwareWorkspace`（单例）共享「烧录表格 rows + 项目库 registry 状态」——侧栏树 / 固件标签 / 时间线标签三处同源；`useServiceStatus`（单例）供 side-card 与状态栏共用 /api/status 快照。依赖注入（getChipName/onParams/onLoaded）。**core 变更仅 N4 监视意图语义**（`streamWanted`，131 测试同步守护）；日志渲染纪律（seq key/批量 flush/500 上限/暂停视图）不动；`?panel=log` 独立窗口与 `fw-log` BroadcastChannel 协议已移除（N2）。
 
 组件注册式扩展：新标签 = `workTabs` 加一行 + `#pane-<id>` 插槽；新侧栏节 = `<TreeSection>` + `<TreeItem>`；新活动栏图标 = `activityItems` 加一行。
 

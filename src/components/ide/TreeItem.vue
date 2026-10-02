@@ -130,10 +130,15 @@ defineProps<{
 .ti__tag--rel {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ti__tag--snap {
+  opacity: 0.72;
 }
 .ti__tag--new {
   color: var(--err);
   border-color: color-mix(in srgb, var(--err) 55%, transparent);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
 }
 .ti__tail {
   margin-left: auto;

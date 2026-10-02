@@ -77,7 +77,7 @@ async function connectReady(deps: DeviceDeps): Promise<DeviceManager> {
 }
 
 describe('DeviceManager（方向1 设备常驻模型）', () => {
-  it('首次连接：无已授权端口 → 弹选择器 → 识别 → 关 esptool 归还端口 → 开日志流', async () => {
+  it('首次连接：识别 → 归还端口 → 日志监视默认关闭（N4 手动开启）', async () => {
     const { deps, rec } = makeDeps()
     const d = await connectReady(deps)
     expect(rec.calls).toEqual([
@@ -85,18 +85,30 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
       'pickPort',
       'detect',
       'closeEsptool',
-      'startStream',
     ])
     expect(d.chip?.name).toBe('ESP32-S3')
-    expect(d.isStreamOn).toBe(true)
+    expect(d.isStreamOn).toBe(false)
   })
 
-  it('再次连接：复用已授权端口，不弹选择器（同样先归还端口再开流）', async () => {
+  it('再次连接：复用已授权端口，不弹选择器；监视未开启则仍不开流', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = new DeviceManager(deps)
     await d.connect()
-    expect(rec.calls).toEqual(['openExistingPort', 'detect', 'closeEsptool', 'startStream'])
+    expect(rec.calls).toEqual(['openExistingPort', 'detect', 'closeEsptool'])
     expect(d.state).toBe('ready')
+  })
+
+  it('重连保持用户意图：手动开启过监视 → 断开再连自动恢复开流', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = new DeviceManager(deps)
+    await d.connect()
+    await d.resumeMonitor()
+    expect(d.isStreamOn).toBe(true)
+    await d.disconnect()
+    rec.calls.length = 0
+    await d.connect()
+    expect(rec.calls).toContain('startStream')
+    expect(d.isStreamOn).toBe(true)
   })
 
   it('用户取消端口选择 → 静默回 disconnected（不进 error）', async () => {
@@ -120,6 +132,7 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
   it('烧录临界区：写入 → 自动硬复位 → 恢复日志流（调用顺序，F-07）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor() // N4：先手动开启监视（意图=开）
     rec.calls.length = 0
     await d.flash(parts)
     expect(d.state).toBe('ready')
@@ -127,9 +140,21 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     expect(d.isStreamOn).toBe(true)
   })
 
+  it('默认未开启监视：烧录临界区结束后保持关闭（N4 意图=关）', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    rec.calls.length = 0
+    await d.flash(parts)
+    expect(d.state).toBe('ready')
+    expect(d.isStreamOn).toBe(false)
+    expect(rec.calls).not.toContain('startStream')
+    expect(rec.calls).not.toContain('stopStream')
+  })
+
   it('烧录失败：日志流仍恢复、状态回 ready、lastError 置位、异常抛给调用方', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true, failFlash: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor() // 意图=开 → 失败后也要恢复
     rec.calls.length = 0
     await expect(d.flash(parts)).rejects.toThrow()
     expect(d.state).toBe('ready')
@@ -141,6 +166,7 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
   it('擦除与硬复位走同样的临界区模式', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor()
     rec.calls.length = 0
     await d.erase()
     await d.hardReset()
@@ -150,9 +176,10 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     ])
   })
 
-  it('切换端口：停流关会话后强制弹选择器', async () => {
+  it('切换端口：停流关会话后强制弹选择器（意图保持 → 重连开流）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor()
     rec.calls.length = 0
     await d.switchPort()
     expect(rec.calls).toEqual([
@@ -164,6 +191,7 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
   it('断开设备：停流 + 关会话 → disconnected', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor()
     rec.calls.length = 0
     await d.disconnect()
     expect(rec.calls).toEqual(['stopStream', 'closeEsptool'])
@@ -177,15 +205,12 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     let notice = ''
     d.setNoticeHandler((m) => (notice = m))
     await d.connect()
-    // 手动触发 stream handlers 的 error 分支：通过 deps 捕获 handlers
+    // N4：连接后默认不开流 → 连接 notice 提示手动开启
     expect(d.state).toBe('ready')
-    // 模拟拔线：直接调用内部行为 —— 用 startStream 捕获的 handler
+    expect(notice).toContain('开始监视')
     const streamDeps = deps as DeviceDeps & { _h?: StreamHandlers }
-    // 重新连接一次以获取 handlers 引用不可行；改为通过 stopStream 错误路径验证降级：
-    // 这里直接断言 ready 态下 flash 可用即可（拔线路径由 glue 的 onStopped 回调驱动）
     await d.flash(parts)
     expect(d.state).toBe('ready')
-    expect(notice).toBe('')
     void streamDeps
   })
 
@@ -224,6 +249,7 @@ describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
       rec.calls.push('reopenForRetry')
     }
     const d = await connectReady(deps)
+    await d.resumeMonitor() // 意图=开
     const notices: string[] = []
     d.setNoticeHandler((m) => notices.push(m))
     rec.calls.length = 0
@@ -252,6 +278,7 @@ describe('D1 自动降速重试（F-05 / DESIGN §4.4）', () => {
       rec.calls.push('reopenForRetry')
     }
     const d = await connectReady(deps)
+    await d.resumeMonitor() // 意图=开 → 失败也恢复
     rec.calls.length = 0
     await expect(d.flash(parts)).rejects.toThrow()
     expect(attempts).toBe(2)
@@ -317,6 +344,7 @@ describe('D2 操作超时（EXECUTION-PLAN 实现债）', () => {
       const { deps, rec } = makeDeps({ hasExistingPort: true })
       deps.flash = () => new Promise<void>(() => {}) // 永不结束、无进度
       const d = await connectReady(deps)
+      await d.resumeMonitor() // 意图=开 → 超时恢复后流仍开
       rec.calls.length = 0
       const p = d.flash(parts)
       const assertion = expect(p).rejects.toThrow()
@@ -378,10 +406,11 @@ describe('D3 ready 态错误可见与清除', () => {
   })
 })
 
-describe('手动监视开关（F-16 手动 · pause/resume）', () => {
+describe('手动监视开关（F-16 / N4 默认关闭 · pause/resume）', () => {
   it('ready 态 pause：停流 + notice 提示让出端口；再次 pause 幂等', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor() // 先手动开启
     const notices: string[] = []
     d.setNoticeHandler((m) => notices.push(m))
     rec.calls.length = 0
@@ -393,20 +422,24 @@ describe('手动监视开关（F-16 手动 · pause/resume）', () => {
     expect(rec.calls.filter((c) => c === 'stopStream')).toHaveLength(1)
   })
 
-  it('resume：重开流 + notice；未暂停时幂等', async () => {
+  it('resume：从默认关闭开启流 + notice；重复 resume 幂等', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    expect(d.isStreamOn).toBe(false) // N4 默认关
     const notices: string[] = []
     d.setNoticeHandler((m) => notices.push(m))
+    await d.resumeMonitor()
+    expect(rec.calls).toContain('startStream')
+    expect(d.isStreamOn).toBe(true)
+    expect(notices.some((n) => n.includes('开启'))).toBe(true)
     rec.calls.length = 0
-    await d.resumeMonitor() // 流已开 → 幂等无动作
+    await d.resumeMonitor() // 已开 → 幂等无动作
     expect(rec.calls).not.toContain('startStream')
     await d.pauseMonitor()
     rec.calls.length = 0
     await d.resumeMonitor()
     expect(rec.calls).toContain('startStream')
     expect(d.isStreamOn).toBe(true)
-    expect(notices.some((n) => n.includes('恢复'))).toBe(true)
   })
 
   it('未连接态 pause/resume 不动作（守卫 ready）', async () => {
@@ -418,20 +451,32 @@ describe('手动监视开关（F-16 手动 · pause/resume）', () => {
     expect(rec.calls).toHaveLength(0)
   })
 
-  it('手动暂停后烧录：临界区结束自动恢复日志流', async () => {
+  it('手动开启后烧录：临界区结束按意图自动恢复日志流', async () => {
     const { deps } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor()
+    expect(d.isStreamOn).toBe(true)
+    await d.flash(parts)
+    expect(d.state).toBe('ready')
+    expect(d.isStreamOn).toBe(true)
+  })
+
+  it('手动暂停（意图=关）后烧录：结束保持关闭，不再抢串口', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps)
+    await d.resumeMonitor()
     await d.pauseMonitor()
     expect(d.isStreamOn).toBe(false)
     await d.flash(parts)
     expect(d.state).toBe('ready')
-    expect(d.isStreamOn).toBe(true) // 烧录恢复编排覆盖手动状态（设计如此）
+    expect(d.isStreamOn).toBe(false) // 尊重用户暂停（N4 意图语义）
   })
 })
 describe('手动开关 emit 同步（按钮切换依赖）', () => {
   it('pause/resume 必须触发 subscribe（否则 UI 按钮不切换）', async () => {
     const { deps } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
+    await d.resumeMonitor()
     let ticks = 0
     d.subscribe(() => ticks++)
     const before = ticks

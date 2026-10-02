@@ -18,10 +18,39 @@ const emit = defineEmits<{
   'update:modelValue': [id: string]
   'toggle-collapsed': []
 }>()
+
+/** N3：上缘拖拽调高度 → --bp-h + localStorage fw.bpH */
+function startResize(e: PointerEvent): void {
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture(e.pointerId)
+  document.body.style.userSelect = 'none'
+  const statusH = 26
+  const onMove = (ev: PointerEvent): void => {
+    const h = Math.round(
+      Math.min(window.innerHeight * 0.75, Math.max(120, window.innerHeight - ev.clientY - statusH)),
+    )
+    document.documentElement.style.setProperty('--bp-h', `${h}px`)
+  }
+  const onUp = (ev: PointerEvent): void => {
+    el.releasePointerCapture(ev.pointerId)
+    el.removeEventListener('pointermove', onMove)
+    el.removeEventListener('pointerup', onUp)
+    document.body.style.userSelect = ''
+    try {
+      const cur = getComputedStyle(document.documentElement).getPropertyValue('--bp-h').trim()
+      if (cur) globalThis.localStorage?.setItem('fw.bpH', cur)
+    } catch {
+      /* 私隐模式忽略 */
+    }
+  }
+  el.addEventListener('pointermove', onMove)
+  el.addEventListener('pointerup', onUp)
+}
 </script>
 
 <template>
   <section class="bp" :class="{ 'bp--collapsed': collapsed }">
+    <div class="bp__rz" title="拖拽调整面板高度" @pointerdown="startResize" />
     <div class="bp__bar">
       <button
         v-for="t in tabs"
@@ -64,10 +93,31 @@ const emit = defineEmits<{
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 264px;
+  height: var(--bp-h, 264px);
+  position: relative;
 }
 .bp--collapsed {
   height: auto;
+}
+/* N3：上缘拖拽条 */
+.bp__rz {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 6;
+  background: transparent;
+}
+.bp__rz:hover,
+.bp__rz:active {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+@media (max-width: 960px) {
+  .bp__rz {
+    display: none;
+  }
 }
 .bp--collapsed .bp__body {
   display: none;

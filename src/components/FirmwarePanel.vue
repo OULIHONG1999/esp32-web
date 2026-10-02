@@ -7,6 +7,8 @@
 import { computed } from 'vue'
 import type { ChipInfo, FlashPart } from '../core/device'
 import type { FirmwareWorkspace } from '../composables/useFirmwareWorkspace'
+import { zipStore } from '../core/zip'
+import { buildFlashArgsText, buildReadmeText, type PackPart } from '../core/firmwarePack'
 
 const props = defineProps<{
   ws: FirmwareWorkspace
@@ -81,6 +83,46 @@ function onAddressChange(r: { address: number }, e: Event): void {
   if (v !== null) r.address = v
   else input.value = props.ws.hex(r.address)
 }
+
+/** N7：把当前清单全部段 + flash_args + README 打成 zip 下载 */
+async function exportPack(): Promise<void> {
+  const entries: { name: string; data: Uint8Array }[] = []
+  const packParts: PackPart[] = []
+  const used = new Set<string>()
+  for (const r of rows) {
+    if (!r.file) continue
+    let name = r.file.name
+    if (used.has(name)) name = `${r.label}-${r.id}-${name}`
+    used.add(name)
+    const data = new Uint8Array(await r.file.arrayBuffer())
+    entries.push({ name, data })
+    packParts.push({ address: r.address, fileName: name, label: r.label, size: data.byteLength })
+  }
+  if (packParts.length === 0) return
+
+  const s = props.ws.state
+  const source =
+    s.from === 'registry' && s.loadedProject
+      ? `${s.loadedProject} ${s.loadedRelease ?? ''}`.trim()
+      : '手动选文件'
+  const meta = { source, chipName: props.chipName, exportedAt: new Date().toISOString() }
+  const text = new TextEncoder()
+  entries.push({ name: 'flash_args', data: text.encode(buildFlashArgsText(packParts, s.flashParams)) })
+  entries.push({
+    name: 'README.txt',
+    data: text.encode(buildReadmeText(packParts, s.flashParams, meta)),
+  })
+
+  const zip = zipStore(entries)
+  const base = (s.loadedProject ?? 'firmware').replace(/[\\/:*?"<>|]/g, '-')
+  const blob = new Blob([zip as unknown as BlobPart], { type: 'application/zip' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${base}-${Date.now()}.zip`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -145,6 +187,15 @@ function onAddressChange(r: { address: number }, e: Event): void {
         重新载入版本
       </button>
       <button class="btn btn--ghost" type="button" @click="pickFiles()">添加 bin…</button>
+      <button
+        class="btn btn--ghost"
+        type="button"
+        :disabled="rows.length === 0"
+        title="把当前清单所有段 + flash_args + README 打包为 zip 下载（可离线 esptool 烧录）"
+        @click="exportPack"
+      >
+        ⬇ 导出固件包
+      </button>
     </div>
 
     <p v-if="ws.state.registryMsg" class="fw__msg">{{ ws.state.registryMsg }}</p>

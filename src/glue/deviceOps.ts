@@ -134,7 +134,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
         },
       })
       await monitor.start(lastPort, 115200)
-      log.add({ level: 'info', source: 'app', text: '实时日志已自动开启（115200）' })
+      log.add({ level: 'info', source: 'app', text: '实时日志已开启（115200）' })
     },
 
     async stopStream(): Promise<void> {

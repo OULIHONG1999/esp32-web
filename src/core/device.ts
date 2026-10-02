@@ -144,6 +144,8 @@ export class DeviceManager {
   private lineHandler: (line: string) => void = () => {}
   private noticeHandler: (message: string) => void = () => {}
   private streamOn = false
+  /** 用户对日志监视的意图（N4：默认关闭、手动开启；跨重连保持，页面加载为 false） */
+  private streamWanted = false
   private readonly detectMs: number
   private readonly flashIdleMs: number
 
@@ -237,8 +239,14 @@ export class DeviceManager {
       this.chip = await withTimeout(this.deps.detect(), this.detectMs, 'chip detect')
       // 互斥编排：识别用的 esptool 会话必须先归还端口，日志流才能 open
       await this.deps.closeEsptool()
-      await this.openStream()
+      // 日志监视默认关闭（2026-10-02 N4）：仅当用户此前手动开启过（streamWanted）才自动恢复
+      if (this.streamWanted) {
+        await this.openStream()
+      }
       this.transition('ready')
+      if (!this.streamOn) {
+        this.noticeHandler('已连接——实时日志监视默认关闭，点面板「▶ 开始监视」查看设备输出')
+      }
     } catch (err) {
       // detect 超时以 phase='detect' 分类（→ ChipDetectFail 超时文案）
       const isTimeout = err instanceof Error && err.name === 'TimeoutError'
@@ -322,7 +330,10 @@ export class DeviceManager {
       /* ignore */
     }
     try {
-      await this.openStream()
+      // 只恢复用户开启过监视的会话（N4：从未开启 / 已手动暂停 → 保持关闭）
+      if (this.streamWanted) {
+        await this.openStream()
+      }
       this.transition('ready')
     } catch (err) {
       this.lastError = classifyError(err, 'connect')
@@ -403,21 +414,27 @@ export class DeviceManager {
   }
 
   /**
-   * 手动暂停实时日志（F-16 手动开关 · 2026-09-29）：
-   * 释放串口 → 本机 idf.py monitor 等外部工具可占用；ready 态有效，幂等。
+   * 手动暂停实时日志（F-16 · N4 后为「关闭监视」语义）：
+   * 释放串口 → 本机 idf.py monitor 等外部工具可占用；意图置为关闭，烧录后不再自动恢复。
+   * ready 态有效，幂等。
    */
   async pauseMonitor(): Promise<void> {
     if (this.state !== 'ready' || !this.streamOn) return
+    this.streamWanted = false
     await this.closeStream()
-    this.noticeHandler('已手动暂停实时日志——串口已释放，可使用外部工具（如 idf.py monitor）')
+    this.noticeHandler('已停止实时日志监视——串口已释放，可使用外部工具（如 idf.py monitor）')
     this.emit() // 通知订阅方刷新 streamOn/按钮（缺此行则按钮不切换）
   }
 
-  /** 手动恢复实时日志；ready 态且当前未开启时有效，幂等 */
+  /**
+   * 手动开启实时日志（N4：连接后默认关闭，由此入口打开）；
+   * 意图置为开启——之后烧录临界区结束与重连都会自动恢复。ready 态幂等。
+   */
   async resumeMonitor(): Promise<void> {
     if (this.state !== 'ready' || this.streamOn) return
+    this.streamWanted = true
     await this.openStream()
-    this.noticeHandler('实时日志已手动恢复')
-    this.emit() // 同上：恢复后按钮须切回"停止监视"
+    this.noticeHandler('实时日志监视已开启')
+    this.emit() // 同上：开启后按钮须切回"停止监视"
   }
 }

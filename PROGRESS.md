@@ -49,6 +49,8 @@ src/core/device.ts            # DeviceManager 设备常驻状态机（deps 注�
 src/core/log.ts               # Logger 环形缓冲 + seq 序号 + esptool 行分级
 src/core/errors.ts            # 七类错误翻译（TimeoutError name 前置分类）
 src/core/lines.ts             # 串口行切分器（纯逻辑）
+src/core/zip.ts               # STORE zip 生成器（N7 导出固件包，零依赖可单测）
+src/core/firmwarePack.ts      # flash_args/README 文本生成（N7）
 src/glue/esptool.ts           # esptool-js 唯一接触面
 src/glue/monitor.ts           # SerialMonitor 实时读取流
 src/glue/deviceOps.ts         # DeviceDeps 实现：lastPort 复用 + 流/esptool 互斥 + reopenForRetry（D1 降速重建）
@@ -133,7 +135,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-13 chipFamily 比对 | ✅ | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 实测顺带验证 |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
-| F-16 实时串口日志 | 🔄 | 机制实测正常（烧录前后自动挂起/恢复）；**hello_world console=UART0（sdkconfig），USB 口无 app 输出**——待 console 改 USB Serial/JTAG 后闭环 |
+| F-16 实时串口日志 | ✅ | console 问题19 已关（实测有输出）；**2026-10-02 N4 改默认关闭**：手动 ▶ 开始监视，streamWanted 跨重连保持，烧录按意图恢复；独立窗口（原附带项）已按用户要求移除 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | ✖ 已移除 | 2026-09-29 应用户要求整体删除（云端部署后失效）：按钮/useIdfBuild/vite 中间件/tests 全清；DESIGN §4.6 同步 |
@@ -147,7 +149,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 ## 下一步
 
 1. **页面功能优化（进行中）**：门5 过、v1.5 核心关账——当前阶段=收集用户对页面功能的优化建议并落地。
-2. **watch 后台网络问题（问题 20，backlog）**：发布暂用手动 once；根因定位（疑进程会话网络策略/安全软件）。
+2. **硬复位按钮不可用（2026-10-02 用户报告，backlog 待查）**：页面点击无响应——先记录不动，排查方向：runCritical assert / glue hardReset 序列。
+3. **watch 后台网络问题（问题 20，backlog）**：发布暂用手动 once；根因定位（疑进程会话网络策略/安全软件）。
 3. **HTTPS 尾巴**：文档已挂 `https://firmware.example.com/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS）；后续可加使用说明页。
 4. **门2 挂起项（用户暂缓）**：D4/boot 日志核对——console 已切（问题19 关闭），恢复时一并做。
 5. 等用户拍板：主操作按钮方案（见会话记录 2026-09-26）。
@@ -156,6 +159,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-10-02（页面任务批次 N1–N7）**：① **N1 项目库折叠**——点文件夹 📁/📂+「N 版本」折叠切换（选中兼折叠）；快照/发布版区分强化（★发布=绿底徽标、快照灰淡、NEW 红）；② **N2 独立窗口整链移除**——⧉ 按钮/?panel=log 分支/fw-log BroadcastChannel 收发/LogPanel minimal 全删，LogPanel 精简为纯终端体；③ **N3 拖拽调尺寸**——侧栏右缘/底板上缘 6px 拖拽条（pointer capture），`--sb-w`/`--bp-h` + localStorage fw.sbW/fw.bpH 持久；④ **N4 日志监视默认关闭**（core 变更）——新增 `streamWanted` 意图位：连接不再自动开流（连接 notice 提示手动开启），手动 ▶ 后跨重连保持，烧录临界区只按意图恢复（**暂停后烧录不再抢串口**）——DESIGN §4.1 状态图/F-16/13 个测试同步重写；⑤ **N5 烧录历史**移入底部面板第 4 标签（活动栏「历史」直接开面板），side-card 只留服务；⑥ **N6 活动栏中文标签**——图标下 9.5px 设备/固件/版本/项目/历史/服务/设置；⑦ **N7 导出固件包**——操作行「⬇ 导出固件包」：全部段+flash_args+README.txt 打 zip（新 core/zip STORE 零依赖 + firmwarePack 文本生成，+6 测试含 crc32 标准向量与 zip 回环解析）。**131 测试 + build 全绿**，Playwright DOM 验收（标签/折叠/拖拽条/默认关监视/无独立窗口）通过。硬复位不可用问题仅记录（下一步2）。
 - **2026-10-02（b-ide 新版上云）**：按 SERVER.md 流程部署——build（index-8VoAskEc.js）→ Compress-Archive → scp → unzip → systemctl restart（ExecMainStartTimestamp=10-02 12:04:16 核对通过）。外网验证：https 入口 bundle ✓、http:80 只读通道 ✓、/design-preview/b-ide.html ✓、/docs/DEPLOY.md ✓、/api/status ✓（2 项目/14 版本）。注：首轮 ssh 重启静默失败（unzip backslash 警告后命令链中断），按 SERVER.md「unzip 成功≠进程重启」教训补重启+时间戳核对。
 - **2026-10-02（页面重排：b-ide 整页复刻）**：应用户「完全以 design-preview/b-ide.html 为模板、旧内容全拆」两轮重构——第一轮五区骨架（ActivityBar/Sidebar/TreeSection/TreeItem/EditorTabs/BottomPanel/StatusBar 注册式组件 + base.css IDE 色系 token --activity/--status，accent 定案=品牌绿）；第二轮模板复刻：设备/项目库/快捷操作全改 VS Code 树行（连接操作=accent 树行）、侧栏底部合一张 side-card（FlashHistory plain 模式+服务行）、底部面板三标签**问题=warn/error、输出=device、日志监视器=LogPanel embedded（控件上提面板头：级别▾/⏸/⏹/⧉/导出/清空）**、状态栏补 ⌀MAC/★订阅N/◉服务在线、活动栏顺序+◷NEW红点、标签动态名（固件 · <文件名>）、终端行号+❯闪烁光标。状态上提 useFirmwareWorkspace（rows+registry 三处共享）+ useServiceStatus（side-card/状态栏共用）；删除 ConnectPanel/DashboardCard/SidebarSection；vite proxy 补 /api/status /api/token。**红线守住：core/glue 零改动、日志渲染纪律与 ?panel=log 不变，122 测试+build 全绿**；Playwright 全量交互回归（选项目→时间线→载入→dio/80m/2MB 注入→面包屑）通过。踩坑：TreeSection 裸 `open` 标识符不解析 props（withDefaults+props.open 修复）；vite HMR 陈旧需重启 dev。
 - **2026-09-29（移除⚡一键载入与 IDF build 中间件）**：应用户要求删除本地构建载入/编译链路（云端部署后失效）——删 `src/api/buildArtifacts.ts`、`src/api/buildCommands.ts`、`src/composables/useIdfBuild.ts`、`tests/api.test.ts`（5 用例）与 `vite.config.ts` 的 `idfBuildArtifacts()` 插件（`/api/artifacts`、`/api/build` 五端点）；FirmwarePanel 去 ⚡按钮/`loadLocalBuild`/`buildRunning`/`autoLoadSignal`，VersionTimeline 去 `disabled` prop，App 去两绑定；`FlashParams` 类型迁至 `registry.ts`。项目库/时间线/SSE/烧录链路零改动。122 测试+build 全绿。文档同步：DESIGN §4.5/§4.6、REQUIREMENTS F-19、FIRMWARE-REGISTRY §0/§3、AGENTS、双份拷贝。

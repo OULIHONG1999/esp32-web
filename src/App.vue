@@ -33,6 +33,16 @@ import {
 
 const report = ref<EnvReport>(checkEnvironment())
 
+// ---- N3：侧栏宽度 / 底部面板高度持久化（拖拽条写入，首屏直接套用防闪） ----
+try {
+  const sbW = globalThis.localStorage?.getItem('fw.sbW')
+  const bpH = globalThis.localStorage?.getItem('fw.bpH')
+  if (sbW) document.documentElement.style.setProperty('--sb-w', sbW)
+  if (bpH) document.documentElement.style.setProperty('--bp-h', bpH)
+} catch {
+  /* 私隐模式忽略 */
+}
+
 const {
   state,
   chip,
@@ -144,15 +154,21 @@ const hasNewRelease = computed(
 )
 
 const activityItems = computed<ActivityItem[]>(() => [
-  { id: 'device', icon: '▣', title: '设备（定位侧栏）' },
-  { id: 'firmware', icon: '⬚', title: '固件（工作区）' },
-  { id: 'timeline', icon: '◷', title: '版本时间线（工作区）', badge: hasNewRelease.value },
-  { id: 'library', icon: '📁', title: '项目库（定位侧栏）' },
-  { id: 'history', icon: '▤', title: '烧录历史（定位侧栏）' },
-  { id: 'service', icon: '◉', title: '服务状态（定位侧栏）' },
+  { id: 'device', icon: '▣', label: '设备', title: '设备（定位侧栏）' },
+  { id: 'firmware', icon: '⬚', label: '固件', title: '固件（工作区）' },
+  {
+    id: 'timeline',
+    icon: '◷',
+    label: '版本',
+    title: '版本时间线（工作区）',
+    badge: hasNewRelease.value,
+  },
+  { id: 'library', icon: '📁', label: '项目', title: '项目库（定位侧栏）' },
+  { id: 'history', icon: '▤', label: '历史', title: '烧录历史（底部面板）' },
+  { id: 'service', icon: '◉', label: '服务', title: '服务状态（定位侧栏）' },
 ])
 const activityEndItems: ActivityItem[] = [
-  { id: 'theme', icon: '⚙', title: '切换日 / 夜主题' },
+  { id: 'theme', icon: '⚙', label: '设置', title: '切换日 / 夜主题' },
 ]
 const activeActivity = ref('firmware')
 
@@ -170,11 +186,12 @@ const workTabs = computed<WorkTab[]>(() => [
 ])
 const activeTab = ref('fw')
 
-// ---- 底部面板（b-ide 三标签：问题 / 输出 / 日志监视器） ----
+// ---- 底部面板（b-ide 三标签 + 烧录历史；历史=手动点击查看） ----
 const bottomTabs: BottomTab[] = [
   { id: 'issues', label: '问题' },
   { id: 'output', label: '输出' },
   { id: 'log', label: '日志监视器' },
+  { id: 'history', label: '烧录历史' },
 ]
 const activeBottom = ref('log')
 const bottomCollapsed = ref(false)
@@ -196,15 +213,6 @@ const serviceLabel = computed(() => {
   return s ? `◉ 服务在线 ${s.projects}/${s.releases}` : '◉ 服务…'
 })
 
-/** 独立日志窗口（面板头 ⧉ 按钮） */
-function openLogWindow(): void {
-  window.open(
-    `${location.pathname}?panel=log`,
-    'fw-log-window',
-    'width=860,height=920,menubar=no,toolbar=no,location=no',
-  )
-}
-
 /** 面板头「导出」 */
 function downloadLogs(): void {
   const blob = new Blob([exportLogs()], { type: 'text/plain;charset=utf-8' })
@@ -224,6 +232,12 @@ function onActivity(id: string): void {
   }
   if (id === 'timeline') {
     activeTab.value = 'tl'
+    return
+  }
+  if (id === 'history') {
+    // 烧录历史 = 底部面板第 4 标签（手动点击查看）
+    activeBottom.value = 'history'
+    bottomCollapsed.value = false
     return
   }
   if (id === 'theme') {
@@ -259,9 +273,22 @@ function folderTags(opt: RegistryOption): TreeTag[] {
 
 function releaseTags(rel: RegistryRelease): TreeTag[] {
   const tags: TreeTag[] =
-    rel.type === 'release' ? [{ text: '★发布', kind: 'rel' }] : [{ text: '快照', kind: 'snap' }]
+    rel.type === 'release' ? [{ text: '★ 发布版', kind: 'rel' }] : [{ text: '快照', kind: 'snap' }]
   if (newReleaseIds.value[rel.id]) tags.push({ text: 'NEW', kind: 'new' })
   return tags
+}
+
+// ---- N1：项目文件夹折叠（点击文件夹=选中+折叠切换；版本行=载入） ----
+const collapsedFolders = ref<Record<string, boolean>>({})
+
+function folderKey(opt: RegistryOption): string {
+  return `${opt.projectId}/${opt.variant}`
+}
+
+function toggleFolder(opt: RegistryOption, i: number): void {
+  ws.selectOption(i)
+  const k = folderKey(opt)
+  collapsedFolders.value = { ...collapsedFolders.value, [k]: !collapsedFolders.value[k] }
 }
 
 const STATE_DOT: Record<string, 'ok' | 'off' | 'warn' | 'err'> = {
@@ -273,41 +300,10 @@ const STATE_DOT: Record<string, 'ok' | 'off' | 'warn' | 'err'> = {
   error: 'err',
 }
 
-// ---- 独立日志窗口模式（?panel=log：副屏日志页，数据由主窗口 BroadcastChannel 转发）----
-const isLogWindow = new URLSearchParams(location.search).get('panel') === 'log'
-const LOG_CHANNEL = 'fw-log'
-
-if (isLogWindow && typeof BroadcastChannel !== 'undefined') {
-  const ch = new BroadcastChannel(LOG_CHANNEL)
-  ch.addEventListener('message', (ev: MessageEvent) => {
-    const m = ev.data as { type?: string; logs?: unknown[]; entries?: unknown[] } | null
-    if (!m) return
-    if (m.type === 'sync' && Array.isArray(m.logs)) {
-      logs.value = m.logs as typeof logs.value
-    } else if (m.type === 'append' && Array.isArray(m.entries)) {
-      logs.value.push(...(m.entries as typeof logs.value))
-      if (logs.value.length > 500) logs.value.splice(0, logs.value.length - 500)
-    } else if (m.type === 'clear') {
-      logs.value = []
-    }
-  })
-  // 请求主窗口全量同步
-  ch.postMessage({ type: 'sync-req' })
-  // 主窗口若稍后才开，定期补请求（3s × 5 次收敛）
-  let tries = 0
-  const retry = setInterval(() => {
-    ch.postMessage({ type: 'sync-req' })
-    if (++tries >= 5) clearInterval(retry)
-  }, 3000)
-}
+// ---- 独立日志窗口已移除（2026-10-02 N2：?panel=log / BroadcastChannel 全链拆除）----
 
 function onRecheck(): void {
   report.value = checkEnvironment()
-}
-
-/** 独立日志窗口关闭（window.close 仅脚本打开的窗口允许） */
-function closeLogWindow(): void {
-  window.close()
 }
 
 function onErase(): void {
@@ -386,33 +382,8 @@ async function configureToken(): Promise<void> {
 </script>
 
 <template>
-  <!-- ═══ 独立日志窗口（?panel=log）：纯显示，数据由主窗口 BroadcastChannel 转发 ═══ -->
-  <div v-if="isLogWindow" class="logwin">
-    <header class="logwin__hd">
-      <span class="logwin__brand">📋 实时日志</span>
-      <span class="logwin__hint">独立窗口 · 连接与控制在主窗口</span>
-      <button class="logwin__close" type="button" title="关闭窗口" @click="closeLogWindow">
-        ✕ 关闭
-      </button>
-    </header>
-    <main class="logwin__main">
-      <LogPanel
-        :logs="logs"
-        :export-text="exportLogs"
-        :view-paused="viewPaused"
-        :stream-on="false"
-        :monitor-disabled="true"
-        :filter="bpFilter"
-        :minimal="true"
-        @clear="clearLogs"
-        @toggle-pause="toggleViewPause"
-        @update:filter="(f) => (bpFilter = f)"
-      />
-    </main>
-  </div>
-
   <!-- ═══ 主界面：IDE 五区骨架（b-ide 复刻） ═══ -->
-  <div v-else class="ide">
+  <div class="ide">
     <!-- 区1 活动栏（跨行） -->
     <ActivityBar
       v-model="activeActivity"
@@ -513,16 +484,19 @@ async function configureToken(): Promise<void> {
         <template v-else>
           <template v-for="(opt, i) in ws.state.options" :key="opt.projectId + '/' + opt.variant">
             <TreeItem
-              icon="📁"
+              :icon="collapsedFolders[folderKey(opt)] ? '📁' : '📂'"
               :label="opt.projectName + ' / ' + opt.variant"
+              :sub="collapsedFolders[folderKey(opt)] ? `${releasesOf(opt).length} 版本` : undefined"
               :active="ws.state.selectedIdx === i"
               :tags="folderTags(opt)"
-              @click="ws.selectOption(i)"
+              @click="toggleFolder(opt, i)"
             />
             <TreeItem
               v-for="rel in releasesOf(opt)"
+              v-show="!collapsedFolders[folderKey(opt)]"
               :key="rel.id"
               :indent="1"
+              :icon="rel.type === 'release' ? '★' : '·'"
               :label="rel.id"
               :tags="releaseTags(rel)"
               :active="rel.id === opt.release.id"
@@ -545,12 +519,9 @@ async function configureToken(): Promise<void> {
         <TreeItem v-if="state === 'ready'" icon="⇄" label="切换端口" @click="switchPort()" />
       </TreeSection>
 
-      <!-- b-ide 侧栏底部卡：烧录历史 + 服务状态 合一 -->
-      <div class="side-card">
-        <div id="sec-history">
-          <FlashHistory plain :history="flashHistory" @clear="clearHistory" />
-        </div>
-        <div id="sec-service" class="side-card__svc">
+      <!-- b-ide 侧栏底部卡：服务状态（烧录历史已移入底部面板标签） -->
+      <div id="sec-service" class="side-card">
+        <div class="side-card__svc" style="border-top: none; margin-top: 0; padding-top: 0">
           <span class="side-card__svc-live" :class="{ 'side-card__svc-live--bad': svc.err.value }">
             {{ svc.err.value ? '服务不可达' : '服务在线' }}
           </span>
@@ -644,9 +615,6 @@ async function configureToken(): Promise<void> {
         >
           {{ streamOn ? '⏹ 停止监视' : '▶ 开始监视' }}
         </button>
-        <button class="bp-ctl" type="button" title="在新窗口打开日志（适合副屏常驻）" @click="openLogWindow">
-          ⧉ 独立窗口
-        </button>
         <button class="bp-ctl" type="button" title="导出 .txt" @click="downloadLogs">导出</button>
         <button class="bp-ctl" type="button" title="清空日志" @click="clearLogs">清空</button>
       </template>
@@ -666,7 +634,7 @@ async function configureToken(): Promise<void> {
       <!-- 输出：设备串口输出（device 级） -->
       <template #output>
         <div class="bp-list">
-          <p v-if="deviceLogs.length === 0" class="bp-empty">（暂无设备串口输出——连接设备后自动采集）</p>
+          <p v-if="deviceLogs.length === 0" class="bp-empty">（暂无设备输出——连接后点「▶ 开始监视」采集）</p>
           <p v-for="e in deviceLogs" :key="e.seq" class="bp-row bp-row--device">
             <span class="bp-ts">{{ new Date(e.ts).toLocaleTimeString() }}</span>
             {{ e.text }}
@@ -675,20 +643,14 @@ async function configureToken(): Promise<void> {
       </template>
 
       <template #log>
-        <LogPanel
-          :logs="logs"
-          :export-text="exportLogs"
-          :view-paused="viewPaused"
-          :stream-on="streamOn"
-          :monitor-disabled="!canOperate"
-          :filter="bpFilter"
-          :embedded="true"
-          @clear="clearLogs"
-          @toggle-pause="toggleViewPause"
-          @pause-monitor="pauseMonitor"
-          @resume-monitor="resumeMonitor"
-          @update:filter="(f) => (bpFilter = f)"
-        />
+        <LogPanel :logs="logs" :view-paused="viewPaused" :filter="bpFilter" />
+      </template>
+
+      <!-- 烧录历史（原侧栏模块移入，手动点击查看） -->
+      <template #history>
+        <div class="bp-list">
+          <FlashHistory plain :history="flashHistory" @clear="clearHistory" />
+        </div>
       </template>
     </BottomPanel>
 
@@ -714,7 +676,7 @@ async function configureToken(): Promise<void> {
 /* ══════════ IDE 主骨架 ══════════ */
 .ide {
   display: grid;
-  grid-template-columns: 48px 250px minmax(0, 1fr);
+  grid-template-columns: 48px var(--sb-w, 250px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto 26px;
   height: 100vh;
   overflow: hidden;
@@ -977,59 +939,6 @@ async function configureToken(): Promise<void> {
   padding: 28px 20px;
   text-align: center;
   line-height: 1.7;
-}
-
-/* ══════════ 独立日志窗口 ══════════ */
-.logwin {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
-.logwin__hd {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-.logwin__brand {
-  font-weight: 700;
-  font-size: 14px;
-}
-.logwin__hint {
-  color: var(--muted);
-  font-size: 12px;
-}
-.logwin__close {
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--ink);
-}
-.logwin__main {
-  flex: 1;
-  min-height: 0;
-  padding: 12px 16px 16px;
-  display: flex;
-  flex-direction: column;
-  /* 日志盒铺满副窗：LogPanel 的 logbox 读取此变量 */
-  --log-height: calc(100vh - 165px);
-}
-.logwin__main :deep(.panel) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-.logwin__main :deep(.logbox) {
-  flex: 1;
-  height: auto;
-  min-height: 0;
 }
 
 /* ══════════ 响应式（窄屏回退：侧栏移上、活动栏隐藏） ══════════ */
