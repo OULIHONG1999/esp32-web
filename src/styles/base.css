@@ -1,27 +1,33 @@
 :root {
-  /* —— 夜间主题（默认）—— */
+  /* —— 夜间主题（默认）：IDE 控制台色系（VS Code 基调 + 品牌绿 accent）—— */
   color-scheme: dark;
-  --bg: #0d1117;
-  --panel: #161b22;
-  --border: #30363d;
-  --ink: #e6edf3;
-  --muted: #8b949e;
-  --accent: #3fb950; /* 修正：原 #2ea87d 在暗底对比不足，提亮 */
+  --bg: #1e1e1e; /* 工作区 / 编辑区底 */
+  --panel: #252526; /* 侧栏 / 卡片底 */
+  --chrome: #2d2d2d; /* 标签条 / 底部面板条 */
+  --activity: #333333; /* 活动栏（更深一档，VS Code 同款） */
+  --status: #1a7f4f; /* 状态栏色条（品牌绿深化，白字达标） */
+  --border: #3c3c3c;
+  --ink: #cccccc;
+  --muted: #858585;
+  --accent: #3fb950; /* 品牌绿（选型定案：不换蓝） */
   --accent-ink: #04150f; /* accent 色块上的文字（按钮/徽标） */
-  --info: #79c0ff; /* 设备日志/信息行 */
-  --warn: #d29922;
-  --err: #f85149;
+  --info: #569cd6; /* 设备日志/信息行（VS Code 蓝） */
+  --warn: #cca700;
+  --err: #f14c4c;
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 
 :root[data-theme='light'] {
-  /* —— 日间主题 —— */
+  /* —— 日间主题：VS Code Light 基调 —— */
   color-scheme: light;
-  --bg: #f6f8fa;
-  --panel: #ffffff;
-  --border: #d0d7de;
-  --ink: #1f2328;
-  --muted: #59636e;
+  --bg: #ffffff;
+  --panel: #f3f3f3;
+  --chrome: #ececec;
+  --activity: #ececec;
+  --status: #1a7f5a;
+  --border: #d4d4d4;
+  --ink: #3b3b3b;
+  --muted: #616161;
   --accent: #1a7f5a; /* 深绿：白底达标对比度 */
   --accent-ink: #ffffff;
   --info: #0a5ecc;
@@ -42,4 +48,26 @@ body {
 code,
 pre {
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+/* —— IDE 通用滚动条（细窄，双主题适配） —— */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

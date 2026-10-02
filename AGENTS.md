@@ -40,7 +40,7 @@ src/core/     纯逻辑（状态机/日志/错误）— 零依赖，改这里必
 src/glue/     esptool-js 粘合层 — 唯一允许 import esptool-js 的地方
 src/env/      环境自检
 src/api/      外部数据客户端（registry=v1.5 自含服务；dev 中间件 buildArtifacts 已移除）
-src/components/  Vue UI
+src/components/  Vue UI（ide/=五区骨架组件：活动栏/侧栏树/标签/底部面板/状态栏）
 server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发布/静态托管
 tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch 等）
 tests/        Vitest（node 环境）：*.test.ts=前端核心层；*.test.js=server/CLI

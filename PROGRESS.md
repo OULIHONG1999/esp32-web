@@ -53,7 +53,10 @@ src/glue/esptool.ts           # esptool-js 唯一接触面
 src/glue/monitor.ts           # SerialMonitor 实时读取流
 src/glue/deviceOps.ts         # DeviceDeps 实现：lastPort 复用 + 流/esptool 互斥 + reopenForRetry（D1 降速重建）
 src/composables/useSession.ts # Vue 接线：批量 flush、暂停视图、状态镜像
-src/components/               # EnvCheck / ConnectPanel / FirmwarePanel / LogPanel
+src/composables/useFirmwareWorkspace.ts # 固件工作区单例（rows+registry 侧栏树/固件页/时间线共享）
+src/composables/useServiceStatus.ts # /api/status 单例快照（side-card + 状态栏共用）
+src/components/ide/           # 五区组件：ActivityBar/Sidebar/TreeSection/TreeItem/EditorTabs/BottomPanel/StatusBar
+src/components/               # EnvCheck / FirmwarePanel / LogPanel / FlashHistory / VersionTimeline / ide/(五区组件)
 
 src/api/registry.ts           # v1.5 项目库客户端（registry/parts 下载、flattenLatest、flashParams 映射）
 server/{config,registry,multipart,publish,app,index}.js  # 自含服务（纯 JS 零依赖 node:http）+ rebuild.js 自愈
@@ -153,6 +156,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-10-02（页面重排：b-ide 整页复刻）**：应用户「完全以 design-preview/b-ide.html 为模板、旧内容全拆」两轮重构——第一轮五区骨架（ActivityBar/Sidebar/TreeSection/TreeItem/EditorTabs/BottomPanel/StatusBar 注册式组件 + base.css IDE 色系 token --activity/--status，accent 定案=品牌绿）；第二轮模板复刻：设备/项目库/快捷操作全改 VS Code 树行（连接操作=accent 树行）、侧栏底部合一张 side-card（FlashHistory plain 模式+服务行）、底部面板三标签**问题=warn/error、输出=device、日志监视器=LogPanel embedded（控件上提面板头：级别▾/⏸/⏹/⧉/导出/清空）**、状态栏补 ⌀MAC/★订阅N/◉服务在线、活动栏顺序+◷NEW红点、标签动态名（固件 · <文件名>）、终端行号+❯闪烁光标。状态上提 useFirmwareWorkspace（rows+registry 三处共享）+ useServiceStatus（side-card/状态栏共用）；删除 ConnectPanel/DashboardCard/SidebarSection；vite proxy 补 /api/status /api/token。**红线守住：core/glue 零改动、日志渲染纪律与 ?panel=log 不变，122 测试+build 全绿**；Playwright 全量交互回归（选项目→时间线→载入→dio/80m/2MB 注入→面包屑）通过。踩坑：TreeSection 裸 `open` 标识符不解析 props（withDefaults+props.open 修复）；vite HMR 陈旧需重启 dev。
 - **2026-09-29（移除⚡一键载入与 IDF build 中间件）**：应用户要求删除本地构建载入/编译链路（云端部署后失效）——删 `src/api/buildArtifacts.ts`、`src/api/buildCommands.ts`、`src/composables/useIdfBuild.ts`、`tests/api.test.ts`（5 用例）与 `vite.config.ts` 的 `idfBuildArtifacts()` 插件（`/api/artifacts`、`/api/build` 五端点）；FirmwarePanel 去 ⚡按钮/`loadLocalBuild`/`buildRunning`/`autoLoadSignal`，VersionTimeline 去 `disabled` prop，App 去两绑定；`FlashParams` 类型迁至 `registry.ts`。项目库/时间线/SSE/烧录链路零改动。122 测试+build 全绿。文档同步：DESIGN §4.5/§4.6、REQUIREMENTS F-19、FIRMWARE-REGISTRY §0/§3、AGENTS、双份拷贝。
 - **2026-09-29（门5 过）**：用户实测 S4 版本管理流程基本跑通、日志可用——晋升/回滚/时间线/retention 链路成立，v1.5 核心关账（S1–S4 四门全过）。F-13/F-20/F-24 转 ✅。当前阶段转入页面功能优化（用户给建议中）。
 - **2026-09-29（🎉 问题19 关闭 + 布局三优化）**：用户实测**"终于看见日志了"**——console=UART0 挂起项关闭，实时日志全链路打通。布局：① **日志按钮精简**——导出/清空收纳进 `⋯` 下拉，主行=暂停视图/监视开关/⧉独立窗口；② **页宽 1280→1560**（header/banner/main/状态卡四处）；③ **日志独立窗口**（`?panel=log`）：BroadcastChannel `fw-log` 三协议（sync-req/sync/append/clear）主窗口实时转发，副屏常驻看日志；副窗 minimal 模式（隐藏监视控制，连接归主窗）。127 测试+build 全绿，已部署（公网 panel=log/独立窗口/fw-log 三标记验证 ✓）。

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { FlashHistoryItem } from '../composables/useSession'
 
-defineProps<{
+const props = defineProps<{
   history: readonly FlashHistoryItem[]
+  /** side-card 嵌入模式：无 details/卡片壳，常显列表（b-ide 侧栏底部卡） */
+  plain?: boolean
 }>()
 defineEmits<{ clear: [] }>()
 
@@ -19,7 +21,36 @@ function fmtSize(n: number): string {
 </script>
 
 <template>
-  <details class="hist">
+  <!-- b-ide side-card 嵌入：仅标题行 + 列表 -->
+  <div v-if="props.plain" class="hist hist--plain">
+    <div class="hist__summary">
+      烧录历史（{{ history.length }}）
+      <button
+        v-if="history.length"
+        class="hist__clear"
+        type="button"
+        title="清空历史（仅本机浏览器记录）"
+        @click="$emit('clear')"
+      >
+        清空
+      </button>
+    </div>
+    <p v-if="history.length === 0" class="hist__empty">尚无记录——每次烧录（成功或失败）都会记在这里。</p>
+    <ul v-else class="hist__list">
+      <li v-for="(h, i) in history" :key="h.ts + '-' + i" class="hist__item">
+        <span class="hist__flag" :class="h.ok ? 'hist__flag--ok' : 'hist__flag--err'">
+          {{ h.ok ? '✓' : '✗' }}
+        </span>
+        <span class="hist__time">{{ fmt(h.ts) }}</span>
+        <span class="hist__chip">{{ h.chip }}</span>
+        <span class="hist__meta">{{ h.parts }} 段 · {{ fmtSize(h.bytes) }}</span>
+        <span v-if="!h.ok && h.error" class="hist__err" :title="h.error">{{ h.error }}</span>
+      </li>
+    </ul>
+  </div>
+
+  <!-- 默认：独立折叠卡 -->
+  <details v-else class="hist">
     <summary class="hist__summary">
       📜 烧录历史（{{ history.length }}）
       <button
@@ -55,6 +86,12 @@ function fmtSize(n: number): string {
   padding: 10px 14px;
   font-size: 13px;
 }
+.hist--plain {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
 .hist__summary {
   cursor: pointer;
   color: var(--muted);
@@ -62,8 +99,11 @@ function fmtSize(n: number): string {
   display: flex;
   align-items: center;
   gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .hist__clear {
+  margin-left: auto;
   background: none;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -71,6 +111,7 @@ function fmtSize(n: number): string {
   font-size: 11px;
   padding: 1px 8px;
   cursor: pointer;
+  font-family: inherit;
 }
 .hist__empty {
   margin: 8px 0 2px;
@@ -79,9 +120,9 @@ function fmtSize(n: number): string {
 }
 .hist__list {
   list-style: none;
-  margin: 8px 0 2px;
+  margin: 6px 0 2px;
   padding: 0;
-  max-height: 180px;
+  max-height: 160px;
   overflow-y: auto;
 }
 .hist__item {
@@ -91,6 +132,7 @@ function fmtSize(n: number): string {
   padding: 4px 0;
   border-top: 1px dashed var(--border);
   flex-wrap: wrap;
+  font-size: 12.5px;
 }
 .hist__flag {
   font-weight: 700;

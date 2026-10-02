@@ -165,19 +165,35 @@ interface FirmwareSet {
 
 **超时分类（D2，2026-09-26 实现）**：core 自抛的 `TimeoutError`（`name==='TimeoutError'`，先于文本规则分类）——detect 阶段映射 `ChipDetectFail`（"芯片识别超时"），flash/erase 阶段映射 `TransferFail`（"操作超时（长时间无进度）"）。错误条在 ready 态也显示且可关闭（D3）。改文案/分类须同步 `tests/errors.test.ts`（AGENTS 纪律 4）。
 
-### 4.5 UI 流程（方向1 四区块布局，2026-09-26 重构后）
+### 4.5 UI 流程（IDE 五区布局，2026-10-02 按 b-ide 预览复刻）
+
+> 蓝本：`public/design-preview/b-ide.html`（选型记录见 PAGE-REDESIGN.md）；accent 选型定案=**品牌绿**（状态栏为深绿色条 `--status`）。
 
 ```
-区块①  设备      [连接]（首次弹选择器，之后免弹窗） [切换端口] [断开设备]
-                  状态：disconnected / requesting / detecting / ready·日志监视中 / working / error
-                  连接成功 → 自动识别芯片 → 自动开启实时日志流（方向1 核心）
-区块②  固件      [添加 bin…]（手动多段） / 📁 项目库（远端版本载入） / 版本时间线
-                  [烧录]（临界区：日志自动挂起 → 写入 → 自动硬复位 → 日志自动恢复）
-                  [完全擦除]（确认弹窗） [硬复位]
-区块③  日志      连接后常开、自动滚动；[⏸ 暂停视图] [导出 .txt] [清空]；显示最近 500 条
+区1 活动栏 48px   ▣设备 ⬚固件 ◷版本时间线(NEW红点) 📁项目库 ▤历史 ◉服务 …(底)⚙切换主题
+                  选中态=左侧 accent 指示条；点击=切工作区标签 / 滚动侧栏定位 / 主题
+区2 侧栏 250px    「资源管理器」树（全部 TreeItem 树行，无卡片按钮）：
+                  ▾ 设备 —— 信息行(芯片/MAC/Flash/状态灯) + 操作树行(▶连接(accent)/⇄切换/⏏断开)
+                             + 错误条(D3)
+                  ▾ 项目库 —— 📁项目/变体（☆订阅/↻刷新在节头）→ 版本行(★发布/快照/NEW 徽标)
+                               点版本行 = 下载载入并切到固件标签
+                  ▾ 快捷操作 —— ＋添加 bin… / ⌫完全擦除 / ↻硬复位（后两个仅 canOperate 可见）
+                  底部 side-card（单张卡）：烧录历史(N)常显列表 ── 服务在线·项目/版本·数据·↻
+区3 工作区        SSE 横幅（顶部）+ 标签页 [固件 · <文件名> | 版本时间线]（EditorTabs 注册式）
+                  固件 = 面包屑 + 参数卡(FLASH MODE/FREQ/SIZE/CHIP FAMILY/合计)
+                        + 操作行(⚡烧录/擦除/硬复位/重新载入/添加bin) + 烧录表格 + 进度条
+                  时间线 = 选中项目后：晋升/回滚/保留数（VersionTimeline 原组件）
+区4 底部面板 264px 三标签 [问题 | 输出 | 日志监视器]（问题=warn/error 行、输出=device 行，真实过滤）
+                  头部右侧控制行：级别▾(v-model 过滤) ⏸暂停视图 ⏹/▶监视 ⧉独立窗口 导出 清空 [+▾收起]
+                  日志监视器=LogPanel embedded 模式（行号/❯闪烁光标；数据流与渲染纪律不动）
+区5 状态栏 26px    accent 绿色条通栏：● state · 芯片 · ⌀MAC · 品牌 ‖ 右:烧录参数 · ★订阅N · ◉服务在线 x/y · 订阅 · 🔑 · 版本
 ```
 
-典型动线：连接（一次）→ 载入固件（项目库或手动选文件）→ 烧录 →（自动复位+日志滚出 Hello world）。
+**数据层**：`useFirmwareWorkspace`（单例）共享「烧录表格 rows + 项目库 registry 状态」——侧栏树 / 固件标签 / 时间线标签三处同源；`useServiceStatus`（单例）供 side-card 与状态栏共用 /api/status 快照。依赖注入（getChipName/onParams/onLoaded）。**core/glue 零改动**，日志渲染纪律（seq key/批量 flush/500 上限/暂停视图）与 `?panel=log` 独立窗口保持原样。
+
+组件注册式扩展：新标签 = `workTabs` 加一行 + `#pane-<id>` 插槽；新侧栏节 = `<TreeSection>` + `<TreeItem>`；新活动栏图标 = `activityItems` 加一行。
+
+典型动线：连接（一次）→ 侧栏项目树点版本载入（或手动添加 bin）→ ⚡烧录（二次确认）→（自动硬复位+日志滚出 Hello world）。
 拔线：日志流 error → 自动回 disconnected（无自动重连，重新点连接即可，端口授权保留）。
 
 ### 4.6 dev 中间件 API（**已移除**，2026-09-29 页面功能优化）

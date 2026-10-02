@@ -5,11 +5,13 @@ import { fileURLToPath, URL } from 'node:url'
 export default defineConfig({
   base: './',
   plugins: [vue()],
-  // v1.5：/api/registry* 与 /api/publish* 转发自含服务（dev 专属 IDF 中间件 artifacts/build 已移除）
+  // v1.5：自含服务 API 统一转发 8787（registry/publish/status/token；dev IDF 中间件已移除）
   server: {
     proxy: {
       '/api/registry': 'http://localhost:8787',
       '/api/publish': 'http://localhost:8787',
+      '/api/status': 'http://localhost:8787',
+      '/api/token': 'http://localhost:8787',
     },
   },
   resolve: {

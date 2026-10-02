@@ -2,6 +2,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { LogEntry } from '../core/log'
 
+/** 日志级别过滤（与底部面板头「级别」下拉 v-model 共享） */
+export type LogFilter = 'all' | 'warn' | 'error' | 'device'
+
 const props = defineProps<{
   logs: readonly LogEntry[]
   exportText: () => string
@@ -10,18 +13,24 @@ const props = defineProps<{
   streamOn: boolean
   /** 未连接/操作中禁用手动监视开关 */
   monitorDisabled: boolean
-  /** 独立日志窗口模式：隐藏监视开关（控制在主窗口） */
+  /** 独立日志窗口模式：保留自带工具行（控制在副窗） */
   minimal?: boolean
+  /** 底部面板嵌入模式：标题/工具行/过滤行上提到面板头，只留终端本体 */
+  embedded?: boolean
+  /** 当前级别过滤（v-model:filter） */
+  filter: LogFilter
 }>()
-defineEmits<{ clear: []; togglePause: []; pauseMonitor: []; resumeMonitor: [] }>()
+defineEmits<{
+  clear: []
+  togglePause: []
+  pauseMonitor: []
+  resumeMonitor: []
+  'update:filter': [f: LogFilter]
+}>()
 
 const body = ref<HTMLElement | null>(null)
 
-// ---- 级别过滤（高频排障：只看警告以上/错误/设备输出）----
-type Filter = 'all' | 'warn' | 'error' | 'device'
-const filter = ref<Filter>('all')
-
-const FILTERS: { id: Filter; label: string; title: string }[] = [
+const FILTERS: { id: LogFilter; label: string; title: string }[] = [
   { id: 'all', label: '全部', title: '显示所有级别' },
   { id: 'warn', label: '⚠ 警告+', title: '仅 warn / error' },
   { id: 'error', label: '✖ 错误', title: '仅 error' },
@@ -30,7 +39,7 @@ const FILTERS: { id: Filter; label: string; title: string }[] = [
 
 const filtered = computed<LogEntry[]>(() => {
   const list = props.logs
-  switch (filter.value) {
+  switch (props.filter) {
     case 'warn':
       return list.filter((e) => e.level === 'warn' || e.level === 'error')
     case 'error':
@@ -79,8 +88,8 @@ function openLogWindow(): void {
 
 <template>
   <section class="panel">
-    <h2 class="panel__title">④ 日志</h2>
-    <div class="logbar">
+    <h2 v-if="!embedded" class="panel__title">④ 日志</h2>
+    <div v-if="!embedded" class="logbar">
       <button
         class="btn"
         :class="viewPaused ? 'btn--live' : ''"
@@ -132,7 +141,7 @@ function openLogWindow(): void {
         {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
       </span>
     </div>
-    <div class="logbar logbar--filter">
+    <div v-if="!embedded" class="logbar logbar--filter">
       <button
         v-for="f in FILTERS"
         :key="f.id"
@@ -140,14 +149,18 @@ function openLogWindow(): void {
         :class="filter === f.id ? 'btn--on' : ''"
         type="button"
         :title="f.title"
-        @click="filter = f.id"
+        @click="$emit('update:filter', f.id)"
       >
         {{ f.label }}
       </button>
+      <span class="logbar__count">
+        {{ filtered.length }}/{{ logs.length }} 条{{ logs.length >= 500 ? '（仅显示最近 500）' : '' }}
+      </span>
     </div>
     <p v-if="viewPaused" class="logbar__hint">⏸ 视图已暂停——日志仍在后台收集，导出不受影响</p>
     <div ref="body" class="logbox">
-      <p v-for="e in filtered" :key="e.seq" class="logline" :class="'logline--' + e.level">
+      <p v-for="(e, i) in filtered" :key="e.seq" class="logline" :class="'logline--' + e.level">
+        <span class="logline__n">{{ i + 1 }}</span>
         <span class="logline__ts">{{ new Date(e.ts).toLocaleTimeString() }}</span>
         <span class="logline__text">{{ e.text }}</span>
       </p>
@@ -158,6 +171,8 @@ function openLogWindow(): void {
         日志流已监听但暂无设备输出——若烧录/复位后仍长时间空白，多半是固件 console 口问题（非网站故障），
         见 <b>/docs/TROUBLESHOOTING.md §1</b>
       </p>
+      <!-- 终端提示符（b-ide 同款闪烁光标） -->
+      <p class="logbox__prompt">❯<span class="logbox__cursor"></span></p>
     </div>
   </section>
 </template>
@@ -226,6 +241,15 @@ function openLogWindow(): void {
   white-space: pre-wrap;
   word-break: break-all;
 }
+.logline__n {
+  display: inline-block;
+  width: 26px;
+  text-align: right;
+  margin-right: 10px;
+  color: var(--muted);
+  opacity: 0.45;
+  user-select: none;
+}
 .logline__ts {
   color: var(--muted);
   margin-right: 8px;
@@ -245,5 +269,25 @@ function openLogWindow(): void {
 .logline--info,
 .logline--debug {
   color: var(--ink);
+}
+/* 终端提示符与闪烁光标（b-ide 同款） */
+.logbox__prompt {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+.logbox__cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  background: var(--ink);
+  margin-left: 4px;
+  vertical-align: -2px;
+  animation: logblink 1s steps(1) infinite;
+}
+@keyframes logblink {
+  50% {
+    opacity: 0;
+  }
 }
 </style>
