@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-29（**门4 已过**——横幅/●NEW 用户实测；进入 S4 版本管理）
+> 最后更新：2026-09-29（**门5 已过**——S4 版本管理流程用户实测基本跑通、日志可用；v1.5 核心关账，进入页面功能优化阶段）
 
 ## 一句话
 
@@ -37,7 +37,7 @@
 | **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
 | **S2 自动发布+部署** | ✅ 门3 已过 | watch 自动发布+增量 0 上传+服务器部署+隧道全通；**浏览器确认：localhost:8787 页面载入远端版本、80m/2MB 注入（2026-09-29 用户日志）**；HTTPS/域名解析为尾巴（不阻塞） |
 | **S3 SSE 订阅** | ✅ 门4 已过 | 用户确认横幅+●NEW（20260929-2029）；SSE hub/广播/subscribe/前端横幅/角标/★开关/轮询降级全实测；108 测试全绿；文档挂载公网 /docs/ |
-| **S4 版本管理** | 🔄 代码完成待门5 | server promote/回滚/retention（Bearer 鉴权）+CLI `promote --note`+前端时间线（晋升/回滚/保留数确认/F-13 芯片比对）+SSE promote/latest 刷新；**插入需求：parts 分区类型 type/subType**（CLI 解析 partition-table 按地址匹配+assets 声明+前端分区列，server 零改动透传）；115 测试+build 全绿；剩部署+rebuild 实测+门5 |
+| **S4 版本管理** | ✅ 门5 已过 | server promote/回滚/retention（Bearer 鉴权）+CLI `promote --note`+前端时间线（晋升/回滚/保留数确认/F-13 芯片比对）+SSE promote/latest 刷新+parts 分区类型 type/subType；115 测试+build 全绿；**用户实测：流程基本跑通、日志可用（2026-09-29）** |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -126,33 +126,32 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-10 错误翻译 | ✅ | 10 用例（含 TimeoutError 分类） |
 | F-11 S3 三层复位 | ✅ | 实机自动进下载（未按 BOOT） |
 | F-12 芯片信息展示 | ✅ | 检测即读 MAC/Revision/Flash 容量入 ChipInfo（失败缺省）+ 设备面板详情卡 + **烧录前二次确认**（段数/字节/地址清单）——本轮补全 |
-| F-13 chipFamily 比对 | 🔄 | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 顺带验证 |
+| F-13 chipFamily 比对 | ✅ | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 实测顺带验证 |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
 | F-16 实时串口日志 | 🔄 | 机制实测正常（烧录前后自动挂起/恢复）；**hello_world console=UART0（sdkconfig），USB 口无 app 输出**——待 console 改 USB Serial/JTAG 后闭环 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | 🔄 | 代码完成+冒烟 exit 0，**待实机点按** |
-| F-20 项目/版本/多芯片变体 | 🔄 | S4 代码完成：三层+latest 载入+**回滚(设 latest)+版本时间线**；晋升/retention 随 F-24；待门5 实测 |
+| F-20 项目/版本/多芯片变体 | ✅ | S4 三层+latest 载入+回滚(设 latest)+版本时间线；门5 用户实测流程跑通 |
 | F-21 订阅推送 | ✅ | 门4 用户实测（横幅+查看+●NEW）：SSE+30s 轮询降级+★开关双写+心跳；nginx 经 IP HTTPS 实测无缓冲 |
 | F-22 任意烧录文件管理 | 🔄 | S4 增强：parts 统一建模+assets 随发布+**分区类型 type/subType**（partition-table 解析/声明/前端列，向后兼容缺省）；页面补充上传=S5 |
 | F-23 发布 CLI 与自动触发 | ✅ | `once`+`--watch`+Bearer token+增量（跨 release 0 上传实测）+flash_args/assets 识别——门3 全链实测（2026-09-29） |
-| F-24 版本说明与保留策略 | 🔄 | S4 代码完成：promote 必填 note（CLI+页面）+retention 设置/预览/发布后自动清理（releases 永不删）；待门5 实测 |
+| F-24 版本说明与保留策略 | ✅ | S4 promote 必填 note（CLI+页面）+retention 设置/预览/发布后自动清理（releases 永不删）；门5 用户实测 |
 
 ## 下一步
 
-1. **S4 版本管理（T15）**：`--promote` 晋升发布版（手写 note）+ 前端版本时间线/晋升/回滚 UI + retention 清理（确认语义）+ F-13 芯片比对 + rebuild 实测 → **门5：晋升/回滚/清理各走一遍**。S4 过后 v1.5 核心关账（S5 可选不排期）。
+1. **页面功能优化（进行中）**：门5 过、v1.5 核心关账——当前阶段=收集用户对页面功能的优化建议并落地。
 2. **watch 后台网络问题（问题 20，backlog）**：发布暂用手动 once；根因定位（疑进程会话网络策略/安全软件）。
 3. **HTTPS 尾巴**：文档已挂 `https://firmware.example.com/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS）；后续可加使用说明页。
-4. **门2 挂起项（用户暂缓）**：D4/boot 日志核对 + console 切换（menuconfig）——恢复时一并做。
+4. **门2 挂起项（用户暂缓）**：D4/boot 日志核对——console 已切（问题19 关闭），恢复时一并做。
 5. 等用户拍板：主操作按钮方案（见会话记录 2026-09-26）。
-3. S1 最小闭环（T12）：server 骨架 + `publish once` + 前端项目库最小版 → **门2 真机**（含 D4 参数生效 / D5 MD5 核对、F-17/F-18/F-19 同批实机回归）。
-4. S2 起：--watch + Ubuntu 部署 runbook（门3）；S3 SSE（门4）；S4 版本管理（门5）；S5 按需不排期。
-5. 打磨项归属：D4/D5→门2、连接超时→D2、部署方案（纯静态描述已 superseded，见 DESIGN §7 注）→S2 runbook。
+7. S5 页面补充上传：按需不排期。
 
 
 ## 变更日志
 
+- **2026-09-29（门5 过）**：用户实测 S4 版本管理流程基本跑通、日志可用——晋升/回滚/时间线/retention 链路成立，v1.5 核心关账（S1–S4 四门全过）。F-13/F-20/F-24 转 ✅。当前阶段转入页面功能优化（用户给建议中）。
 - **2026-09-29（🎉 问题19 关闭 + 布局三优化）**：用户实测**"终于看见日志了"**——console=UART0 挂起项关闭，实时日志全链路打通。布局：① **日志按钮精简**——导出/清空收纳进 `⋯` 下拉，主行=暂停视图/监视开关/⧉独立窗口；② **页宽 1280→1560**（header/banner/main/状态卡四处）；③ **日志独立窗口**（`?panel=log`）：BroadcastChannel `fw-log` 三协议（sync-req/sync/append/clear）主窗口实时转发，副屏常驻看日志；副窗 minimal 模式（隐藏监视控制，连接归主窗）。127 测试+build 全绿，已部署（公网 panel=log/独立窗口/fw-log 三标记验证 ✓）。
 - **2026-09-29（F-16 手动监视开关）**：用户澄清需求=**手动让出串口给本机 idf.py monitor**（自动流独占端口导致外部 monitor 打不开）。实现：core `pauseMonitor/resumeMonitor`（ready 态幂等；暂停 notice 提示"端口已释放可使用外部工具"）+ useSession 接线 + LogPanel 工具栏 `⏹ 停止监视（让出串口）/ ▶ 开始监视` 按钮（区分于"暂停视图"）；烧录临界区结束仍自动恢复（设计如此，4 个单测覆盖含该语义）。F-16 需求行与 DESIGN §4.1 同步（"无手动开关"→有）。**另：menuconfig 网页面板中途否决撤回**（dev 中间件管不到目标电脑开发代码），已 revert。126 测试+build 全绿，已上线（bundle 含按钮文案）。
 - **2026-09-29（页面内容四件套）**：应"更丰富内容功能"全选四方向——① **F-12 芯片详情补全**：detectChip 顺读 MAC/Revision/detectFlashSize（ChipInfo 扩展、可选缺省）+ ConnectPanel 详情卡 + 烧录前二次确认（段数/字节/地址清单）；② **日志级别过滤**：LogPanel 全部/⚠警告+/✖错误/设备 四档 + 计数改 filtered/总；③ **烧录历史**：useSession pushHistory（localStorage 20 条，成败/芯片/段数/字节/错误）+ FlashHistory 折叠组件（左栏底部）；④ **服务状态摘要卡**：`GET /api/status`（项目/版本计数、数据占用、运行时长、最近发布）+ DashboardCard 全宽横条（60s 自动刷新）+ llms 索引。121 测试（+1 status）全绿，已部署（公网 status 实测：2 项目/12 版本——跨网发布已在真实使用）。
