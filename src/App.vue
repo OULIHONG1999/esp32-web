@@ -278,17 +278,21 @@ function releaseTags(rel: RegistryRelease): TreeTag[] {
   return tags
 }
 
-// ---- N1：项目文件夹折叠（点击文件夹=选中+折叠切换；版本行=载入） ----
-const collapsedFolders = ref<Record<string, boolean>>({})
+// ---- N1：项目文件夹折叠（**默认折叠**；点文件夹=选中+开合切换；版本行=载入） ----
+const openFolders = ref<Record<string, boolean>>({})
 
 function folderKey(opt: RegistryOption): string {
   return `${opt.projectId}/${opt.variant}`
 }
 
+function isFolderOpen(opt: RegistryOption): boolean {
+  return openFolders.value[folderKey(opt)] === true
+}
+
 function toggleFolder(opt: RegistryOption, i: number): void {
   ws.selectOption(i)
   const k = folderKey(opt)
-  collapsedFolders.value = { ...collapsedFolders.value, [k]: !collapsedFolders.value[k] }
+  openFolders.value = { ...openFolders.value, [k]: !isFolderOpen(opt) }
 }
 
 const STATE_DOT: Record<string, 'ok' | 'off' | 'warn' | 'err'> = {
@@ -484,16 +488,16 @@ async function configureToken(): Promise<void> {
         <template v-else>
           <template v-for="(opt, i) in ws.state.options" :key="opt.projectId + '/' + opt.variant">
             <TreeItem
-              :icon="collapsedFolders[folderKey(opt)] ? '📁' : '📂'"
+              :icon="isFolderOpen(opt) ? '📂' : '📁'"
               :label="opt.projectName + ' / ' + opt.variant"
-              :sub="collapsedFolders[folderKey(opt)] ? `${releasesOf(opt).length} 版本` : undefined"
+              :sub="isFolderOpen(opt) ? undefined : `${releasesOf(opt).length} 版本`"
               :active="ws.state.selectedIdx === i"
               :tags="folderTags(opt)"
               @click="toggleFolder(opt, i)"
             />
             <TreeItem
               v-for="rel in releasesOf(opt)"
-              v-show="!collapsedFolders[folderKey(opt)]"
+              v-show="isFolderOpen(opt)"
               :key="rel.id"
               :indent="1"
               :icon="rel.type === 'release' ? '★' : '·'"

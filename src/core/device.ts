@@ -434,7 +434,8 @@ export class DeviceManager {
     if (this.state !== 'ready' || this.streamOn) return
     this.streamWanted = true
     await this.openStream()
-    this.noticeHandler('实时日志监视已开启')
+    // 串口无缓冲：开启前已输出的行无法追回——引导正确顺序抓全启动日志
+    this.noticeHandler('实时日志监视已开启（提示：先开监视、再复位设备，才能抓全启动日志）')
     this.emit() // 同上：开启后按钮须切回"停止监视"
   }
 }

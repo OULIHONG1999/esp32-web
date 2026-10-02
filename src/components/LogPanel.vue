@@ -57,8 +57,9 @@ watch(
         {{ logs.length === 0 ? '（暂无日志——连接设备并点「▶ 开始监视」）' : '（当前过滤条件下无匹配）' }}
       </p>
       <p v-if="listeningIdle" class="logbox__hint">
-        日志流已监听但暂无设备输出——若烧录/复位后仍长时间空白，多半是固件 console 口问题（非网站故障），
-        见 <b>/docs/TROUBLESHOOTING.md §1</b>
+        已在监听但暂无设备输出——串口无缓冲，设备之前的输出无法追回：
+        点面板「硬复位」（或按设备 RST 键）重启，即可从启动日志开头看起。
+        若重启后仍长时间空白，多半是固件 console 口问题，见 <b>/docs/TROUBLESHOOTING.md §1</b>。
       </p>
       <!-- 终端提示符（b-ide 同款闪烁光标） -->
       <p class="logbox__prompt">❯<span class="logbox__cursor"></span></p>
