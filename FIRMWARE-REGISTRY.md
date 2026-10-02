@@ -8,7 +8,7 @@
 | 项 | 决定 |
 |---|---|
 | 服务端 | **Node 24 + 原生 `node:http`，零第三方依赖**；单文件夹部署；端口 `PORT`（默认 8787） |
-| API | 全部相对路径 `/api/*`；**vite dev 用 proxy** 把 `/api/registry*` `/api/publish*` 转发到 `localhost:8787`，dev 专属（artifacts/build）留 vite 自管 |
+| API | 全部相对路径 `/api/*`；**vite dev 用 proxy** 把 `/api/registry*` `/api/publish*` 转发到 `localhost:8787`，dev 专属中间件（artifacts/build）已于 2026-09-29 移除 |
 | 存储 | `server-data/` 下：`registry.json` + `projects/<id>/<variant>/<release>/`；registry 写入 = tmp+rename 原子；附 `rebuild.js` 自愈工具 |
 | 鉴权 | 发布/晋升带 `Authorization: Bearer <token>`（服务端 config + 环境变量）；读取公开；多用户命名空间仅预留 |
 | 上传安全 | 文件名取 basename 且白名单 `[A-Za-z0-9._-]`、单文件 ≤64MB、单发布 ≤256MB、发布互斥锁、逐文件 SHA256 校验 |
@@ -47,7 +47,7 @@
 
 ## 3. 总体架构（三端）
 
-> **API 路径定案（S1'）**：前后端一律相对路径 `/api/*`，不写死 host。生产：server 同域托管 dist，天然同源；开发：vite dev 配 proxy，把 `/api/registry*`、`/api/publish*` 转发到 `localhost:8787`，而 dev 专属的 `/api/artifacts`、`/api/build`（IDF 中间件，DESIGN §4.6）留 vite 自管——两组路由互不相撞。
+> **API 路径定案（S1'）**：前后端一律相对路径 `/api/*`，不写死 host。生产：server 同域托管 dist，天然同源；开发：vite dev 配 proxy，把 `/api/registry*`、`/api/publish*` 转发到 `localhost:8787`，而 dev 专属的 IDF 中间件（artifacts/build，DESIGN §4.6）已于 2026-09-29 移除。
 >
 > **S1 已实现端点**（2026-09-27，`server/app.js`）：`GET /api/registry`（含 ETag）、`POST /api/publish`（Bearer 鉴权 + multipart）、`GET /api/registry/projects/:pid/variants/:vid/releases/:rid/parts/:file`（下载，路径段白名单+前缀双检）、静态 `dist/`（SPA fallback）。SSE `…/registry/stream` 与 promote/notes 未实现（S3/S4）。
 

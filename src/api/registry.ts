@@ -1,5 +1,21 @@
 /** 固件项目库 API 客户端（v1.5 · F-20；相对路径经 vite proxy → localhost:8787） */
-import type { FlashParams } from './buildArtifacts'
+
+/** 烧录参数（注入 esptool writeFlash 的 mode/freq/size） */
+export interface FlashParams {
+  flashMode: 'qio' | 'qout' | 'dio' | 'dout'
+  flashFreq: '80m' | '40m' | '26m' | '20m'
+  flashSize:
+    | '256KB'
+    | '512KB'
+    | '1MB'
+    | '2MB'
+    | '4MB'
+    | '8MB'
+    | '16MB'
+    | '32MB'
+    | '64MB'
+    | '128MB'
+}
 
 export interface RegistryPart {
   label: string

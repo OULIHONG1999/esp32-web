@@ -18,7 +18,6 @@ const props = defineProps<{
   option: RegistryOption | null
   registry: Registry | null
   chipName: string | null
-  disabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -127,9 +126,8 @@ async function doRetention(): Promise<void> {
           v-model="retentionInput"
           class="tl__ret-input"
           placeholder="30 / all"
-          :disabled="disabled"
         />
-        <button class="tl__btn" type="button" :disabled="disabled" @click="doRetention">
+        <button class="tl__btn" type="button" @click="doRetention">
           设置
         </button>
       </span>
@@ -151,7 +149,6 @@ async function doRetention(): Promise<void> {
           <button
             class="tl__btn tl__btn--primary"
             type="button"
-            :disabled="disabled"
             title="下载该版本全部段并填入烧录表格"
             @click="emit('load', rel)"
           >
@@ -161,7 +158,6 @@ async function doRetention(): Promise<void> {
             v-if="rel.type === 'snapshot'"
             class="tl__btn"
             type="button"
-            :disabled="disabled"
             title="晋升为发布版（需填写说明，永不自动删）"
             @click="doPromote(rel)"
           >
@@ -171,7 +167,6 @@ async function doRetention(): Promise<void> {
             v-if="rel.id !== option.release.id"
             class="tl__btn"
             type="button"
-            :disabled="disabled"
             title="把 latest 指向此版本（回滚）"
             @click="doRollback(rel)"
           >

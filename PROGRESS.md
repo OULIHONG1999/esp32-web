@@ -32,7 +32,8 @@
 | T7 方向1 设备常驻重构 | ✅ 代码完成 | `core/device.ts` + `glue/deviceOps.ts`，32 测试全绿；**待实机回归** |
 | T8 日志渲染性能 | ✅ 代码完成 | 批量 flush + seq key + 显示 500 + 暂停视图；**待实机压测** |
 | T9 文档同步 | ✅ done | DESIGN §4.1/§4.2、AGENTS、REQUIREMENTS（F-17/F-18）、本文 |
-| T10 IDF 命令按钮（F-19） | ✅ 代码完成 | dev 中间件 `/api/build`（build/fullclean/abort/轮询）+ 🔨🧹■ 按钮 + 编译成功自动载入；冒烟 exit 0；**待实机点按验证** |
+| T10 IDF 命令按钮（F-19） | ✖ 已移除 | 2026-09-29 随页面功能优化整体删除（历史：dev 中间件+按钮+自动载入） |
+
 | **T11 阶段1 文档+实现债** | ✅ done | 门1 已过（2026-09-27 用户确认 5 项拍板） |
 | **T12 S1 最小闭环** | 🔄 门2 进行中 | 代码+e2e+首轮真机（发布→载入→烧录→复位全通）；**复测 4 项修复全过**（80m/2MB 注入、首把成功、D5 三段 verified）；D4/console 核对**用户暂缓**（现有编译结果可用），不阻塞 S2 |
 | **S2 自动发布+部署** | ✅ 门3 已过 | watch 自动发布+增量 0 上传+服务器部署+隧道全通；**浏览器确认：localhost:8787 页面载入远端版本、80m/2MB 注入（2026-09-29 用户日志）**；HTTPS/域名解析为尾巴（不阻塞） |
@@ -53,11 +54,11 @@ src/glue/monitor.ts           # SerialMonitor 实时读取流
 src/glue/deviceOps.ts         # DeviceDeps 实现：lastPort 复用 + 流/esptool 互斥 + reopenForRetry（D1 降速重建）
 src/composables/useSession.ts # Vue 接线：批量 flush、暂停视图、状态镜像
 src/components/               # EnvCheck / ConnectPanel / FirmwarePanel / LogPanel
-src/api/buildArtifacts.ts     # ⚡一键载入客户端
+
 src/api/registry.ts           # v1.5 项目库客户端（registry/parts 下载、flattenLatest、flashParams 映射）
 server/{config,registry,multipart,publish,app,index}.js  # 自含服务（纯 JS 零依赖 node:http）+ rebuild.js 自愈
 tools/publish/{lib,index}.js  # 发布 CLI：flash_args/assets 解析、查缺、multipart 上传（once）
-vite.config.ts                # idfBuildArtifacts dev 中间件 + /api/registry* /api/publish* proxy（→8787）
+vite.config.ts                # /api/registry* /api/publish* proxy（→8787；dev 中间件已移除）
 tests/{device,log,errors,lines}.test.ts   # 前端核心 43 用例
 tests/{server,publish-cli,e2e}.test.js    # server 17 + CLI 16 + e2e 5 = 38 用例（合计 81 全绿）
 tests/fixtures/               # fake-build 四段假 bin + publish.config.json（e2e 用）
@@ -73,7 +74,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
    ```powershell
    & $env:MIMO_NODE $env:MIMO_NPM install / test / run build
    ```
-4. **dev 服务器启动（两个坑）**：必须带 `IDF_BUILD_DIR`；脱离 MiMo 会话需 `MIMO_ELECTRON_NODE_HOST`，npm shim 会报错——推荐 WMI 直启 vite（命令见 git 历史 8ef1458 或 AGENTS.md）。验证：`GET http://localhost:5173/api/artifacts`。
+4. **dev 服务器启动（坑已减一）**：`IDF_BUILD_DIR` 已随 artifacts 中间件移除（2026-09-29），不再需要；脱离 MiMo 会话需 `MIMO_ELECTRON_NODE_HOST`，npm shim 会报错——推荐 WMI 直启 vite（命令见 git 历史 8ef1458 或 AGENTS.md）。验证：`GET http://localhost:5173/api/registry`（需本地 server 起着）。
 5. **状态机迁移表在 `src/core/device.ts`** 的 `TRANSITIONS`/`ALLOWED`；改表必须同步 `DESIGN.md` §4.1 + `tests/device.test.ts`。
 6. **日志渲染纪律**（洪峰卡页教训）：seq 稳定 key、120ms 批量 flush、显示上限 500、暂停视图——禁止恢复"每行一次响应式更新 + 索引 key"写法（AGENTS 纪律 8）。
 7. **烧录后自动硬复位在 `DeviceManager.flash` 临界区内**（写入成功后调 `deps.hardReset()`，F-07）——重构时曾弄丢一次，有断言测试守护，勿删。
@@ -115,7 +116,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | 需求 | 状态 | 备注 |
 |---|---|---|
 | F-01 环境自检 | ✅ | 代码+实机浏览器路径 |
-| F-02 文件选择 | ✅ | 手动多选 + ⚡一键载入双路径 |
+| F-02 文件选择 | ✅ | 手动多选 + 项目库载入（⚡本地一键载入已移除） |
 | F-03 选固件（服务器） | 🔄 | manifest 语义由 **registry 载入取代**（S6'）：项目库 UI+下载+参数注入完成，本地 e2e 过，**待真机** |
 | F-04 连接 | ✅ | 实机 COM3/原生 USB |
 | F-05 烧录 | ✅ | 实机三段烧录成功；**门2 复测全过**：参数注入 80m/2MB（`Flash params set to 21f`）、首把直接成功（无重试）、D5 三段 `Hash of data verified.`；降速重试机制首轮实测触发成功 |
@@ -132,7 +133,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-16 实时串口日志 | 🔄 | 机制实测正常（烧录前后自动挂起/恢复）；**hello_world console=UART0（sdkconfig），USB 口无 app 输出**——待 console 改 USB Serial/JTAG 后闭环 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
-| F-19 IDF 命令按钮 | 🔄 | 代码完成+冒烟 exit 0，**待实机点按** |
+| F-19 IDF 命令按钮 | ✖ 已移除 | 2026-09-29 应用户要求整体删除（云端部署后失效）：按钮/useIdfBuild/vite 中间件/tests 全清；DESIGN §4.6 同步 |
+
 | F-20 项目/版本/多芯片变体 | ✅ | S4 三层+latest 载入+回滚(设 latest)+版本时间线；门5 用户实测流程跑通 |
 | F-21 订阅推送 | ✅ | 门4 用户实测（横幅+查看+●NEW）：SSE+30s 轮询降级+★开关双写+心跳；nginx 经 IP HTTPS 实测无缓冲 |
 | F-22 任意烧录文件管理 | 🔄 | S4 增强：parts 统一建模+assets 随发布+**分区类型 type/subType**（partition-table 解析/声明/前端列，向后兼容缺省）；页面补充上传=S5 |
@@ -151,6 +153,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-09-29（移除⚡一键载入与 IDF build 中间件）**：应用户要求删除本地构建载入/编译链路（云端部署后失效）——删 `src/api/buildArtifacts.ts`、`src/api/buildCommands.ts`、`src/composables/useIdfBuild.ts`、`tests/api.test.ts`（5 用例）与 `vite.config.ts` 的 `idfBuildArtifacts()` 插件（`/api/artifacts`、`/api/build` 五端点）；FirmwarePanel 去 ⚡按钮/`loadLocalBuild`/`buildRunning`/`autoLoadSignal`，VersionTimeline 去 `disabled` prop，App 去两绑定；`FlashParams` 类型迁至 `registry.ts`。项目库/时间线/SSE/烧录链路零改动。122 测试+build 全绿。文档同步：DESIGN §4.5/§4.6、REQUIREMENTS F-19、FIRMWARE-REGISTRY §0/§3、AGENTS、双份拷贝。
 - **2026-09-29（门5 过）**：用户实测 S4 版本管理流程基本跑通、日志可用——晋升/回滚/时间线/retention 链路成立，v1.5 核心关账（S1–S4 四门全过）。F-13/F-20/F-24 转 ✅。当前阶段转入页面功能优化（用户给建议中）。
 - **2026-09-29（🎉 问题19 关闭 + 布局三优化）**：用户实测**"终于看见日志了"**——console=UART0 挂起项关闭，实时日志全链路打通。布局：① **日志按钮精简**——导出/清空收纳进 `⋯` 下拉，主行=暂停视图/监视开关/⧉独立窗口；② **页宽 1280→1560**（header/banner/main/状态卡四处）；③ **日志独立窗口**（`?panel=log`）：BroadcastChannel `fw-log` 三协议（sync-req/sync/append/clear）主窗口实时转发，副屏常驻看日志；副窗 minimal 模式（隐藏监视控制，连接归主窗）。127 测试+build 全绿，已部署（公网 panel=log/独立窗口/fw-log 三标记验证 ✓）。
 - **2026-09-29（F-16 手动监视开关）**：用户澄清需求=**手动让出串口给本机 idf.py monitor**（自动流独占端口导致外部 monitor 打不开）。实现：core `pauseMonitor/resumeMonitor`（ready 态幂等；暂停 notice 提示"端口已释放可使用外部工具"）+ useSession 接线 + LogPanel 工具栏 `⏹ 停止监视（让出串口）/ ▶ 开始监视` 按钮（区分于"暂停视图"）；烧录临界区结束仍自动恢复（设计如此，4 个单测覆盖含该语义）。F-16 需求行与 DESIGN §4.1 同步（"无手动开关"→有）。**另：menuconfig 网页面板中途否决撤回**（dev 中间件管不到目标电脑开发代码），已 revert。126 测试+build 全绿，已上线（bundle 含按钮文案）。

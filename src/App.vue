@@ -298,8 +298,6 @@ async function configureToken(): Promise<void> {
               :percent="percent"
               :chip-name="chip?.name ?? null"
               :chip-detail="chip"
-              :build-running="false"
-              :auto-load-signal="0"
               :new-releases="newReleases"
               :refresh-signal="refreshSignal"
               @flash="flash"

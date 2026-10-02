@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import type { ChipInfo, FlashPart } from '../core/device'
-import { fetchBuildManifest, fetchBuildPartBytes, type FlashParams } from '../api/buildArtifacts'
 import {
   fetchRegistry,
   fetchReleasePart,
   flattenLatest,
   setSubscribed,
   toFlashParams,
+  type FlashParams,
   type Registry,
   type RegistryOption,
   type RegistryRelease,
@@ -40,49 +40,11 @@ const props = defineProps<{
   chipName: string | null
   /** F-12：芯片详情（烧录前二次确认用） */
   chipDetail: ChipInfo | null
-  buildRunning: boolean
-  autoLoadSignal: number
   /** S3：待发布的 `${pid}/{vid}` 集合（NEW 角标） */
   newReleases: Record<string, boolean>
   /** S3：远端有新版本时 +1，触发项目库自动刷新 */
   refreshSignal: number
 }>()
-
-const localLoadMsg = ref<string | null>(null)
-
-// 编译成功信号 → 自动载入（loadLocalBuild 内部会把 buildRunning 期间禁用）
-watch(
-  () => props.autoLoadSignal,
-  (n) => {
-    if (n > 0) void loadLocalBuild()
-  },
-)
-
-/** 一键载入：从 dev 中间件读取 IDF build 目录（flash_args 权威地址 + 烧录参数） */
-async function loadLocalBuild(): Promise<void> {
-  localLoadMsg.value = null
-  const manifest = await fetchBuildManifest()
-  if (!manifest) {
-    localLoadMsg.value =
-      '本地构建载入不可用：需设置 IDF_BUILD_DIR 环境变量并已执行过 idf.py build'
-    return
-  }
-  try {
-    const loaded: Row[] = []
-    for (const p of manifest.parts) {
-      const bytes = await fetchBuildPartBytes(p.rel)
-      const file = new File([bytes as BlobPart], p.name, {
-        type: 'application/octet-stream',
-      })
-      loaded.push({ id: nextId++, label: p.label, address: p.address, file })
-    }
-    rows.splice(0, rows.length, ...loaded)
-    emit('params', manifest.flashParams)
-    localLoadMsg.value = `已载入 ${loaded.length} 段（${manifest.buildDir}）`
-  } catch (e) {
-    localLoadMsg.value = `载入失败：${e instanceof Error ? e.message : String(e)}`
-  }
-}
 
 function hex(n: number): string {
   return '0x' + n.toString(16).toUpperCase().padStart(4, '0')
@@ -280,21 +242,11 @@ async function toggleSubscribe(): Promise<void> {
     </p>
 
     <div class="loadrow">
-      <button
-        class="btn btn--load"
-        type="button"
-        :disabled="buildRunning"
-        :title="buildRunning ? '编译进行中，完成后会自动载入' : '从 IDF build 目录自动载入 flash_args 中的全部固件段与烧录参数'"
-        @click="loadLocalBuild"
-      >
-        ⚡ 载入本地构建（一键）
-      </button>
       <label class="filebtn">
         添加 bin 文件…
         <input type="file" accept=".bin" multiple @change="onFiles" />
       </label>
     </div>
-    <p v-if="localLoadMsg" class="loadmsg">{{ localLoadMsg }}</p>
 
     <!-- 项目库（v1.5 F-20 最小版）：两跳可达——选项目 → 载入 latest -->
     <div class="registry">
@@ -330,7 +282,7 @@ async function toggleSubscribe(): Promise<void> {
       <button
         class="btn btn--load"
         type="button"
-        :disabled="selectedIdx < 0 || buildRunning"
+        :disabled="selectedIdx < 0"
         title="下载该版本全部段并填入下方表格（含烧录参数）——无需连接设备"
         @click="loadRegistryRelease"
       >
@@ -346,7 +298,6 @@ async function toggleSubscribe(): Promise<void> {
       :option="registryOptions[selectedIdx]"
       :registry="rawRegistry"
       :chip-name="chipName"
-      :disabled="buildRunning"
       @load="(rel) => loadRelease(registryOptions[selectedIdx], rel)"
       @changed="refreshRegistry"
     />

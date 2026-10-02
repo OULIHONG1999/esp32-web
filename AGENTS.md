@@ -19,7 +19,7 @@
 & $env:MIMO_NODE $env:MIMO_NPM install
 & $env:MIMO_NODE $env:MIMO_NPM test          # Vitest，提交前必须全绿
 & $env:MIMO_NODE $env:MIMO_NPM run build     # vue-tsc --noEmit + vite build，必须过
-& $env:MIMO_NODE $env:MIMO_NPM run dev      # 简单场景可用；完整启动配方（IDF_BUILD_DIR / MIMO_ELECTRON_NODE_HOST 两个坑）见 PROGRESS.md「关键决策 4」
+& $env:MIMO_NODE $env:MIMO_NPM run dev      # 简单场景可用；完整启动配方（MIMO_ELECTRON_NODE_HOST 坑）见 PROGRESS.md「关键决策 4」
 ```
 
 ## 硬性纪律
@@ -39,7 +39,7 @@
 src/core/     纯逻辑（状态机/日志/错误）— 零依赖，改这里必配测试
 src/glue/     esptool-js 粘合层 — 唯一允许 import esptool-js 的地方
 src/env/      环境自检
-src/api/      外部数据客户端（buildArtifacts=dev 中间件 / registry=v1.5 自含服务）
+src/api/      外部数据客户端（registry=v1.5 自含服务；dev 中间件 buildArtifacts 已移除）
 src/components/  Vue UI
 server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发布/静态托管
 tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch 等）

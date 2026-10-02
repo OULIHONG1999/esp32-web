@@ -171,33 +171,20 @@ interface FirmwareSet {
 区块①  设备      [连接]（首次弹选择器，之后免弹窗） [切换端口] [断开设备]
                   状态：disconnected / requesting / detecting / ready·日志监视中 / working / error
                   连接成功 → 自动识别芯片 → 自动开启实时日志流（方向1 核心）
-区块①.5 IDF 命令（仅 dev 中间件存在时显示）
-                  [🔨 编译](idf.py build) [🧹 清理](fullclean) [■ 中止]
-                  编译输出实时进日志面板；编译成功 → 自动载入固件段
-区块②  固件      [⚡ 载入本地构建]（flash_args 权威地址+烧录参数） / [添加 bin…]（手动多段）
+区块②  固件      [添加 bin…]（手动多段） / 📁 项目库（远端版本载入） / 版本时间线
                   [烧录]（临界区：日志自动挂起 → 写入 → 自动硬复位 → 日志自动恢复）
                   [完全擦除]（确认弹窗） [硬复位]
 区块③  日志      连接后常开、自动滚动；[⏸ 暂停视图] [导出 .txt] [清空]；显示最近 500 条
 ```
 
-典型动线：连接（一次）→ 🔨编译 →（自动载入）→ 烧录 →（自动复位+日志滚出 Hello world）。
+典型动线：连接（一次）→ 载入固件（项目库或手动选文件）→ 烧录 →（自动复位+日志滚出 Hello world）。
 拔线：日志流 error → 自动回 disconnected（无自动重连，重新点连接即可，端口授权保留）。
 
-### 4.6 dev 中间件 API（仅 localhost 开发环境，不进生产）
+### 4.6 dev 中间件 API（**已移除**，2026-09-29 页面功能优化）
 
-由 `vite.config.ts` 的 `idfBuildArtifacts()` 插件提供，`IDF_BUILD_DIR` 未设置时整体关闭：
+> ⚠️ 历史记录：曾由 `vite.config.ts` 的 `idfBuildArtifacts()` 插件提供 `/api/artifacts`（⚡一键载入本地构建）与 `/api/build`（🔨🧹■ 编译命令）五个端点。**部署云端后该功能失效，经用户确认整体移除**（前端入口、vite 中间件、`buildArtifacts.ts`/`buildCommands.ts`/`useIdfBuild.ts` 客户端、`tests/api.test.ts` 一并删除，`FlashParams` 类型迁至 `registry.ts`）。
 
-| 端点 | 方法 | 说明 |
-|---|---|---|
-| `/api/artifacts` | GET | 读 build 目录 `flash_args` → 三段清单 + 烧录参数（dio/freq/size） |
-| `/api/artifacts/file?path=` | GET | 下载固件段（路径限定在 buildDir 内，防穿越） |
-| `/api/build/status?since=N` | GET | 轮询：行缓冲增量 + running/exitCode（单飞行） |
-| `/api/build/start?cmd=build\|clean` | POST | spawn PowerShell + EIM profile 执行 `idf.py build/fullclean` |
-| `/api/build/abort` | POST | `taskkill /T /F` 中止 |
-
-约束：仅绑定 localhost（vite 默认）；生产构建无此插件 → 客户端探测 404 后隐藏相关按钮（F-19）。
-
-> **路由分流（v1.5 定案）**：本表端点由 vite 自管；`/api/registry*`、`/api/publish*` 走 vite proxy 转发到 `localhost:8787`（自含服务），两者路径不相撞。见 FIRMWARE-REGISTRY §3。
+> **路由分流（v1.5 定案）**：`/api/registry*`、`/api/publish*` 走 vite proxy 转发到 `localhost:8787`（自含服务）。见 FIRMWARE-REGISTRY §3。
 
 ## 5. ESP32-S3 原生 USB（CDC）专项
 
