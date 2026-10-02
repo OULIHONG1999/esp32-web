@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方案D · 保守精修 — ESP32 Web Flasher 重排预览</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2129; --line: #30363d;
+    --ink: #e6edf3; --muted: #8b949e; --accent: #3fb950; --accent-ink: #04150f;
+    --info: #79c0ff; --warn: #d29922; --err: #f85149;
+    --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.6; }
+
+  /* header */
+  .hd { border-bottom: 1px solid var(--line); background: var(--panel); }
+  .hd__in { max-width: 1560px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+  .brand { font-weight: 700; font-size: 15px; }
+  .ver { color: var(--muted); font-size: 12px; }
+  .chips { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--bg); }
+  .d { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .d--muted { background: #6e7681; }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .theme { border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 6px; width: 30px; height: 30px; cursor: pointer; }
+
+  /* banner */
+  .banner { max-width: 1560px; margin: 14px auto 0; padding: 0 20px; }
+  .banner__in { border: 1px solid #1f6feb44; background: #121d2f; border-radius: 8px; padding: 9px 14px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+  .banner__in b { color: var(--info); }
+  .banner__in .go { margin-left: auto; color: var(--accent); font-weight: 600; cursor: pointer; }
+  .banner__in .x { color: var(--muted); cursor: pointer; }
+
+  /* layout */
+  .main { max-width: 1560px; margin: 16px auto 40px; padding: 0 20px; display: grid; grid-template-columns: minmax(0,7fr) minmax(0,5fr); gap: 16px; align-items: start; }
+  .col-r { position: sticky; top: 14px; }
+
+  /* 步骤指示条（新增的流程层） */
+  .rail { display: flex; gap: 8px; margin-bottom: 14px; }
+  .rail__s { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); position: relative; }
+  .rail__s b { color: var(--ink); font-weight: 600; }
+  .rail__n { width: 20px; height: 20px; border-radius: 50%; background: var(--line); color: var(--muted); font-size: 11.5px; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+  .rail__s--done .rail__n { background: var(--accent); color: var(--accent-ink); }
+  .rail__s--now { border-color: var(--accent); }
+  .rail__s--now .rail__n { background: var(--accent); color: var(--accent-ink); }
+  .rail__s--now::after { content: '当前'; position: absolute; right: 10px; top: -8px; font-size: 10px; background: var(--accent); color: var(--accent-ink); border-radius: 4px; padding: 0 6px; }
+  .rail__s--done { color: var(--ink); }
+
+  /* 卡片分级 */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+  .card--main { border-color: #2ea04344; box-shadow: inset 0 0 0 1px #2ea04322; padding: 18px; }
+  .card--tool { padding: 12px 14px; }
+  .t { font-size: 15px; font-weight: 650; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  .t .sub { font-size: 11.5px; color: var(--muted); font-weight: 400; margin-left: auto; }
+  .eyebrow { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 14px 0 8px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
+  .hint code { background: var(--panel2); padding: 1px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; color: var(--info); }
+
+  .kv { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+  .kv .cell { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 11px; color: var(--muted); }
+  .kv .cell b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+  .kv .cell code { font-family: var(--mono); font-size: 12px; color: var(--info); }
+
+  .btn { border: 1px solid var(--line); background: transparent; color: var(--ink); font-family: var(--sans); font-size: 13.5px; padding: 7px 15px; border-radius: 6px; cursor: pointer; }
+  .btn:hover { border-color: #6e7681; }
+  .btn--flash { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 15px; padding: 11px 40px; }
+  .btn--flash:hover { filter: brightness(1.08); }
+  .btn--load { border-style: dashed; color: var(--accent); border-color: var(--accent); }
+  .btnrow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* 项目库 */
+  .reg { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .reg select { flex: 1; min-width: 240px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-family: var(--sans); font-size: 13px; }
+  .star { color: var(--warn); }
+  .tg { font-size: 11px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-family: var(--mono); }
+  .tg--rel { color: var(--accent); border-color: #2ea04366; }
+  .tg--new { color: var(--err); border-color: #f8514966; }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td code { font-family: var(--mono); font-size: 12.5px; }
+  .part { font-size: 11px; border: 1px solid var(--line); padding: 1px 7px; border-radius: 4px; color: var(--accent); }
+  .params { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .p-param { font-family: var(--mono); font-size: 12px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); padding: 3px 10px; border-radius: 999px; }
+  .p-param.ok { color: var(--accent); border-color: #2ea04366; }
+
+  /* 时间线（左栏内嵌，紧凑） */
+  .tl { border-left: 2px solid var(--line); margin: 6px 0 0 6px; padding-left: 16px; }
+  .tl__i { position: relative; padding: 7px 0; display: flex; gap: 10px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+  .tl__i::before { content: ''; position: absolute; left: -23px; top: 14px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); border: 2px solid var(--panel); }
+  .tl__i--rel::before { background: var(--accent); }
+  .tl__i--now::before { box-shadow: 0 0 0 3px #2ea04333; }
+  .tl__id { font-family: var(--mono); font-size: 12.5px; }
+  .tl__note { color: var(--muted); font-size: 12px; }
+  .tl__ops { margin-left: auto; display: flex; gap: 6px; }
+  .mini { font-size: 11.5px; padding: 3px 9px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 5px; cursor: pointer; font-family: var(--sans); }
+  .mini:hover { color: var(--ink); border-color: #6e7681; }
+
+  /* 历史 / 服务 */
+  .rowline { display: flex; gap: 10px; font-size: 13px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .rowline:last-child { border-bottom: 0; }
+  .ok { color: var(--accent); } .er { color: var(--err); }
+  .rowline .t2 { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+  .svc { display: flex; gap: 22px; font-family: var(--mono); }
+  .svc b { font-size: 20px; display: block; }
+  .svc span { font-size: 11px; color: var(--muted); font-family: var(--sans); }
+
+  /* —— 日志（终端 chrome，右栏） —— */
+  .log { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; height: calc(100vh - 130px); display: flex; flex-direction: column; }
+  .log__hd { display: flex; align-items: center; gap: 4px; background: var(--panel2); border-bottom: 1px solid var(--line); padding: 0 8px; height: 36px; flex: none; }
+  .ltab { font-size: 12.5px; color: var(--muted); padding: 8px 10px; cursor: pointer; }
+  .ltab--on { color: var(--ink); border-bottom: 2px solid var(--accent); font-weight: 600; }
+  .log__hd .right { margin-left: auto; display: flex; gap: 4px; }
+  .ic { border: none; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; padding: 4px 7px; border-radius: 5px; font-family: var(--sans); }
+  .ic:hover { background: var(--line); color: var(--ink); }
+  .log__status { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); padding: 5px 12px; border-bottom: 1px solid var(--line); flex: none; font-family: var(--mono); }
+  .log__status .g { color: var(--accent); }
+  .term { flex: 1; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.75; padding: 6px 0 10px; }
+  .l { display: flex; padding: 0 12px; white-space: pre-wrap; }
+  .l:nth-child(even) { background: #ffffff06; }
+  .l .n { color: #484f58; width: 26px; flex: none; text-align: right; margin-right: 12px; user-select: none; }
+  .ts { color: var(--muted); }
+  .g { color: var(--accent); } .b { color: var(--info); } .y { color: var(--warn); }
+  .term .caret { padding: 0 12px; color: var(--accent); }
+  .term .caret::after { content: '▮'; animation: bl 1s steps(1) infinite; }
+  @keyframes bl { 50% { opacity: 0; } }
+
+  .foot { max-width: 1560px; margin: 0 auto; padding: 0 20px 26px; color: var(--muted); font-size: 12px; text-align: center; }
+  .foot a { color: var(--info); text-decoration: none; }
+
+  @media (max-width: 960px) {
+    .main { grid-template-columns: 1fr; }
+    .col-r { position: static; }
+    .log { height: 320px; }
+    .rail { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hd">
+  <div class="hd__in">
+    <span class="brand">ESP32 Web Flasher</span>
+    <span class="ver">v0.2.0 · 设备常驻连接</span>
+    <div class="chips">
+      <span class="chip"><span class="d"></span><b>● 订阅中</b></span>
+      <span class="chip"><span class="d"></span>设备 <b>ready</b></span>
+      <span class="chip"><span class="d d--muted"></span>服务 2/12</span>
+      <span class="chip">🔑 有 token</span>
+      <button class="theme" title="主题">☾</button>
+    </div>
+  </div>
+</header>
+
+<div class="banner">
+  <div class="banner__in">
+    <span>📣</span>
+    <span><b>hello-world · ESP32-S3</b> 发布了新版本 <code style="font-family:var(--mono)">20260929-2029</code></span>
+    <span class="go">查看 →</span>
+    <span class="x">✕</span>
+  </div>
+</div>
+
+<div class="main">
+  <!-- 左栏 -->
+  <div class="col-l">
+
+    <!-- 步骤指示条 -->
+    <div class="rail">
+      <div class="rail__s rail__s--done"><span class="rail__n">✓</span><span><b>连接</b> · ESP32-S3</span></div>
+      <div class="rail__s rail__s--now"><span class="rail__n">2</span><span><b>载入</b> · 已选 3 段</span></div>
+      <div class="rail__s"><span class="rail__n">3</span><span><b>烧录</b> · 待执行</span></div>
+    </div>
+
+    <!-- 设备卡（次级） -->
+    <section class="card card--tool">
+      <div class="t">① 设备 <span class="sub">连接一次，常驻复用 · 日志自动开启</span></div>
+      <div class="kv" style="margin: 8px 0 10px">
+        <span class="cell">端口 <b>COM3</b>（原生 USB）</span>
+        <span class="cell">MAC <code>84:27:0C:xx:xx:xx</code></span>
+        <span class="cell">Flash <b>8MB</b> · Rev <b>v0.2</b></span>
+        <span class="cell">状态 <b style="color:var(--accent)">ready · 日志监视中</b></span>
+      </div>
+      <div class="btnrow">
+        <button class="btn">切换端口</button>
+        <button class="btn">断开</button>
+        <span style="width:1px;height:20px;background:var(--line)"></span>
+        <button class="btn">完全擦除</button>
+        <button class="btn">硬复位</button>
+      </div>
+    </section>
+
+    <!-- 固件主卡（唯一 accent 描边） -->
+    <section class="card card--main">
+      <div class="t">② 选择固件 <span class="sub">项目库载入已注入地址与参数 · 未连接也可载入</span></div>
+
+      <div class="eyebrow">项目库</div>
+      <div class="reg">
+        <select>
+          <option>★ hello-world · ESP32-S3 · 20260929-2029 ●NEW ★</option>
+          <option>☆ hello-world · ESP32-S3 · 20260929-1949</option>
+        </select>
+        <button class="btn">★ 已订阅</button>
+        <button class="btn">刷新</button>
+        <button class="btn btn--load">载入此版本</button>
+        <button class="btn">添加 bin 文件…</button>
+      </div>
+
+      <div class="params">
+        <span class="p-param">flash: dio</span>
+        <span class="p-param">freq: 80m</span>
+        <span class="p-param">size: 2MB</span>
+        <span class="p-param ok">chipFamily: ESP32-S3 ✓</span>
+        <span class="p-param">3 段 · 689 KB</span>
+      </div>
+
+      <table>
+        <thead><tr><th>段</th><th>文件</th><th>分区</th><th>地址</th><th>大小</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><code>bootloader</code></td><td>bootloader.bin</td><td><span class="part">app</span></td><td><code>0x0000</code></td><td>23.1 KB</td><td style="color:var(--err)">✕</td></tr>
+          <tr><td><code>partition-table</code></td><td>partition-table.bin</td><td><span class="part">data</span></td><td><code>0x8000</code></td><td>3.0 KB</td><td style="color:var(--err)">✕</td></tr>
+          <tr><td><code>app</code></td><td>hello_world.bin</td><td><span class="part">app</span></td><td><code>0x10000</code></td><td>663 KB</td><td style="color:var(--err)">✕</td></tr>
+        </tbody>
+      </table>
+
+      <div class="btnrow" style="margin-top: 14px">
+        <button class="btn btn--flash">⚡ 烧录 3 段（689 KB）</button>
+        <span class="hint" style="margin:0">点击后弹出二次确认：段数 / 字节 / 地址清单</span>
+      </div>
+    </section>
+
+    <!-- 版本时间线（次级紧凑） -->
+    <section class="card card--tool">
+      <div class="t">③ 版本时间线 <span class="sub">保留 30 快照 · 发布版永不删</span></div>
+      <div class="tl">
+        <div class="tl__i tl__i--rel tl__i--now">
+          <span class="tl__id">20260929-2029</span>
+          <span class="tg tg--rel">★ 发布版 · latest</span>
+          <span class="tl__note">修复 SSE 心跳</span>
+          <div class="tl__ops"><button class="mini">载入</button></div>
+        </div>
+        <div class="tl__i tl__i--rel">
+          <span class="tl__id">20260929-1949</span>
+          <span class="tg tg--rel">★ 发布版</span>
+          <span class="tl__note">首次跨网发布</span>
+          <div class="tl__ops"><button class="mini">载入</button><button class="mini">回滚到此</button></div>
+        </div>
+        <div class="tl__i">
+          <span class="tl__id">20260929-1948</span>
+          <span class="tg">快照</span>
+          <span class="tl__note">自动快照</span>
+          <div class="tl__ops"><button class="mini">载入</button><button class="mini">晋升</button><button class="mini">回滚到此</button></div>
+        </div>
+      </div>
+      <div class="btnrow" style="margin-top:8px">
+        <button class="btn">保留数（30 / all）</button>
+      </div>
+    </section>
+
+    <!-- 历史 + 服务 两小卡并排 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <section class="card card--tool" style="margin:0">
+        <div class="t" style="font-size:13.5px">烧录历史</div>
+        <div class="rowline"><span class="ok">✓</span>3 段 · 689KB<span class="t2">12:01</span></div>
+        <div class="rowline"><span class="ok">✓</span>3 段 · 689KB<span class="t2">昨天</span></div>
+        <div class="rowline"><span class="er">✗</span>端口被占用<span class="t2">昨天</span></div>
+      </section>
+      <section class="card card--tool" style="margin:0">
+        <div class="t" style="font-size:13.5px">服务状态</div>
+        <div class="svc" style="margin-top:6px">
+          <div><b>2</b><span>项目</span></div>
+          <div><b>12</b><span>版本</span></div>
+          <div><b>1.2G</b><span>占用</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 右栏：日志（终端 chrome） -->
+  <aside class="col-r">
+    <div class="log">
+      <div class="log__hd">
+        <span class="ltab ltab--on">日志</span>
+        <span class="ltab">过滤 <span style="color:var(--warn)">⚠3</span> <span style="color:var(--err)">✖1</span></span>
+        <div class="right">
+          <button class="ic" title="暂停视图">⏸</button>
+          <button class="ic" title="停止监视（让出串口）">⏹</button>
+          <button class="ic" title="独立窗口">⧉</button>
+          <button class="ic" title="更多">⋯</button>
+        </div>
+      </div>
+      <div class="log__status">
+        <span class="g">● 监视中</span>
+        <span>28 行</span>
+        <span>过滤：全部</span>
+        <span style="margin-left:auto">自动滚动</span>
+      </div>
+      <div class="term">
+        <div class="l"><span class="n">1</span><span class="ts">[12:01:44]</span>&nbsp;<span class="g">ready</span> · ESP32-S3 @ COM3 已连接，日志流自动开启</div>
+        <div class="l"><span class="n">2</span><span class="ts">[12:01:45]</span>&nbsp;<span class="b">rst:0x1 (POWERON_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)</span></div>
+        <div class="l"><span class="n">3</span><span class="ts">[12:01:45]</span>&nbsp;<span class="b">configsip: 0, SPIWFC:0x00000000, mode:QIO, clock div:1</span></div>
+        <div class="l"><span class="n">4</span><span class="ts">[12:01:45]</span>&nbsp;<span class="b">waiting for download</span></div>
+        <div class="l"><span class="n">5</span><span class="ts">[12:01:46]</span>&nbsp;<span class="g">Hello world!</span></div>
+        <div class="l"><span class="n">6</span><span class="ts">[12:01:46]</span>&nbsp;<span class="g">This is ESP32-S3 chip with 2 CPU core(s), WiFi/BLE, 8MB flash</span></div>
+        <div class="l"><span class="n">7</span><span class="ts">[12:01:47]</span>&nbsp;<span class="y">app: rebooting in 3s…</span></div>
+        <div class="l"><span class="n">8</span><span class="ts">[12:01:50]</span>&nbsp;<span class="g">Hello world!</span></div>
+        <div class="l"><span class="n">9</span><span class="ts">[12:01:51]</span>&nbsp;<span class="y">app: rebooting in 3s…</span></div>
+        <div class="caret"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="foot">方案 D · 静态预览（mock 数据，沿用现有 GitHub 色板） · <a href="./index.html">返回方案导航</a> · <a href="../">主站</a></div>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方案C · 现代仪表盘 — ESP32 Web Flasher 重排预览</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --card: #141414; --card2: #171717; --line: #262626;
+    --ink: #ededed; --muted: #a1a1aa; --faint: #52525b;
+    --accent: #5e6ad2; --accent-ink: #fff; --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.55; padding-bottom: 64px; }
+
+  /* —— 顶部导航 —— */
+  .nav { position: sticky; top: 0; z-index: 10; background: rgba(10,10,10,.85); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .nav__in { max-width: 1160px; margin: 0 auto; height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px; }
+  .brand { font-weight: 700; font-size: 14.5px; letter-spacing: -.2px; display: flex; gap: 8px; align-items: center; }
+  .brand .sq { width: 18px; height: 18px; border-radius: 5px; background: var(--accent); display: inline-block; }
+  .nav__links { display: flex; gap: 4px; font-size: 13px; color: var(--muted); }
+  .nav__links a { color: inherit; text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+  .nav__links a:hover, .nav__links a.on { color: var(--ink); background: var(--card2); }
+  .cmdk { margin-left: auto; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; color: var(--faint); font-size: 12.5px; cursor: pointer; width: 240px; }
+  .cmdk:hover { border-color: #3f3f46; color: var(--muted); }
+  .cmdk kbd { margin-left: auto; font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
+  .icon-btn { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 14px; }
+  .icon-btn:hover { color: var(--ink); }
+
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 22px 20px; }
+
+  /* —— SSE 横幅 —— */
+  .banner { display: flex; align-items: center; gap: 12px; border: 1px solid #2b2b55; background: #14142b; border-radius: 10px; padding: 10px 14px; margin-bottom: 18px; font-size: 13px; }
+  .banner b { color: #a5b4fc; }
+  .banner .go { margin-left: auto; color: var(--accent); cursor: pointer; font-weight: 600; }
+  .banner .x { color: var(--faint); cursor: pointer; }
+
+  /* —— 状态胶囊 —— */
+  .pills { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .pill { display: flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; font-size: 13px; }
+  .pill .d { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .pill .d--warn { background: var(--warn); }
+  .pill .d--off { background: var(--faint); }
+  .pill span.m { color: var(--muted); font-size: 12.5px; }
+  .pill b { font-weight: 600; }
+
+  /* —— 分区眉题 —— */
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .12em; color: var(--faint); text-transform: uppercase; margin: 26px 0 10px; display: flex; align-items: center; gap: 10px; }
+  .eyebrow::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+  /* —— 网格卡片 —— */
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+  .col4 { grid-column: span 4; } .col8 { grid-column: span 8; }
+  .col6 { grid-column: span 6; } .col12 { grid-column: span 12; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; transition: border-color .15s, transform .15s; }
+  .card:hover { border-color: #3f3f46; }
+  .card--main { border-color: #35356e; background: linear-gradient(180deg, #14142a 0%, var(--card) 45%); }
+  .card__hd { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card__t { font-size: 14px; font-weight: 600; }
+  .card__hint { font-size: 12px; color: var(--faint); margin-left: auto; }
+
+  .kv { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; }
+  .kv .v.ok { color: var(--ok); }
+
+  .btn { border: 1px solid var(--line); background: var(--card2); color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  .btn:hover { border-color: #52525b; }
+  .btn--p { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn--p:hover { filter: brightness(1.1); }
+  .btn--danger { color: var(--err); border-color: #4c1f1d; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  /* 项目库选择器 */
+  .sel { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .sel .caret { color: var(--faint); margin-left: auto; }
+  .star { color: var(--warn); }
+  .tag { font-size: 11px; padding: 1.5px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); font-family: var(--mono); }
+  .tag--rel { color: var(--ok); border-color: #1d4a2a; background: #0e1f14; }
+  .tag--new { color: #ff7b72; border-color: #4c1f1d; background: #1f0f0e; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: #191919; }
+  td code { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .part { font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--accent); }
+
+  .tl-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; flex-wrap: wrap; }
+  .tl-row:last-child { border-bottom: 0; }
+  .tl-row .id { font-family: var(--mono); font-size: 12.5px; }
+  .tl-row .meta { color: var(--muted); font-size: 12px; }
+  .tl-row .ops { margin-left: auto; display: flex; gap: 6px; }
+  .mini { font-size: 11.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-family: var(--sans); }
+  .mini:hover { color: var(--ink); border-color: #52525b; }
+  .mini--p { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .hist { display: flex; gap: 10px; font-size: 13px; padding: 8px 0; border-bottom: 1px dashed var(--line); align-items: baseline; }
+  .hist:last-child { border-bottom: 0; }
+  .hist .ok { color: var(--ok); } .hist .err { color: var(--err); }
+  .hist .t { color: var(--faint); font-family: var(--mono); font-size: 11.5px; margin-left: auto; }
+  .stat-num { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+  .stat-lbl { font-size: 11.5px; color: var(--muted); }
+  .stats { display: flex; gap: 26px; }
+
+  /* —— 日志 dock —— */
+  .dock { position: fixed; right: 18px; bottom: 18px; width: min(560px, calc(100vw - 36px)); background: #0d1117; border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.55); z-index: 8; overflow: hidden; }
+  .dock--min .dock__body { display: none; }
+  .dock__hd { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 12.5px; color: #e6edf3; cursor: pointer; user-select: none; border-bottom: 1px solid #21262d; }
+  .dock--min .dock__hd { border-bottom: 0; }
+  .dock__hd .d { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .dock__hd .m { color: #8b949e; font-size: 12px; }
+  .dock__hd .right { margin-left: auto; display: flex; gap: 10px; color: #8b949e; font-size: 12px; }
+  .dock__hd .right span:hover { color: #e6edf3; }
+  .dock__body { height: 168px; overflow: auto; padding: 8px 14px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.7; color: #e6edf3; }
+  .lt { color: #8b949e; }
+  .lg { color: #3fb950; } .lb { color: #79c0ff; } .ly { color: #d29922; }
+  .lp { color: #3fb950; }
+
+  /* —— ⌘K overlay —— */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; z-index: 20; }
+  .overlay.on { display: flex; }
+  .palette { width: min(560px, 92vw); background: #141414; border: 1px solid #3f3f46; border-radius: 12px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+  .palette input { width: 100%; border: 0; background: transparent; color: var(--ink); font-size: 15px; padding: 14px 16px; outline: none; border-bottom: 1px solid var(--line); font-family: var(--sans); }
+  .palette .it { padding: 10px 16px; font-size: 13.5px; color: var(--muted); display: flex; gap: 10px; }
+  .palette .it:hover, .palette .it.on { background: #1c1c1c; color: var(--ink); }
+  .palette .it kbd { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+  .foot { text-align: center; color: var(--faint); font-size: 12px; margin-top: 34px; }
+  .foot a { color: var(--accent); text-decoration: none; }
+
+  @media (max-width: 900px) {
+    .col4, .col8, .col6 { grid-column: span 12; }
+    .cmdk { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav__in">
+    <span class="brand"><span class="sq"></span>ESP32 Web Flasher</span>
+    <div class="nav__links">
+      <a href="#" class="on">总览</a><a href="#">项目库</a><a href="#">版本</a><a href="#">历史</a>
+    </div>
+    <div class="cmdk" onclick="document.getElementById('cmdk').classList.add('on')">⌘ 搜索项目、版本、命令… <kbd>⌘K</kbd></div>
+    <button class="icon-btn" title="Token">🔑</button>
+    <button class="icon-btn" title="切换主题">◐</button>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <div class="banner">
+    <span>●</span>
+    <span><b>hello-world · ESP32-S3</b> 有新版本 <code style="font-family:var(--mono)">20260929-2029</code> 已发布</span>
+    <span class="go">查看 →</span>
+    <span class="x">✕</span>
+  </div>
+
+  <div class="pills">
+    <span class="pill"><span class="d"></span><b>设备就绪</b><span class="m">ESP32-S3 @ COM3</span></span>
+    <span class="pill"><span class="d"></span><b>日志监视中</b><span class="m">28 行</span></span>
+    <span class="pill"><span class="d d--warn"></span><b>1 个新发布</b><span class="m">SSE 已推送</span></span>
+    <span class="pill"><span class="d"></span><b>服务在线</b><span class="m">2 项目 / 12 版本</span></span>
+  </div>
+
+  <div class="eyebrow">Device · 设备</div>
+  <div class="grid">
+    <div class="card col4">
+      <div class="card__hd"><span class="card__t">ESP32-S3</span><span class="tag tag--rel">ready</span></div>
+      <div class="kv"><span class="k">端口</span><span class="v">COM3（原生 USB）</span></div>
+      <div class="kv"><span class="k">MAC</span><span class="v">84:27:0C:xx:xx:xx</span></div>
+      <div class="kv"><span class="k">Flash</span><span class="v">8 MB</span></div>
+      <div class="kv"><span class="k">Revision</span><span class="v">v0.2</span></div>
+      <div class="kv"><span class="k">chipFamily</span><span class="v ok">ESP32-S3 ✓</span></div>
+      <div class="btnrow">
+        <button class="btn">断开</button>
+        <button class="btn">切换端口</button>
+        <button class="btn btn--danger">完全擦除</button>
+        <button class="btn">硬复位</button>
+      </div>
+    </div>
+
+    <div class="card card--main col8">
+      <div class="card__hd"><span class="card__t">烧录固件</span><span class="card__hint">参数已按发布记录注入</span></div>
+      <div class="sel">
+        <span class="star">★</span><b>hello-world · ESP32-S3</b>
+        <span class="tag">20260929-2029</span><span class="tag tag--rel">release</span><span class="tag tag--new">NEW</span>
+        <span class="caret">▾</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <span class="tag">dio</span><span class="tag">80m</span><span class="tag">2MB</span>
+        <span class="tag" style="color:var(--ok)">chipFamily 匹配 ✓</span>
+        <button class="btn" style="margin-left:auto">载入此版本</button>
+        <button class="btn">添加 bin…</button>
+      </div>
+      <table style="margin-top:8px">
+        <thead><tr><th>段</th><th>分区</th><th>地址</th><th>大小</th></tr></thead>
+        <tbody>
+          <tr><td>bootloader.bin</td><td><span class="part">app</span></td><td><code>0x0000</code></td><td><code>23.1 KB</code></td></tr>
+          <tr><td>partition-table.bin</td><td><span class="part">data</span></td><td><code>0x8000</code></td><td><code>3.0 KB</code></td></tr>
+          <tr><td>hello_world.bin</td><td><span class="part">app</span></td><td><code>0x10000</code></td><td><code>663 KB</code></td></tr>
+        </tbody>
+      </table>
+      <div class="btnrow">
+        <button class="btn btn--p">烧录 3 段（689 KB）</button>
+        <span style="color:var(--faint);font-size:12px;align-self:center">写入前会弹出二次确认（段数/字节/地址清单）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="eyebrow">Releases · 版本</div>
+  <div class="grid">
+    <div class="card col12">
+      <div class="card__hd"><span class="card__t">hello-world / ESP32-S3 · 版本时间线</span><span class="card__hint">保留 30 快照 · 发布版永不删除</span></div>
+      <div class="tl-row">
+        <span class="id">20260929-2029</span><span class="tag tag--rel">★ 发布版 · latest</span>
+        <span class="meta">修复 SSE 心跳 · 3 段 · dio/80m/2MB</span>
+        <div class="ops"><button class="mini mini--p">载入</button></div>
+      </div>
+      <div class="tl-row">
+        <span class="id">20260929-1949</span><span class="tag tag--rel">★ 发布版</span>
+        <span class="meta">首次跨网发布 · 3 段</span>
+        <div class="ops"><button class="mini">载入</button><button class="mini">回滚到此</button></div>
+      </div>
+      <div class="tl-row">
+        <span class="id">20260929-1948</span><span class="tag">快照</span>
+        <span class="meta">自动快照 · 3 段</span>
+        <div class="ops"><button class="mini">载入</button><button class="mini">晋升</button><button class="mini">回滚到此</button></div>
+      </div>
+      <div class="btnrow"><button class="btn">保留数设置（30 / all）</button><button class="btn">刷新</button></div>
+    </div>
+  </div>
+
+  <div class="eyebrow">Activity · 动态</div>
+  <div class="grid">
+    <div class="card col6">
+      <div class="card__hd"><span class="card__t">烧录历史</span><span class="card__hint">本地保存 20 条</span></div>
+      <div class="hist"><span class="ok">✓</span>3 段 · 689 KB · ESP32-S3<span class="t">12:01</span></div>
+      <div class="hist"><span class="ok">✓</span>3 段 · 689 KB · ESP32-S3<span class="t">昨天 21:44</span></div>
+      <div class="hist"><span class="err">✗</span>失败 · 端口被占用（4 步排查→）<span class="t">昨天 21:40</span></div>
+    </div>
+    <div class="card col6">
+      <div class="card__hd"><span class="card__t">服务状态</span><span class="card__hint">60s 自动刷新</span></div>
+      <div class="stats">
+        <div><div class="stat-num">2</div><div class="stat-lbl">项目</div></div>
+        <div><div class="stat-num">12</div><div class="stat-lbl">版本</div></div>
+        <div><div class="stat-num">1.2<span style="font-size:13px">GB</span></div><div class="stat-lbl">占用</div></div>
+        <div><div class="stat-num">3</div><div class="stat-lbl">订阅</div></div>
+      </div>
+      <div class="kv" style="margin-top:10px"><span class="k">最近发布</span><span class="v">20260929-2029 · SSE 推送 ✓</span></div>
+    </div>
+  </div>
+
+  <div class="foot">方案 C · 静态预览（mock 数据） · <a href="./index.html">返回方案导航</a> · <a href="../">主站</a></div>
+</div>
+
+<!-- 日志 dock -->
+<div class="dock" id="dock">
+  <div class="dock__hd" onclick="document.getElementById('dock').classList.toggle('dock--min')">
+    <span class="d"></span><b>实时日志</b><span class="m">监视中 · 28 行</span>
+    <div class="right"><span>⏸</span><span>⏹</span><span>⧉</span><span>⋯</span><span id="mt">▾</span></div>
+  </div>
+  <div class="dock__body">
+    <div>[12:01:44] <span class="lg">ready</span> · ESP32-S3 已连接，日志流自动开启</div>
+    <div>[12:01:45] <span class="lb">rst:0x1 (POWERON_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)</span></div>
+    <div>[12:01:45] <span class="lb">configsip: 0, SPIWFC:0x00000000, mode:QIO, clock div:1</span></div>
+    <div>[12:01:45] <span class="lb">waiting for download</span></div>
+    <div>[12:01:46] <span class="lg">Hello world!</span></div>
+    <div>[12:01:46] <span style="color:#e6edf3">This is ESP32-S3 chip with 2 CPU core(s), WiFi/BLE, 8MB flash</span></div>
+    <div>[12:01:47] <span class="ly">app: rebooting in 3s…</span></div>
+    <div><span class="lp">▮</span></div>
+  </div>
+</div>
+
+<!-- ⌘K 演示 -->
+<div class="overlay" id="cmdk" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="palette">
+    <input placeholder="输入命令或搜索…" readonly />
+    <div class="it on">▣ 连接设备 <kbd>C</kbd></div>
+    <div class="it">⬇ 载入最新版本 <kbd>L</kbd></div>
+    <div class="it">⚡ 烧录当前清单 <kbd>F</kbd></div>
+    <div class="it">⏹ 停止监视（让出串口） <kbd>S</kbd></div>
+    <div class="it">◐ 切换主题 <kbd>T</kbd></div>
+  </div>
+</div>
+
+<script>
+  // dock 收起箭头文案
+  var dock = document.getElementById('dock'), mt = document.getElementById('mt');
+  dock.querySelector('.dock__hd').addEventListener('click', function () {
+    setTimeout(function () { mt.textContent = dock.classList.contains('dock--min') ? '▴' : '▾'; }, 0);
+  });
+  // ⌘K
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      document.getElementById('cmdk').classList.toggle('on');
+    }
+    if (e.key === 'Escape') document.getElementById('cmdk').classList.remove('on');
+  });
+</script>
+</body>
+</html>
