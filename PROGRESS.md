@@ -136,7 +136,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 | F-13 chipFamily 比对 | ✅ | S4 实现：载入时 chipFamily≠实测 → confirm 警告不阻断；门5 实测顺带验证 |
 | F-14 地址预设 | ✅ | flash_args 权威地址（不再靠猜） |
 | F-15 会话可重复 | ✅ | 实机二次烧录验证 |
-| F-16 实时串口日志 | ✅ | console 问题19 已关（实测有输出）；**2026-10-02 N4 改默认关闭**：手动 ▶ 开始监视，streamWanted 跨重连保持，烧录按意图恢复；独立窗口（原附带项）已按用户要求移除 |
+| F-16 实时串口日志 | ✅ | console 问题19 已关；N4 默认关（streamWanted 跨重连保持）；**R-1 对齐 idf monitor**：开监视自动硬复位抓全启动日志 +「↻ 复位」信号复位不断流；独立窗口已按用户要求移除 |
 | F-17 设备常驻连接 | 🔄 | 代码+单测完成，**待实机回归** |
 | F-18 日志渲染性能 | 🔄 | 代码+单测完成，**待洪峰实测** |
 | F-19 IDF 命令按钮 | ✖ 已移除 | 2026-09-29 应用户要求整体删除（云端部署后失效）：按钮/useIdfBuild/vite 中间件/tests 全清；DESIGN §4.6 同步 |
@@ -160,6 +160,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-10-02（R-1 监视对齐 idf.py monitor）**：调研驱动实现——① `glue/signalReset.ts`：**esp_idf_monitor 官方同源时序**（本地 IDF 源码核实：`Reset.hard()` = RTS低→**5ms**(esp32s3 MINIMAL_EN_LOW_DELAY)→RTS高 + Windows usbser DTR 重发变通；开流后先置 RTS/DTR=idle 防误复位）；② **▶开始监视 → 自动硬复位一次**（官方 `open_serial(reset=True)` 同款，`--no-reset` 等价语义留待需要）→ 从 ROM 第一行抓全启动日志；③ **「↻ 复位」按钮**（面板头）：硬复位智能路由——**监视开=signalReset 信号路径（端口不关/日志不断/COM 不掉）**、监视关=原 esptool 临界区兜底，快捷操作硬复位同享；④ 读取权威源码：`node_modules/esptool-js/lib/reset.js` + `D:\Espressif\...\esp_idf_monitor\base\reset.py/chip_specific_config.py/serial_reader.py`。core 依赖 `deps.signalReset` 注入，**+2 新测试**（信号路径不断流/启动自动复位），擦除与硬复位用例重写。**133 测试 + build 全绿**（publish-watch 防抖用例单独复跑 2 次过，判定计时偶发）。**待实机验证**：USB-Serial/JTAG 枚举保持 + 时序效果。
 - **2026-10-02（M1 默认折叠+启动日志引导）**：① 项目库文件夹**默认折叠**（openFolders 语义反转，显示「N 版本」，点开才列版本行）；② 启动日志缺失定位=**串口无缓冲**（监视开启前的输出无法追回，非丢读）——glue 开流路径无冗余延迟（port.open 直读）；引导两处：resume notice「先开监视、再复位设备，才能抓全启动日志」+ 空窗提示改写（点硬复位/RST 从头看起）。131 测试+build 全绿。
 - **2026-10-02（页面任务批次 N1–N7）**：① **N1 项目库折叠**——点文件夹 📁/📂+「N 版本」折叠切换（选中兼折叠）；快照/发布版区分强化（★发布=绿底徽标、快照灰淡、NEW 红）；② **N2 独立窗口整链移除**——⧉ 按钮/?panel=log 分支/fw-log BroadcastChannel 收发/LogPanel minimal 全删，LogPanel 精简为纯终端体；③ **N3 拖拽调尺寸**——侧栏右缘/底板上缘 6px 拖拽条（pointer capture），`--sb-w`/`--bp-h` + localStorage fw.sbW/fw.bpH 持久；④ **N4 日志监视默认关闭**（core 变更）——新增 `streamWanted` 意图位：连接不再自动开流（连接 notice 提示手动开启），手动 ▶ 后跨重连保持，烧录临界区只按意图恢复（**暂停后烧录不再抢串口**）——DESIGN §4.1 状态图/F-16/13 个测试同步重写；⑤ **N5 烧录历史**移入底部面板第 4 标签（活动栏「历史」直接开面板），side-card 只留服务；⑥ **N6 活动栏中文标签**——图标下 9.5px 设备/固件/版本/项目/历史/服务/设置；⑦ **N7 导出固件包**——操作行「⬇ 导出固件包」：全部段+flash_args+README.txt 打 zip（新 core/zip STORE 零依赖 + firmwarePack 文本生成，+6 测试含 crc32 标准向量与 zip 回环解析）。**131 测试 + build 全绿**，Playwright DOM 验收（标签/折叠/拖拽条/默认关监视/无独立窗口）通过。硬复位不可用问题仅记录（下一步2）。
 - **2026-10-02（b-ide 新版上云）**：按 SERVER.md 流程部署——build（index-8VoAskEc.js）→ Compress-Archive → scp → unzip → systemctl restart（ExecMainStartTimestamp=10-02 12:04:16 核对通过）。外网验证：https 入口 bundle ✓、http:80 只读通道 ✓、/design-preview/b-ide.html ✓、/docs/DEPLOY.md ✓、/api/status ✓（2 项目/14 版本）。注：首轮 ssh 重启静默失败（unzip backslash 警告后命令链中断），按 SERVER.md「unzip 成功≠进程重启」教训补重启+时间戳核对。

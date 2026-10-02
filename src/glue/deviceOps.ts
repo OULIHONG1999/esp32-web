@@ -146,6 +146,15 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
       }
     },
 
+    /** R-1：对监视中持有的端口发信号硬复位（idf.py monitor 同源，端口不关、日志不断） */
+    async signalReset(): Promise<void> {
+      if (!monitor) {
+        throw new Error('signal reset requires active log monitor (port not open)')
+      }
+      await monitor.resetTarget()
+      log.add({ level: 'info', source: 'app', text: '已发送硬复位信号（端口保持、日志不断流）' })
+    },
+
     async flash(parts: FlashPart[], onProgress: (p: Progress) => void): Promise<void> {
       const total = parts.reduce((n, p) => n + p.data.byteLength, 0)
       log.add({

@@ -21,9 +21,11 @@ export interface Progress {
 }
 
 /**
- * 设备常驻连接模型（DESIGN §4.1，2026-09-26 方向1 重构）：
- * 端口授权与连接是长生命周期，烧录/擦除/复位是短暂的"临界区"，
- * 实时日志流在 connected(ready) 态默认开启，临界区期间自动挂起、结束自动恢复。
+ * 设备常驻连接模型（DESIGN §4.1，2026-09-26 方向1 重构；2026-10-02 N4/R-1 修订）：
+ * 端口授权与连接是长生命周期，烧录/擦除是短暂的"临界区"；
+ * **实时日志监视默认关闭**（streamWanted 意图位，手动 ▶ 开启，跨重连保持），
+ * 开启时**自动硬复位一次**（对齐 idf.py monitor 启动行为，抓全启动日志），
+ * 监视中复位走信号路径（端口不关、日志不断）。
  */
 export type DeviceState =
   | 'disconnected'
@@ -49,6 +51,11 @@ export interface DeviceDeps {
   detect(): Promise<ChipInfo>
   startStream(handlers: StreamHandlers): Promise<void>
   stopStream(): Promise<void>
+  /**
+   * R-1 信号复位：对【监视已打开】的端口拨硬复位信号（idf.py monitor 同源）——
+   * 端口不关、日志流不断、COM 不掉。监视未开启时 glue 抛错。
+   */
+  signalReset(): Promise<void>
   flash(parts: FlashPart[], onProgress: (p: Progress) => void): Promise<void>
   erase(): Promise<void>
   hardReset(): Promise<void>
@@ -410,6 +417,24 @@ export class DeviceManager {
   }
 
   async hardReset(): Promise<void> {
+    this.assert('hardReset')
+    // R-1 智能路由：监视开着 → 信号复位（端口由监视持有，不挂起日志流）；
+    // 监视未开 → 原 esptool 临界区路径（端口空闲，会话可用）兜底。
+    if (this.streamOn) {
+      this.transition('working')
+      try {
+        await this.deps.signalReset()
+        this.lastError = null
+        this.noticeHandler('已硬复位（端口保持、日志不断流）')
+        this.transition('ready')
+      } catch (err) {
+        this.lastError = classifyError(err, PHASE_OF.hardReset)
+        // 流未被挂起，直接归位 ready（端口仍在）
+        this.transition('ready')
+        throw err
+      }
+      return
+    }
     await this.runCritical('hardReset', () => this.deps.hardReset())
   }
 
@@ -429,13 +454,15 @@ export class DeviceManager {
   /**
    * 手动开启实时日志（N4：连接后默认关闭，由此入口打开）；
    * 意图置为开启——之后烧录临界区结束与重连都会自动恢复。ready 态幂等。
+   * R-1：开启后**自动硬复位一次**（esp_idf_monitor `open_serial(reset=True)` 同款，
+   * 官方 idf.py monitor 启动默认行为）→ 从 ROM 第一行开始抓启动日志。
    */
   async resumeMonitor(): Promise<void> {
     if (this.state !== 'ready' || this.streamOn) return
     this.streamWanted = true
     await this.openStream()
-    // 串口无缓冲：开启前已输出的行无法追回——引导正确顺序抓全启动日志
-    this.noticeHandler('实时日志监视已开启（提示：先开监视、再复位设备，才能抓全启动日志）')
+    await this.deps.signalReset()
+    this.noticeHandler('实时日志监视已开启——已自动硬复位（同 idf.py monitor：从启动日志开头显示）')
     this.emit() // 同上：开启后按钮须切回"停止监视"
   }
 }

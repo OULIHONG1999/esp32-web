@@ -619,6 +619,15 @@ async function configureToken(): Promise<void> {
         >
           {{ streamOn ? '⏹ 停止监视' : '▶ 开始监视' }}
         </button>
+        <button
+          class="bp-ctl"
+          type="button"
+          :disabled="!canOperate"
+          :title="streamOn ? '硬复位（端口保持、日志不断流——同 idf.py monitor Ctrl+T Ctrl+R）' : '硬复位（监视未开，走 esptool 会话路径）'"
+          @click="hardReset"
+        >
+          ↻ 复位
+        </button>
         <button class="bp-ctl" type="button" title="导出 .txt" @click="downloadLogs">导出</button>
         <button class="bp-ctl" type="button" title="清空日志" @click="clearLogs">清空</button>
       </template>

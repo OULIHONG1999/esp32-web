@@ -64,7 +64,7 @@ disconnected
            └─ ok → ready              （已连接 · 日志监视**默认关闭** N4：streamWanted=false；▶手动开启后保持，重连自动恢复）
                 ├─ flash()   → working（stopStream(仅监视开着时) → 写入 → closeEsptool → 按 streamWanted 恢复流）→ ready
                 ├─ erase()   → working（同上临界区）→ ready
-                ├─ hardReset() → working → ready
+                ├─ hardReset() → working → ready（R-1：监视开=signalReset 信号路径不断流；监视关=esptool 临界区）
                 ├─ switchPort() → 停流关会话 → requesting（强制弹选择器）
                 └─ disconnect() → disconnected
 ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notice
@@ -188,11 +188,14 @@ interface FirmwareSet {
 区4 底部面板      高度上缘可拖拽（N3 → --bp-h / fw.bpH，默认 264px）
                   四标签 [问题 | 输出 | 日志监视器 | 烧录历史 N5]
                   （问题=warn/error、输出=device 真实过滤；历史=原侧栏模块移入，手动点击查看）
-                  头部右侧控制行：级别▾(v-model 过滤) ⏸暂停视图 ⏹/▶监视 导出 清空 [+▾收起]
+                  头部右侧控制行：级别▾(v-model 过滤) ⏸暂停视图 ⏹/▶监视 ↻复位 导出 清空 [+▾收起]
                   （⧉ 独立窗口已整链移除 N2：按钮/?panel=log/fw-log 协议）
                   日志监视器 = LogPanel 纯终端体（行号/❯闪烁光标；渲染纪律不动）
                   **日志监视默认关闭（N4）**：连接后手动「▶ 开始监视」；streamWanted 意图跨重连保持，
                   烧录临界区只按意图恢复（手动暂停后烧录不再抢串口）
+                  **R-1 监视对齐 idf.py monitor（2026-10-02）**：开启监视=自动硬复位一次（抓全启动日志）；
+                  面板头「↻ 复位」= 信号复位（RTS 低→5ms→高，esp_idf_monitor 同源时序）——端口不关、
+                  日志不断、COM 不掉；监视未开时该按钮走 esptool 临界区兜底（glue/signalReset.ts）
 区5 状态栏 26px    accent 绿色条通栏：● state · 芯片 · ⌀MAC · 品牌 ‖ 右:烧录参数 · ★订阅N · ◉服务在线 x/y · 订阅 · 🔑 · 版本
 ```
 

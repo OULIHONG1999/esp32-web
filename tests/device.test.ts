@@ -53,6 +53,9 @@ function makeDeps(opts: FakeOptions = {}): { deps: DeviceDeps; rec: Recorded } {
     async stopStream() {
       rec.calls.push('stopStream')
     },
+    async signalReset() {
+      rec.calls.push('signalReset')
+    },
     async flash(_p, _on: (p: Progress) => void) {
       rec.calls.push('flash')
       if (opts.failFlash) throw new Error('Timeout: lost sync')
@@ -163,17 +166,45 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     expect(d.isStreamOn).toBe(true)
   })
 
-  it('擦除与硬复位走同样的临界区模式', async () => {
+  it('擦除走临界区；监视中的硬复位走信号路径（R-1 不挂起日志流）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)
     await d.resumeMonitor()
     rec.calls.length = 0
     await d.erase()
-    await d.hardReset()
     expect(rec.calls).toEqual([
       'stopStream', 'erase', 'closeEsptool', 'startStream',
-      'stopStream', 'hardReset', 'closeEsptool', 'startStream',
     ])
+    // 监视开着 → 硬复位=纯信号操作：无 stopStream/startStream、不关会话
+    rec.calls.length = 0
+    await d.hardReset()
+    expect(rec.calls).toEqual(['signalReset'])
+    expect(d.state).toBe('ready')
+    expect(d.isStreamOn).toBe(true) // 日志流全程未断
+  })
+
+  it('未开监视的硬复位：esptool 临界区兜底（R-1 路由）', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = await connectReady(deps) // 默认监视关
+    rec.calls.length = 0
+    await d.hardReset()
+    expect(rec.calls).toEqual(['hardReset', 'closeEsptool'])
+    expect(d.state).toBe('ready')
+    expect(d.isStreamOn).toBe(false)
+  })
+
+  it('开始监视自动硬复位（对齐 idf.py monitor 启动行为，R-1）', async () => {
+    const { deps, rec } = makeDeps({ hasExistingPort: true })
+    const d = new DeviceManager(deps)
+    const notices: string[] = []
+    d.setNoticeHandler((m) => notices.push(m))
+    await d.connect()
+    rec.calls.length = 0
+    await d.resumeMonitor()
+    expect(rec.calls).toEqual(['startStream', 'signalReset'])
+    expect(d.isStreamOn).toBe(true)
+    expect(notices.some((n) => n.includes('已自动硬复位'))).toBe(true)
+    expect(notices.some((n) => n.includes('开启'))).toBe(true)
   })
 
   it('切换端口：停流关会话后强制弹选择器（意图保持 → 重连开流）', async () => {
