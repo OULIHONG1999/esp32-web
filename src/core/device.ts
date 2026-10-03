@@ -420,10 +420,11 @@ export class DeviceManager {
     this.assert('hardReset')
     // R-1 智能路由：监视开着 → 信号复位（端口由监视持有，不挂起日志流）；
     // 监视未开 → 原 esptool 临界区路径（端口空闲，会话可用）兜底。
+    // 2026-10-03 防挂：两条路径都套超时（信号 3s / esptool 8s），超时归位 ready，绝不卡 working。
     if (this.streamOn) {
       this.transition('working')
       try {
-        await this.deps.signalReset()
+        await withTimeout(this.deps.signalReset(), 3000, 'signal reset')
         this.lastError = null
         this.noticeHandler('已硬复位（端口保持、日志不断流）')
         this.transition('ready')
@@ -435,7 +436,9 @@ export class DeviceManager {
       }
       return
     }
-    await this.runCritical('hardReset', () => this.deps.hardReset())
+    await this.runCritical('hardReset', () =>
+      withTimeout(this.deps.hardReset(), 8000, 'hard reset'),
+    )
   }
 
   /**

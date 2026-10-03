@@ -207,6 +207,25 @@ describe('DeviceManager（方向1 设备常驻模型）', () => {
     expect(notices.some((n) => n.includes('开启'))).toBe(true)
   })
 
+  it('信号复位挂起 → 3s 超时归位 ready，不卡 working（防挂）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps } = makeDeps({ hasExistingPort: true })
+      const d = await connectReady(deps)
+      await d.resumeMonitor() // 开监视（含一次即时信号复位）
+      deps.signalReset = () => new Promise<void>(() => {}) // 模拟 USB 控制传输挂死
+      const p = d.hardReset()
+      const assertion = expect(p).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(3100)
+      await assertion
+      expect(d.state).toBe('ready') // 归位而非卡 working
+      expect(d.isStreamOn).toBe(true) // 日志流未受影响
+      expect(d.lastError?.cls).toBe('ResetFailed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('切换端口：停流关会话后强制弹选择器（意图保持 → 重连开流）', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })
     const d = await connectReady(deps)

@@ -54,6 +54,14 @@ describe('classifyError 错误翻译（F-10）', () => {
     expect(r.retryable).toBe(true)
   })
 
+  it('TimeoutError + reset 阶段 → ResetFailed 复位超时（2026-10-03 防挂分类）', () => {
+    const e = new Error('signal reset timed out after 3000ms')
+    e.name = 'TimeoutError'
+    const r = classifyError(e, 'reset')
+    expect(r.cls).toBe('ResetFailed')
+    expect(r.message).toContain('复位超时')
+    expect(r.retryable).toBe(true)
+  })
   it('七类文案全部非空（结构完整性）', () => {
     const cases = [
       classifyError(new DOMException('x', 'NotFoundError')),

@@ -151,6 +151,7 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
       if (!monitor) {
         throw new Error('signal reset requires active log monitor (port not open)')
       }
+      log.add({ level: 'info', source: 'app', text: '发送硬复位信号（EN 脉冲，端口保持）…' })
       await monitor.resetTarget()
       log.add({ level: 'info', source: 'app', text: '已发送硬复位信号（端口保持、日志不断流）' })
     },

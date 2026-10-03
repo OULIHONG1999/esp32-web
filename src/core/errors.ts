@@ -77,13 +77,22 @@ export function classifyError(err: unknown, phase?: SessionPhase): ClassifiedErr
   const text = errText(err)
   const name = errName(err)
 
-  // D2：core 自抛的超时（detect 20s / flash 空闲 60s）——先于其它规则，避免被 /timeout/ 误吞
+  // D2：core 自抛的超时（detect 20s / flash 空闲 60s / reset 3s-8s）——先于其它规则，避免被 /timeout/ 误吞
   if (name === 'TimeoutError') {
     if (phase === 'detect') {
       return {
         cls: 'ChipDetectFail',
         message: '芯片识别超时（20 秒无响应）',
         hint: '检查接线与供电后重试；设备若已拔出，请重新点「连接」。',
+        retryable: true,
+      }
+    }
+    if (phase === 'reset') {
+      // 2026-10-03 防挂：复位信号/会话无响应——归 ResetFailed 而非"传输失败"
+      return {
+        cls: 'ResetFailed',
+        message: '复位超时（无响应）',
+        hint: '复位信号可能已发出：观察设备是否重启；若无，点「开始监视」再复位，或按板载 RST 键。',
         retryable: true,
       }
     }
