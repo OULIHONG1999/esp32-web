@@ -5,7 +5,6 @@ import FirmwarePanel from './components/FirmwarePanel.vue'
 import VersionTimeline from './components/VersionTimeline.vue'
 import LogPanel, { type LogFilter } from './components/LogPanel.vue'
 import FlashHistory from './components/FlashHistory.vue'
-import ActivityBar, { type ActivityItem } from './components/ide/ActivityBar.vue'
 import Sidebar from './components/ide/Sidebar.vue'
 import TreeSection from './components/ide/TreeSection.vue'
 import TreeItem, { type TreeTag } from './components/ide/TreeItem.vue'
@@ -146,39 +145,6 @@ function onAddFiles(e: Event): void {
   activeTab.value = 'fw'
 }
 
-// ---- IDE 注册表（扩展点：加一行 + 对应插槽即完成接入；顺序按 b-ide 蓝本） ----
-const hasNewRelease = computed(
-  () =>
-    Object.keys(newReleaseIds.value).length > 0 ||
-    Object.keys(newReleases.value).length > 0,
-)
-
-const activityItems = computed<ActivityItem[]>(() => [
-  { id: 'device', icon: '▣', label: '设备', title: '设备（定位侧栏）' },
-  { id: 'firmware', icon: '⬚', label: '固件', title: '固件（工作区）' },
-  {
-    id: 'timeline',
-    icon: '◷',
-    label: '版本',
-    title: '版本时间线（工作区）',
-    badge: hasNewRelease.value,
-  },
-  { id: 'library', icon: '📁', label: '项目', title: '项目库（定位侧栏）' },
-  { id: 'history', icon: '▤', label: '历史', title: '烧录历史（底部面板）' },
-  { id: 'service', icon: '◉', label: '服务', title: '服务状态（定位侧栏）' },
-])
-/** 左下角：主题切换（所见即所得——显示点击后要切到的主题） */
-const activityEndItems = computed<ActivityItem[]>(() => [
-  {
-    id: 'theme',
-    icon: theme.value === 'dark' ? '☀' : '🌙',
-    label: '主题',
-    title: theme.value === 'dark' ? '切换到日间主题' : '切换到夜间主题',
-  },
-])
-const activeActivity = ref('firmware')
-
-/** 标签动态名：载入后带首个文件名（b-ide「固件 · hello_world.bin」） */
 const workTabs = computed<WorkTab[]>(() => [
   {
     id: 'fw',
@@ -228,30 +194,6 @@ function downloadLogs(): void {
   a.download = `esp32-web-flash-log-${Date.now()}.txt`
   a.click()
   URL.revokeObjectURL(url)
-}
-
-function onActivity(id: string): void {
-  if (id === 'firmware') {
-    activeTab.value = 'fw'
-    bottomCollapsed.value = false
-    return
-  }
-  if (id === 'timeline') {
-    activeTab.value = 'tl'
-    return
-  }
-  if (id === 'history') {
-    // 烧录历史 = 底部面板第 4 标签（手动点击查看）
-    activeBottom.value = 'history'
-    bottomCollapsed.value = false
-    return
-  }
-  if (id === 'theme') {
-    toggleTheme()
-    return
-  }
-  // 定位类：滚动侧栏对应分区到可视区
-  document.getElementById('sec-' + id)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 /** 项目树/时间线载入成功后切到固件标签展示清单 */
@@ -405,13 +347,6 @@ async function configureToken(): Promise<void> {
   <!-- ═══ 主界面：IDE 五区骨架（b-ide 复刻） ═══ -->
   <div class="ide">
     <!-- 区1 活动栏（跨行） -->
-    <ActivityBar
-      v-model="activeActivity"
-      :items="activityItems"
-      :end-items="activityEndItems"
-      @select="onActivity"
-    />
-
     <!-- 区2 侧栏：VS Code 树形资源管理器（跨行） -->
     <Sidebar>
       <!-- 设备卡：主行=芯片名+中文状态徽章；副行=详情合并；操作=真按钮 -->
@@ -713,7 +648,9 @@ async function configureToken(): Promise<void> {
       :subscribed="subscribedCount"
       :service-label="serviceLabel"
       :flash-params="activeParams"
+      :theme="theme"
       @configure-token="configureToken"
+      @toggle-theme="toggleTheme"
     />
 
     <!-- 共享隐藏文件选择器（侧栏「添加 bin」与固件页共用） -->
@@ -725,19 +662,18 @@ async function configureToken(): Promise<void> {
 /* ══════════ IDE 主骨架 ══════════ */
 .ide {
   display: grid;
-  grid-template-columns: 48px var(--sb-w, 250px) minmax(0, 1fr);
+  grid-template-columns: var(--sb-w, 250px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto 26px;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
 }
 /* 活动栏 + 侧栏跨前两行 */
-.ide > :first-child,
 .ide > .sb {
   grid-row: 1 / 3;
 }
 .ide__center {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1;
   display: flex;
   flex-direction: column;
@@ -1090,13 +1026,10 @@ async function configureToken(): Promise<void> {
 @media (max-width: 960px) {
   .ide {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr) auto 26px;
+    grid-template-rows: auto minmax(0, 1fr) auto 26px;
     height: auto;
     min-height: 100vh;
     overflow: visible;
-  }
-  .ide > :first-child {
-    display: none;
   }
   .ide > .sb {
     grid-row: 2;

@@ -20,9 +20,14 @@ defineProps<{
   serviceLabel: string
   /** 最近注入的烧录参数（null=未注入） */
   flashParams: FlashParams | null
+  /** 当前主题（右下角主题切换按钮） */
+  theme: string
   version?: string
 }>()
-defineEmits<{ 'configure-token': [] }>()
+defineEmits<{
+  'configure-token': []
+  'toggle-theme': []
+}>()
 
 const STATE_LABEL: Record<DeviceState, string> = {
   disconnected: '未连接',
@@ -70,6 +75,14 @@ const STATE_LABEL: Record<DeviceState, string> = {
         🔑 {{ hasToken ? '已设' : '设置' }}
       </button>
       <span class="st__item st__ver">{{ version ?? 'v0.2.0' }}</span>
+      <button
+        class="st__btn st__btn--theme"
+        type="button"
+        :title="theme === 'dark' ? '切换到日间主题' : '切换到夜间主题'"
+        @click="$emit('toggle-theme')"
+      >
+        {{ theme === 'dark' ? '☀ 日间' : '🌙 夜间' }}
+      </button>
     </div>
   </footer>
 </template>
