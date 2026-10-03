@@ -166,26 +166,26 @@ Ubuntu 22.04 @ firmware.example.com
 
 ---
 
-## 7. 版本与获取（Git 发布版）
+## 7. 版本与获取
 
-每个发布版都是 **annotated tag**，版本描述写在 tag 说明里：
+每个发布版都是 **annotated tag**（版本描述在 tag 说明里）；**最新版另有 GitHub Release 页**（一键下载 zip + 发布说明）。
 
-`ash
+```bash
 git tag -l -n99          # 列出所有版本及完整版本描述
 git checkout v2.0.0      # 切到任意版本（只读查看）
 git show v1.5.0          # 看该版本的详细描述与提交
 
 # 快速拿到某版本的完整源码包（zip，无需克隆历史）：
 git archive --format=zip -o esp32-web-v2.0.0.zip v2.0.0
-`
+```
 
-| 版本 | 内容 | 对应 tag |
+| 版本 | 内容 | 获取方式 |
 |---|---|---|
-| **v2.0.0**（当前） | IDE 五区工作站 + 监视对齐 idf.py monitor + 文档体系 | 2.0.0 |
-| v1.5.0 | 跨设备固件库（发布/SSE 订阅/版本管理，五道门全过） | 1.5.0 |
-| v1.0.0 | 烧录工具核心（连接/烧录/日志/状态机，门2 真机通过） | 1.0.0 |
+| **v2.0.0**（当前） | IDE 五区工作站 + 监视对齐 idf.py monitor + 文档体系 | **Release 页**（含说明，可下 zip）+ tag |
+| v1.5.0 | 跨设备固件库（发布/SSE 订阅/版本管理，五道门全过） | tag（历史快照） |
+| v1.0.0 | 烧录工具核心（连接/烧录/日志/状态机，门2 真机通过） | tag（历史快照） |
 
-> 打算挂到 **GitHub/Gitee Releases**（网页一键下载 zip + 发布说明页）的话：建好远端仓库后把地址给我，我来推 tag 并生成 Release 说明（本地 tag/描述已就绪，推送即发布）。
+发布策略：**只对最新版出 Release**；旧版本仅以 tag 形式保留，可随时 checkout/archive。
 
 ---
 
@@ -193,7 +193,7 @@ git archive --format=zip -o esp32-web-v2.0.0.zip v2.0.0
 
 - **v1 核心**：烧录/擦除/复位/日志/错误翻译/S3 三层复位 ✅（F-01…F-18）
 - **v1.5 固件库**：S1 最小闭环→S2 自动发布部署→S3 SSE 订阅→S4 版本管理，**五道验收门全过**（F-20…F-24）；S5 页面补充上传=可选不排期
-- **体验层**：IDE 五区界面（b-ide 复刻）、监视对齐 idf monitor（N4/R-1）、导出固件包 ✅
+- **体验层（v2.0.0）**：IDE 五区界面（b-ide 复刻）、监视对齐 idf monitor（N4/R-1）、导出固件包 ✅
 - **Backlog**：watch 后台网络问题（问题20）、HTTPS 域名尾巴、S5、硬复位 esptool 路径细节（信号路径已覆盖主场景）
 
-快速验证：`& $env:MIMO_NODE $env:MIMO_NPM test`（133 用例）+ `run build`（vue-tsc + vite）。
+快速验证：`npm test`（133 用例）+ `npm run build`（vue-tsc + vite）。
