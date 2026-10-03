@@ -163,7 +163,7 @@ interface FirmwareSet {
 
 **自动降速策略**：flash 断在中途 → 以 `原波特率/2` 重试一次（下限 115200），重试写入日志；只重试一次，避免死循环。
 
-**超时分类（D2，2026-09-26 实现）**：core 自抛的 `TimeoutError`（`name==='TimeoutError'`，先于文本规则分类）——detect 阶段映射 `ChipDetectFail`（"芯片识别超时"），flash/erase 阶段映射 `TransferFail`（"操作超时（长时间无进度）"）。错误条在 ready 态也显示且可关闭（D3）。改文案/分类须同步 `tests/errors.test.ts`（AGENTS 纪律 4）。
+**超时分类（D2，2026-09-26 实现；2026-10-03 增 reset）**：core 自抛的 `TimeoutError`（`name==='TimeoutError'`，先于文本规则分类）——detect 阶段映射 `ChipDetectFail`（"芯片识别超时"），reset 阶段映射 `ResetFailed`（"复位超时"——2026-10-03 防挂：信号复位 3s / esptool 复位 8s），flash/erase 阶段映射 `TransferFail`（"操作超时（长时间无进度）"）。错误条在 ready 态也显示且可关闭（D3）。改文案/分类须同步 `tests/errors.test.ts`（AGENTS 纪律 4）。
 
 ### 4.5 UI 流程（IDE 五区布局，2026-10-02 按 b-ide 预览复刻）
 
