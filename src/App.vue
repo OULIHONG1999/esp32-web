@@ -167,9 +167,15 @@ const activityItems = computed<ActivityItem[]>(() => [
   { id: 'history', icon: '▤', label: '历史', title: '烧录历史（底部面板）' },
   { id: 'service', icon: '◉', label: '服务', title: '服务状态（定位侧栏）' },
 ])
-const activityEndItems: ActivityItem[] = [
-  { id: 'theme', icon: '⚙', label: '设置', title: '切换日 / 夜主题' },
-]
+/** 左下角：主题切换（所见即所得——显示点击后要切到的主题） */
+const activityEndItems = computed<ActivityItem[]>(() => [
+  {
+    id: 'theme',
+    icon: theme.value === 'dark' ? '☀' : '🌙',
+    label: '主题',
+    title: theme.value === 'dark' ? '切换到日间主题' : '切换到夜间主题',
+  },
+])
 const activeActivity = ref('firmware')
 
 /** 标签动态名：载入后带首个文件名（b-ide「固件 · hello_world.bin」） */
@@ -304,6 +310,16 @@ const STATE_DOT: Record<string, 'ok' | 'off' | 'warn' | 'err'> = {
   error: 'err',
 }
 
+/** 设备卡状态徽章（中文，替代裸状态码） */
+const STATE_BADGE: Record<string, string> = {
+  disconnected: '未连接',
+  requesting: '选择端口中…',
+  detecting: '识别芯片中…',
+  ready: '已连接',
+  working: '操作中…',
+  error: '连接错误',
+}
+
 // ---- 独立日志窗口已移除（2026-10-02 N2：?panel=log / BroadcastChannel 全链拆除）----
 
 function onRecheck(): void {
@@ -398,43 +414,64 @@ async function configureToken(): Promise<void> {
 
     <!-- 区2 侧栏：VS Code 树形资源管理器（跨行） -->
     <Sidebar>
-      <!-- 设备（b-ide：纯信息树行 + 树行操作） -->
+      <!-- 设备卡：主行=芯片名+中文状态徽章；副行=详情合并；操作=真按钮 -->
       <TreeSection id="sec-device" title="设备">
-        <TreeItem
-          icon="▣"
-          :label="chip?.name ?? '（未连接）'"
-          :sub="chip && state === 'ready' ? '@ 常驻' : undefined"
-          :dot="STATE_DOT[state]"
-        />
-        <TreeItem v-if="chip?.mac" icon="⌗" :label="chip.mac" :indent="1" />
-        <TreeItem
-          v-if="chip?.flashSize"
-          icon="◫"
-          :label="'Flash ' + chip.flashSize"
-          :sub="chip.revision ? 'Rev ' + chip.revision : undefined"
-          :indent="1"
-        />
-        <TreeItem icon="◉" :label="state" :sub="state === 'ready' ? '日志监视中' : undefined" />
-
-        <!-- 操作行（树行形态，b-ide 快捷操作同款） -->
-        <TreeItem
-          v-if="state === 'disconnected' || state === 'error'"
-          accent
-          icon="▶"
-          label="连接设备"
-          title="选择串口（首次弹出浏览器选择器，之后免弹窗复用）"
-          @click="connect"
-        />
-        <TreeItem
-          v-else-if="state === 'requesting' || state === 'detecting'"
-          icon="…"
-          label="连接中…"
-          disabled
-        />
-        <template v-else>
-          <TreeItem v-if="state === 'ready'" icon="⇄" label="切换端口" @click="switchPort" />
-          <TreeItem icon="⏏" label="断开设备" :disabled="state === 'working'" @click="disconnect" />
-        </template>
+        <div class="dev-card">
+          <div class="dev-main">
+            <span class="dev-icon">▣</span>
+            <div class="dev-text">
+              <div class="dev-name">
+                {{ chip?.name ?? '未连接设备' }}
+                <span class="dev-badge" :class="'dev-badge--' + STATE_DOT[state]">
+                  {{ STATE_BADGE[state] ?? state }}
+                </span>
+              </div>
+              <div class="dev-meta">
+                {{
+                  chip?.mac || chip?.flashSize || chip?.revision
+                    ? [chip?.mac ? 'MAC ' + chip.mac : '', chip?.flashSize ? 'Flash ' + chip.flashSize : '', chip?.revision ? 'Rev ' + chip.revision : '']
+                        .filter(Boolean)
+                        .join(' · ')
+                    : '连接后显示芯片详情（MAC / Flash / 版本）'
+                }}
+              </div>
+            </div>
+          </div>
+          <div class="dev-btns">
+            <template v-if="state === 'disconnected' || state === 'error'">
+              <button
+                class="dbtn dbtn--primary"
+                type="button"
+                title="选择串口（首次弹出浏览器选择器，之后免弹窗复用）"
+                @click="connect"
+              >
+                ▶ 连接设备
+              </button>
+            </template>
+            <template v-else-if="state === 'requesting' || state === 'detecting'">
+              <button class="dbtn" type="button" disabled>连接中…</button>
+            </template>
+            <template v-else>
+              <button
+                v-if="state === 'ready'"
+                class="dbtn"
+                type="button"
+                title="换一个串口（重新弹出系统选择器）"
+                @click="switchPort"
+              >
+                ⇄ 切换端口
+              </button>
+              <button
+                class="dbtn"
+                type="button"
+                :disabled="state === 'working'"
+                @click="disconnect"
+              >
+                ⏏ 断开
+              </button>
+            </template>
+          </div>
+        </div>
 
         <!-- D3：ready 态烧录失败的错误条也可见，可手动关闭 -->
         <div v-if="lastError && (state === 'error' || state === 'ready')" class="dev-err">
@@ -513,14 +550,13 @@ async function configureToken(): Promise<void> {
         </p>
       </TreeSection>
 
-      <!-- 快捷操作 -->
-      <TreeSection id="sec-actions" title="快捷操作">
-        <TreeItem icon="＋" label="添加 bin 文件…" @click="pickFiles()" />
+      <!-- 操作（擦除/复位；连接入口在设备卡、添加 bin 在固件页，不重复） -->
+      <TreeSection id="sec-actions" title="操作">
         <template v-if="canOperate">
           <TreeItem icon="⌫" label="完全擦除" @click="onErase()" />
           <TreeItem icon="↻" label="硬复位" @click="hardReset()" />
         </template>
-        <TreeItem v-if="state === 'ready'" icon="⇄" label="切换端口" @click="switchPort()" />
+        <TreeItem v-else icon="○" label="（连接设备后可用）" disabled />
       </TreeSection>
 
       <!-- b-ide 侧栏底部卡：服务状态（烧录历史已移入底部面板标签） -->
@@ -754,7 +790,103 @@ async function configureToken(): Promise<void> {
   cursor: pointer;
 }
 
-/* ── 侧栏：错误条 / 提示 / 树消息 / side-card ── */
+/* ── 侧栏：设备卡 / 错误条 / 提示 / 树消息 / side-card ── */
+.dev-card {
+  margin: 4px 6px 8px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.dev-main {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.dev-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+.dev-text {
+  min-width: 0;
+}
+.dev-name {
+  font-size: 13px;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.dev-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.dev-badge--ok {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.dev-badge--warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+}
+.dev-badge--err {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 50%, transparent);
+}
+.dev-badge--off {
+  color: var(--muted);
+}
+.dev-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.dev-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.dbtn {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dbtn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.dbtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dbtn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
 .dev-err {
   position: relative;
   margin: 6px 8px;
