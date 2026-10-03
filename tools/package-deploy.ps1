@@ -1,4 +1,4 @@
-# 发布打包（纪律 9 用）：build 产物中的占位符 → 真实服务器地址 → zip
+﻿# 发布打包（纪律 9 用）：build 产物中的占位符 → 真实服务器地址 → zip
 # 仓库与远端永远只有占位符（firmware.example.com / panel.example.com）；
 # 真实地址只存在于本机 `.fw-deploy.local`（gitignored）或调用参数。
 #
