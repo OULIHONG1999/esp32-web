@@ -37,7 +37,7 @@
 6. 实机相关改动（T4+）不能只靠单测：在 `PROGRESS.md` 记录人工清单执行结果。
 7. 不做的事（见 REQUIREMENTS）：读取备份、ELF 转换、espefuse/espsecure、多用户鉴权、Safari 支持。（串口监视已入 v1：F-16，**2026-10-02 起默认关闭、手动 ▶ 开始**；独立日志窗口已移除。）
 8. **日志渲染纪律**（实测洪峰卡页教训）：LogEntry 必须带 `seq` 作稳定 key；批量 flush（120ms）后才推视图；显示上限 500；不得恢复"每行一次响应式更新/索引 key 全量 diff"的写法。
-9. **自动发布（2026-10-02 用户授权）**：`test` + `run build` 全绿并提交后，**直接按 docs/SERVER.md 流程发布云端，不再询问**；发布后必核对 `ExecMainStartTimestamp` 与外网入口 bundle 名，失败必须报告。
+9. **自动发布（2026-10-02 用户授权）**：`test` + `run build` 全绿并提交后，**直接发布云端，不再询问**。打包必须用 tools/package-deploy.ps1（dist 占位符 firmware.example.com 注入真实地址后再 zip；真实地址仅存本机 .fw-deploy.local（gitignored），严禁写入仓库/远端）→ scp → 远端 unzip → systemctl restart → 核对 `ExecMainStartTimestamp` 与外网入口 bundle 名，失败必须报告。
 
 ## 目录约定
 
