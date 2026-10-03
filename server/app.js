@@ -174,6 +174,19 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
     async function app(req, res) {
       const url = new URL(req.url ?? '/', 'http://localhost')
       const p = url.pathname
+      // 访问日志（P4 可观测性）：每个请求一行；SSE 在连接关闭时记一行
+      const started = Date.now()
+      let logged = false
+      const logHttp = () => {
+        if (logged) return
+        logged = true
+        const line = `[http] ${req.method} ${p} ${res.statusCode} ${Date.now() - started}ms`
+        if (res.statusCode >= 500) console.error(line)
+        else if (res.statusCode >= 400) console.warn(line)
+        else console.log(line)
+      }
+      res.on('finish', logHttp)
+      res.on('close', logHttp)
       try {
         if (req.method === 'GET' && p === '/api/registry') {
           return serveRegistry(dataDir, res)
@@ -310,7 +323,8 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
         send(res, 405, { error: 'method not allowed' })
       } catch (err) {
         const status = err?.status ?? 500
-        if (status >= 500) console.error('[server]', err)
+        if (status >= 500) console.error('[server]', req.method, p, err)
+        else console.warn('[server]', req.method, p, err?.message ?? err)
         send(res, status, { error: err?.message ?? 'internal error' })
       }
     },

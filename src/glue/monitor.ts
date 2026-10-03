@@ -38,11 +38,11 @@ export class SerialMonitor {
    * 对当前持有的端口发硬复位信号（进正常 app 启动）——
    * 端口不关、读流不断、COM 不掉；监视未运行时抛错。
    */
-  async resetTarget(): Promise<void> {
+  async resetTarget(onLog?: (msg: string) => void): Promise<void> {
     if (!this.running || !this.port) {
       throw new Error('signal reset requires an active monitor')
     }
-    await hardResetViaSignals(this.port)
+    await hardResetViaSignals(this.port, onLog)
   }
 
   private async readLoop(port: SerialPort): Promise<void> {

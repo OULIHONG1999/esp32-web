@@ -82,6 +82,7 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       state.registryMsg = state.options.length === 0 ? '服务器暂无已发布项目' : null
       if (state.selectedIdx >= state.options.length) state.selectedIdx = -1
     } catch (e) {
+      console.error('[api] refreshRegistry 失败:', e)
       state.options = []
       state.selectedIdx = -1
       state.registryMsg = `项目库不可达：${e instanceof Error ? e.message : String(e)}（自含服务未启动？node server/index.js）`
@@ -137,6 +138,7 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       deps.onLoaded(`${opt.projectId}/${opt.variant}`, rel.id)
       state.registryMsg = `已载入 ${opt.projectName}/${opt.variant} ${rel.id}（${loaded.length} 段，烧录参数已注入）`
     } catch (e) {
+      console.error('[api] loadRelease 失败:', e)
       state.registryMsg = `载入失败：${e instanceof Error ? e.message : String(e)}`
     }
   }

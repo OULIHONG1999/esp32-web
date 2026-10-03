@@ -70,11 +70,20 @@ async function setRTSWithDtrWorkaround(port: SerialPort, rts: boolean): Promise<
  * 硬复位进正常 app 启动（出完整 boot 日志）——
  * esp_idf_monitor `Reset.hard()` 的 Web Serial 等价实现（极性已按 constants.py 修正）。
  * 任何一步超时都不会挂起；关键的两次 EN 沿（拉低/释放）若全失败则抛错给上层。
+ * onLog：逐步打点（P4 可观测性——页面日志可见复位进行到哪一步）。
  */
-export async function hardResetViaSignals(port: SerialPort): Promise<void> {
-  const okLow = await setRTSWithDtrWorkaround(port, true) // RTS=TRUE（官方 LOW=True）→ EN=LOW 复位
+export async function hardResetViaSignals(
+  port: SerialPort,
+  onLog?: (msg: string) => void,
+): Promise<void> {
+  const say = onLog ?? (() => {})
+  say('步骤 1/2：EN → LOW（芯片进复位）…')
+  const okLow = await setRTSWithDtrWorkaround(port, true) // RTS=TRUE（官方 LOW=True）
+  if (!okLow) say('⚠ 步骤 1 信号超时（可能未生效），继续')
+  say('步骤 2/2：保持 5ms 后 EN → HIGH（释放，正常启动）…')
   await new Promise((resolve) => setTimeout(resolve, EN_LOW_MS))
-  const okHigh = await setRTSWithDtrWorkaround(port, false) // RTS=FALSE（官方 HIGH=False）→ EN=HIGH 启动
+  const okHigh = await setRTSWithDtrWorkaround(port, false) // RTS=FALSE（官方 HIGH=False）
+  if (!okHigh) say('⚠ 步骤 2 信号超时（可能未生效），继续')
   if (!okLow && !okHigh) {
     throw new Error('signal reset failed: setSignals timed out on both edges')
   }
