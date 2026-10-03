@@ -9,3 +9,5 @@ server-data/
 *.err
 
 /deploy-package.zip
+
+.fw-deploy.local
