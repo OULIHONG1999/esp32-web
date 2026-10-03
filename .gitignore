@@ -11,3 +11,11 @@ server-data/
 /deploy-package.zip
 
 .fw-deploy.local
+
+# font-cloud-server: runtime / deps / large fonts (see fonts/README.md)
+font-cloud-server/.venv/
+font-cloud-server/cache/
+font-cloud-server/data/
+font-cloud-server/fonts/*.ttf
+font-cloud-server/fonts/*.otf
+font-cloud-server/fonts/*.ttc

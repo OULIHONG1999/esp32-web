@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Font Cloud · 测试台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Font Cloud Server · 本地原型</p>
+        <h1>字体子集化测试台</h1>
+        <p class="sub">固定文本离线预置 · 动态文本按需拉字 · 云端只做「给字」</p>
+      </div>
+      <div class="top-actions">
+        <span id="health" class="pill">…</span>
+        <a class="btn ghost" href="docs/" title="架构方案 / API 协议">文档</a>
+        <button id="btn-reset" class="ghost">清空统计</button>
+        <button id="btn-refresh" class="primary">刷新</button>
+      </div>
+    </header>
+
+    <!-- 请求台 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>① 发起 /subset 请求</h2>
+        <span class="hint">按段去重 · POST JSON · 返回 TTF</span>
+      </div>
+
+      <div class="form-grid">
+        <label class="field">
+          <span>字体库</span>
+          <select id="font-select"></select>
+        </label>
+        <label class="field check">
+          <input type="checkbox" id="include-latin" />
+          <span>附加可打印 ASCII（调试用）</span>
+        </label>
+      </div>
+
+      <label class="field block">
+        <span>动态文本（歌词 / 便签 / 小说片段）</span>
+        <textarea id="chars-input" rows="3" placeholder="粘贴一段要显示的文本，例如：天青色等烟雨而我在等你">天青色等烟雨而我在等你</textarea>
+      </label>
+
+      <div class="row">
+        <button id="btn-subset" class="primary">拉取子集字体</button>
+        <button id="btn-demo" class="ghost">填入示例歌词</button>
+        <button id="btn-clear" class="ghost">清空</button>
+      </div>
+
+      <div id="dedupe-preview" class="preview"></div>
+    </section>
+
+    <!-- 结果 -->
+    <section class="panel" id="result-panel" hidden>
+      <div class="panel-head">
+        <h2>② 请求结果</h2>
+        <span id="result-status" class="hint"></span>
+      </div>
+      <div class="result-grid" id="result-body"></div>
+      <div class="row" id="result-actions">
+        <a id="dl-link" class="btn primary" download="subset.ttf" href="#">下载子集 TTF</a>
+        <span class="hint" id="result-path"></span>
+      </div>
+    </section>
+
+    <!-- 模拟设备流程 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>③ 设备端缺字比对（模拟）</h2>
+        <span class="hint">本地索引为空 → 全部当作缺字</span>
+      </div>
+      <div class="device-sim">
+        <div>
+          <div class="mini-label">文本去重后的字集</div>
+          <div id="char-chips" class="chips"></div>
+        </div>
+        <div class="arrow">→</div>
+        <div>
+          <div class="mini-label">本轮需请求</div>
+          <div id="missing-chips" class="chips missing"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 统计 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>④ 服务统计</h2>
+        <span class="hint">每 3 秒自动刷新 · 点「刷新」立即更新</span>
+      </div>
+
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi"><div class="kpi-label">子集请求</div><div class="kpi-value" id="k-req">0</div></div>
+        <div class="kpi"><div class="kpi-label">缓存命中率</div><div class="kpi-value" id="k-hit">0%</div></div>
+        <div class="kpi"><div class="kpi-label">平均延迟</div><div class="kpi-value" id="k-lat">0 ms</div></div>
+        <div class="kpi"><div class="kpi-label">已下发字节</div><div class="kpi-value" id="k-bytes">0</div></div>
+        <div class="kpi"><div class="kpi-label">平均子集大小</div><div class="kpi-value" id="k-size">0 KB</div></div>
+        <div class="kpi"><div class="kpi-label">累计去重字数</div><div class="kpi-value" id="k-chars">0</div></div>
+      </div>
+
+      <div class="charts">
+        <div class="chart-card">
+          <div class="mini-label">最近请求延迟 (ms)</div>
+          <canvas id="chart-latency" width="640" height="180"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="mini-label">子集体积分布 (KB)</div>
+          <canvas id="chart-size" width="640" height="180"></canvas>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <div class="mini-label">按字体</div>
+          <table class="table" id="font-table">
+            <thead>
+              <tr><th>字体</th><th>请求</th><th>命中</th><th>字数</th><th>下发</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div>
+          <div class="mini-label">缓存</div>
+          <div id="cache-box" class="cache-box"></div>
+          <div class="mini-label" style="margin-top:14px">延迟分位</div>
+          <div id="lat-box" class="cache-box"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 历史 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>⑤ 最近请求日志</h2>
+        <span class="hint" id="hist-count">—</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="hist-table">
+          <thead>
+            <tr>
+              <th>时间</th><th>字体</th><th>字</th><th>缺</th>
+              <th>缓存</th><th>体积</th><th>耗时</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <div>协议 v1.0 · 对应架构方案腿 A · 本地验证用，不上线 · <a href="docs/architecture.md">架构方案</a> · <a href="docs/protocol.md">API 协议</a></div>
+      <div class="api">
+        <code>GET /api/meta</code>
+        <code>GET /api/fonts</code>
+        <code>POST /api/subset</code>
+        <code>GET /api/stats</code>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

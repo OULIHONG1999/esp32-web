@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Font Cloud · 文档</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Font Cloud Server · Docs</p>
+        <h1>文档挂载</h1>
+        <p class="sub">AI / Agent 可直接抓取 Markdown；人可点开阅读。</p>
+      </div>
+      <div class="top-actions">
+        <a class="btn" href="../">← 返回测试台</a>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head"><h2>可抓取文档</h2><span class="hint">text/markdown · 无鉴权</span></div>
+      <table class="table">
+        <thead><tr><th>路径</th><th>说明</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>/docs/architecture.md</code></td>
+            <td>字体云端架构方案（定位/决策/架构/数据流/缓存/路线）</td>
+            <td><a href="architecture.md">打开</a></td>
+          </tr>
+          <tr>
+            <td><code>/docs/protocol.md</code></td>
+            <td>API 契约：/subset 参数、响应头、错误码、设备端调用流程</td>
+            <td><a href="protocol.md">打开</a></td>
+          </tr>
+          <tr>
+            <td><code>/api/meta</code></td>
+            <td>协议版本与能力协商（JSON）</td>
+            <td><a href="/api/meta">打开</a></td>
+          </tr>
+          <tr>
+            <td><code>/api/fonts</code></td>
+            <td>当前字体库</td>
+            <td><a href="/api/fonts">打开</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Agent 入口建议</h2></div>
+      <ol>
+        <li>抓 <code>/api/meta</code> 确认协议版本</li>
+        <li>读 <code>/docs/protocol.md</code> 了解请求/响应</li>
+        <li>读 <code>/docs/architecture.md</code> 理解固定/动态两条路径与缓存模型</li>
+        <li>调 <code>POST /api/subset</code> 做一次拉字自测</li>
+      </ol>
+    </section>
+  </div>
+</body>
+</html>
