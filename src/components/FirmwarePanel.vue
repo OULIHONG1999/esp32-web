@@ -4,11 +4,12 @@
  * 数据与项目库选择在 useFirmwareWorkspace（侧栏树 / 时间线共享）；
  * 本组件只负责展示与烧录确认。扩展：操作行按钮走 emits（flash/erase/hardReset）。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ChipInfo, FlashPart } from '../core/device'
 import type { FirmwareWorkspace } from '../composables/useFirmwareWorkspace'
 import { zipStore } from '../core/zip'
 import { buildFlashArgsText, buildReadmeText, type PackPart } from '../core/firmwarePack'
+import { extractStrings, parseBin, sha256Hex, type BinInfo } from '../core/binInfo'
 
 const props = defineProps<{
   ws: FirmwareWorkspace
@@ -82,6 +83,24 @@ function onAddressChange(r: { address: number }, e: Event): void {
   const v = props.ws.parseAddress(input.value)
   if (v !== null) r.address = v
   else input.value = props.ws.hex(r.address)
+}
+
+// ---- A2 固件详情（bin 解析：镜像头/分区表/字符串/校验和） ----
+const inspect = ref<{
+  name: string
+  label: string
+  info: BinInfo
+  sha: string
+  strings: string[]
+} | null>(null)
+
+async function inspectRow(r: { label: string; file: File | null }): Promise<void> {
+  if (!r.file) return
+  const bytes = new Uint8Array(await r.file.arrayBuffer())
+  const info = parseBin(bytes)
+  const sha = await sha256Hex(bytes)
+  const strings = extractStrings(bytes, 8).slice(0, 24)
+  inspect.value = { name: r.file.name, label: r.label, info, sha, strings }
 }
 
 /** N7：把当前清单全部段 + flash_args + README 打成 zip 下载 */
@@ -229,6 +248,14 @@ async function exportPack(): Promise<void> {
           </td>
           <td class="fw__size">{{ r.file ? fmtSize(r.file.size) : '—' }}</td>
           <td>
+            <button
+              class="fw__info"
+              type="button"
+              title="查看固件详情（镜像头 / 分区表 / 字符串 / 校验和）"
+              @click="inspectRow(r)"
+            >
+              ⓘ
+            </button>
             <button class="fw__del" type="button" title="移除该段" @click="ws.removeRow(r.id)">
               ✕
             </button>
@@ -248,6 +275,51 @@ async function exportPack(): Promise<void> {
       地址与参数以发布记录为准（flash_args 权威）；写错固件可能无法启动，届时按住 BOOT 重进下载模式。
       未连接也可浏览与载入，仅「烧录 / 擦除 / 复位」需要先连接设备。
     </p>
+
+    <!-- A2 固件详情弹层 -->
+    <div v-if="inspect" class="insp" @click.self="inspect = null">
+      <div class="insp__card">
+        <div class="insp__hd">
+          <span class="insp__title">固件详情 · <code>{{ inspect.name }}</code></span>
+          <button class="insp__x" type="button" @click="inspect = null">✕</button>
+        </div>
+
+        <template v-if="inspect.info.kind === 'image'">
+          <div class="insp__grid">
+            <div><i>类型</i>ESP 镜像（0xE9）</div>
+            <div><i>芯片</i>{{ inspect.info.chipName ?? '未知(ID ' + inspect.info.chipId + ')' }}</div>
+            <div><i>段数</i>{{ inspect.info.segmentCount }}</div>
+            <div><i>入口</i><code>0x{{ inspect.info.entry.toString(16) }}</code></div>
+            <div><i>FLASH MODE</i>{{ inspect.info.flashMode }}</div>
+            <div><i>FREQ / SIZE</i>{{ inspect.info.flashFreq }} / {{ inspect.info.flashSize }}</div>
+          </div>
+        </template>
+        <template v-else-if="inspect.info.kind === 'partition-table'">
+          <table class="insp__tbl">
+            <thead><tr><th>标签</th><th>类型</th><th>子类型</th><th>偏移</th><th>大小</th></tr></thead>
+            <tbody>
+              <tr v-for="(p, i) in inspect.info.partitions" :key="i">
+                <td><code>{{ p.label }}</code></td>
+                <td>{{ p.type }}</td>
+                <td>{{ p.subType }}</td>
+                <td><code>0x{{ p.offset.toString(16) }}</code></td>
+                <td>{{ (p.size / 1024).toFixed(1) }} KB</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <p v-else class="insp__raw">{{ inspect.info.reason }}</p>
+
+        <div class="insp__sec">SHA-256</div>
+        <code class="insp__sha">{{ inspect.sha }}</code>
+
+        <div class="insp__sec">可打印字符串（前 {{ inspect.strings.length }} 条）</div>
+        <div class="insp__strings">
+          <code v-for="(s, i) in inspect.strings" :key="i">{{ s }}</code>
+          <span v-if="inspect.strings.length === 0" class="insp__raw">（无）</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -446,6 +518,121 @@ async function exportPack(): Promise<void> {
   justify-content: center;
   font-size: 11.5px;
   color: var(--ink);
+}
+/* A2 固件详情 */
+.fw__info {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  margin-right: 4px;
+}
+.fw__info:hover {
+  color: var(--accent);
+}
+.insp {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.insp__card {
+  width: min(680px, 92vw);
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.insp__hd {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.insp__title {
+  font-size: 14px;
+  font-weight: 650;
+}
+.insp__title code {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+}
+.insp__x {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.insp__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 14px;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+.insp__grid i {
+  font-style: normal;
+  color: var(--muted);
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  margin-bottom: 1px;
+}
+.insp__tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.insp__tbl th, .insp__tbl td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.insp__tbl th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.insp__sec {
+  margin: 12px 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.insp__sha {
+  display: block;
+  font-size: 11px;
+  word-break: break-all;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.insp__strings {
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.insp__strings code {
+  font-size: 11px;
+  color: var(--info);
+  word-break: break-all;
+}
+.insp__raw {
+  color: var(--muted);
+  font-size: 12px;
 }
 .fw__hint {
   margin: 0;

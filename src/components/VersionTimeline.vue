@@ -216,8 +216,6 @@ async function doRetention(): Promise<void> {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 220px;
-  overflow-y: auto;
 }
 .tl__item {
   display: flex;

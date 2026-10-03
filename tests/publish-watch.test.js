@@ -110,7 +110,9 @@ describe('runWatch（防抖/触发/失败补传）', () => {
     const app = path.join(buildDir, 'hello_world.bin')
     const d = new Date(Date.now() + 7000)
     fs.utimesSync(app, d, d) // 触发签名变化
-    await sleep(500) // 防抖 60ms + 轮询 25ms（并行负载下放宽，消除偶发）
+    // 等待二次发布真正发生（防抖/轮询在并行负载下时序不稳——改为事件等待，5s 上限）
+    const deadline = Date.now() + 5000
+    while (publishCalls < 2 && Date.now() < deadline) await sleep(50)
     ac.abort()
     await done
     expect(publishCalls).toBe(2)
