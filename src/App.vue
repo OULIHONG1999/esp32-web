@@ -6,6 +6,8 @@ import VersionTimeline from './components/VersionTimeline.vue'
 import LogPanel, { type LogFilter } from './components/LogPanel.vue'
 import FlashHistory from './components/FlashHistory.vue'
 import ActivityBar, { type ActivityItem } from './components/ide/ActivityBar.vue'
+import Sidebar from './components/ide/Sidebar.vue'
+import TreeSection from './components/ide/TreeSection.vue'
 import TreeItem, { type TreeTag } from './components/ide/TreeItem.vue'
 import EditorTabs, { type WorkTab } from './components/ide/EditorTabs.vue'
 import BottomPanel, { type BottomTab } from './components/ide/BottomPanel.vue'
@@ -13,7 +15,7 @@ import StatusBar from './components/ide/StatusBar.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
 import { useSession } from './composables/useSession'
 import { useFirmwareWorkspace } from './composables/useFirmwareWorkspace'
-import { useServiceStatus } from './composables/useServiceStatus'
+import { useServiceStatus, fmtSize } from './composables/useServiceStatus'
 import {
   collectReleases,
   generateWorkToken,
@@ -152,8 +154,8 @@ const hasNewRelease = computed(
 )
 
 const activityItems = computed<ActivityItem[]>(() => [
+  { id: 'device', icon: '▣', label: '设备', title: '设备（定位侧栏）' },
   { id: 'firmware', icon: '⬚', label: '固件', title: '固件（工作区）' },
-  { id: 'library', icon: '📁', label: '项目', title: '项目库（工作区）' },
   {
     id: 'timeline',
     icon: '◷',
@@ -161,8 +163,18 @@ const activityItems = computed<ActivityItem[]>(() => [
     title: '版本时间线（工作区）',
     badge: hasNewRelease.value,
   },
+  { id: 'library', icon: '📁', label: '项目', title: '项目库（定位侧栏）' },
   { id: 'history', icon: '▤', label: '历史', title: '烧录历史（底部面板）' },
-  { id: 'log', icon: '◫', label: '日志', title: '日志面板（展开 / 收起）' },
+  { id: 'service', icon: '◉', label: '服务', title: '服务状态（定位侧栏）' },
+])
+/** 左下角：主题切换（所见即所得——显示点击后要切到的主题） */
+const activityEndItems = computed<ActivityItem[]>(() => [
+  {
+    id: 'theme',
+    icon: theme.value === 'dark' ? '☀' : '🌙',
+    label: '主题',
+    title: theme.value === 'dark' ? '切换到日间主题' : '切换到夜间主题',
+  },
 ])
 const activeActivity = ref('firmware')
 
@@ -176,7 +188,6 @@ const workTabs = computed<WorkTab[]>(() => [
         : '固件',
     icon: '⬚',
   },
-  { id: 'lib', label: '项目库', icon: '📁' },
   { id: 'tl', label: '版本时间线', icon: '◷' },
 ])
 const activeTab = ref('fw')
@@ -225,10 +236,6 @@ function onActivity(id: string): void {
     bottomCollapsed.value = false
     return
   }
-  if (id === 'library') {
-    activeTab.value = 'lib'
-    return
-  }
   if (id === 'timeline') {
     activeTab.value = 'tl'
     return
@@ -239,9 +246,12 @@ function onActivity(id: string): void {
     bottomCollapsed.value = false
     return
   }
-  if (id === 'log') {
-    bottomCollapsed.value = !bottomCollapsed.value
+  if (id === 'theme') {
+    toggleTheme()
+    return
   }
+  // 定位类：滚动侧栏对应分区到可视区
+  document.getElementById('sec-' + id)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 /** 项目树/时间线载入成功后切到固件标签展示清单 */
@@ -398,10 +408,174 @@ async function configureToken(): Promise<void> {
     <ActivityBar
       v-model="activeActivity"
       :items="activityItems"
+      :end-items="activityEndItems"
       @select="onActivity"
     />
 
+    <!-- 区2 侧栏：VS Code 树形资源管理器（跨行） -->
+    <Sidebar>
+      <!-- 设备卡：主行=芯片名+中文状态徽章；副行=详情合并；操作=真按钮 -->
+      <TreeSection id="sec-device" title="设备">
+        <div class="dev-card">
+          <div class="dev-main">
+            <span class="dev-icon">▣</span>
+            <div class="dev-text">
+              <div class="dev-name">
+                {{ chip?.name ?? '未连接设备' }}
+                <span class="dev-badge" :class="'dev-badge--' + STATE_DOT[state]">
+                  {{ STATE_BADGE[state] ?? state }}
+                </span>
+              </div>
+              <div class="dev-meta">
+                {{
+                  chip?.mac || chip?.flashSize || chip?.revision
+                    ? [chip?.mac ? 'MAC ' + chip.mac : '', chip?.flashSize ? 'Flash ' + chip.flashSize : '', chip?.revision ? 'Rev ' + chip.revision : '']
+                        .filter(Boolean)
+                        .join(' · ')
+                    : '连接后显示芯片详情（MAC / Flash / 版本）'
+                }}
+              </div>
+            </div>
+          </div>
+          <div class="dev-btns">
+            <template v-if="state === 'disconnected' || state === 'error'">
+              <button
+                class="dbtn dbtn--primary"
+                type="button"
+                title="选择串口（首次弹出浏览器选择器，之后免弹窗复用）"
+                @click="connect"
+              >
+                ▶ 连接设备
+              </button>
+            </template>
+            <template v-else-if="state === 'requesting' || state === 'detecting'">
+              <button class="dbtn" type="button" disabled>连接中…</button>
+            </template>
+            <template v-else>
+              <button
+                v-if="state === 'ready'"
+                class="dbtn"
+                type="button"
+                title="换一个串口（重新弹出系统选择器）"
+                @click="switchPort"
+              >
+                ⇄ 切换端口
+              </button>
+              <button
+                class="dbtn"
+                type="button"
+                :disabled="state === 'working'"
+                @click="disconnect"
+              >
+                ⏏ 断开
+              </button>
+            </template>
+          </div>
+        </div>
 
+        <!-- D3：ready 态烧录失败的错误条也可见，可手动关闭 -->
+        <div v-if="lastError && (state === 'error' || state === 'ready')" class="dev-err">
+          <button class="dev-err__x" type="button" title="关闭" @click="clearError">✕</button>
+          <p class="dev-err__msg">{{ lastError.message }}</p>
+          <p class="dev-err__hint">{{ lastError.hint }}</p>
+          <p class="dev-err__cls">分类：{{ lastError.cls }}</p>
+        </div>
+        <p v-if="state === 'ready'" class="dev-hint">
+          设备常驻连接：烧录/擦除会自动挂起日志，结束后自动恢复。
+        </p>
+      </TreeSection>
+
+      <!-- 项目库（树形：项目文件夹 → 版本行） -->
+      <TreeSection id="sec-library" title="项目库">
+        <template #actions>
+          <button
+            class="mini"
+            type="button"
+            :disabled="ws.state.selectedIdx < 0"
+            :title="
+              ws.state.selectedIdx >= 0 && ws.state.options[ws.state.selectedIdx]?.subscribed
+                ? '取消订阅该项目（发布会静默）'
+                : '订阅该项目（发布会横幅提醒）'
+            "
+            @click="ws.toggleSubscribe()"
+          >
+            {{
+              ws.state.selectedIdx >= 0 && ws.state.options[ws.state.selectedIdx]?.subscribed
+                ? '★'
+                : '☆'
+            }}
+          </button>
+          <button
+            class="mini"
+            type="button"
+            :disabled="ws.state.registryLoading"
+            title="拉取 /api/registry 最新版本列表"
+            @click="ws.refreshRegistry()"
+          >
+            {{ ws.state.registryLoading ? '…' : '↻' }}
+          </button>
+        </template>
+
+        <p v-if="ws.state.registryLoading && ws.state.options.length === 0" class="tree-msg">
+          拉取中…
+        </p>
+        <p v-else-if="ws.state.options.length === 0" class="tree-msg">
+          {{ ws.state.registryMsg ?? '服务器暂无已发布项目' }}
+        </p>
+        <template v-else>
+          <template v-for="(opt, i) in ws.state.options" :key="opt.projectId + '/' + opt.variant">
+            <TreeItem
+              :icon="isFolderOpen(opt) ? '📂' : '📁'"
+              :label="opt.projectName + ' / ' + opt.variant"
+              :sub="isFolderOpen(opt) ? undefined : `${releasesOf(opt).length} 版本`"
+              :active="ws.state.selectedIdx === i"
+              :tags="folderTags(opt)"
+              @click="toggleFolder(opt, i)"
+            />
+            <TreeItem
+              v-for="rel in releasesOf(opt)"
+              v-show="isFolderOpen(opt)"
+              :key="rel.id"
+              :indent="1"
+              :icon="rel.type === 'release' ? '★' : '·'"
+              :label="rel.id"
+              :tags="releaseTags(rel)"
+              :active="rel.id === opt.release.id"
+              @click="loadAndShow(opt, rel)"
+            />
+          </template>
+        </template>
+        <p v-if="ws.state.registryMsg && ws.state.options.length > 0" class="tree-msg">
+          {{ ws.state.registryMsg }}
+        </p>
+      </TreeSection>
+
+      <!-- 操作（擦除/复位；连接入口在设备卡、添加 bin 在固件页，不重复） -->
+      <TreeSection id="sec-actions" title="操作">
+        <template v-if="canOperate">
+          <TreeItem icon="⌫" label="完全擦除" @click="onErase()" />
+          <TreeItem icon="↻" label="硬复位" @click="hardReset()" />
+        </template>
+        <TreeItem v-else icon="○" label="（连接设备后可用）" disabled />
+      </TreeSection>
+
+      <!-- b-ide 侧栏底部卡：服务状态（烧录历史已移入底部面板标签） -->
+      <div id="sec-service" class="side-card">
+        <div class="side-card__svc" style="border-top: none; margin-top: 0; padding-top: 0">
+          <span class="side-card__svc-live" :class="{ 'side-card__svc-live--bad': svc.err.value }">
+            {{ svc.err.value ? '服务不可达' : '服务在线' }}
+          </span>
+          <template v-if="!svc.err.value && svc.snap.value">
+            <span><i>项目</i>{{ svc.snap.value.projects }}</span>
+            <span><i>版本</i>{{ svc.snap.value.releases }}</span>
+            <span><i>数据</i>{{ fmtSize(svc.snap.value.dataDirBytes) }}</span>
+          </template>
+          <button class="mini side-card__refresh" type="button" title="立即刷新" @click="svc.refresh()">
+            ↻
+          </button>
+        </div>
+      </div>
+    </Sidebar>
 
     <!-- 区3 中央：横幅 + 环境自检 / 工作区标签 -->
     <div class="ide__center">
@@ -418,74 +592,6 @@ async function configureToken(): Promise<void> {
 
       <EditorTabs v-else v-model="activeTab" :tabs="workTabs">
         <template #pane-fw>
-          <!-- 设备卡（原侧栏迁入）：主行=芯片名+中文状态徽章；操作=真按钮 -->
-          <div class="dev-card">
-            <div class="dev-main">
-              <span class="dev-icon">▣</span>
-              <div class="dev-text">
-                <div class="dev-name">
-                  {{ chip?.name ?? '未连接设备' }}
-                  <span class="dev-badge" :class="'dev-badge--' + STATE_DOT[state]">
-                    {{ STATE_BADGE[state] ?? state }}
-                  </span>
-                </div>
-                <div class="dev-meta">
-                  {{
-                    chip?.mac || chip?.flashSize || chip?.revision
-                      ? [chip?.mac ? 'MAC ' + chip.mac : '', chip?.flashSize ? 'Flash ' + chip.flashSize : '', chip?.revision ? 'Rev ' + chip.revision : '']
-                          .filter(Boolean)
-                          .join(' · ')
-                      : '连接后显示芯片详情（MAC / Flash / 版本）'
-                  }}
-                </div>
-              </div>
-            </div>
-            <div class="dev-btns">
-              <template v-if="state === 'disconnected' || state === 'error'">
-                <button
-                  class="dbtn dbtn--primary"
-                  type="button"
-                  title="选择串口（首次弹出浏览器选择器，之后免弹窗复用）"
-                  @click="connect"
-                >
-                  ▶ 连接设备
-                </button>
-              </template>
-              <template v-else-if="state === 'requesting' || state === 'detecting'">
-                <button class="dbtn" type="button" disabled>连接中…</button>
-              </template>
-              <template v-else>
-                <button
-                  v-if="state === 'ready'"
-                  class="dbtn"
-                  type="button"
-                  title="换一个串口（重新弹出系统选择器）"
-                  @click="switchPort"
-                >
-                  ⇄ 切换端口
-                </button>
-                <button
-                  class="dbtn"
-                  type="button"
-                  :disabled="state === 'working'"
-                  @click="disconnect"
-                >
-                  ⏏ 断开
-                </button>
-              </template>
-            </div>
-            <!-- D3：ready 态烧录失败的错误条也可见，可手动关闭 -->
-            <div v-if="lastError && (state === 'error' || state === 'ready')" class="dev-err">
-              <button class="dev-err__x" type="button" title="关闭" @click="clearError">✕</button>
-              <p class="dev-err__msg">{{ lastError.message }}</p>
-              <p class="dev-err__hint">{{ lastError.hint }}</p>
-              <p class="dev-err__cls">分类：{{ lastError.cls }}</p>
-            </div>
-            <p v-if="state === 'ready'" class="dev-hint">
-              设备常驻连接：烧录/擦除会自动挂起日志，结束后自动恢复。
-            </p>
-          </div>
-
           <FirmwarePanel
             :ws="ws"
             :disabled="!canOperate"
@@ -498,77 +604,6 @@ async function configureToken(): Promise<void> {
             @hard-reset="hardReset"
           />
         </template>
-
-        <!-- 项目库标签（原侧栏树迁入） -->
-        <template #pane-lib>
-          <div class="lib">
-            <div class="lib__hd">
-              <span class="lib__title">📁 项目库</span>
-              <span class="lib__actions">
-                <button
-                  class="mini"
-                  type="button"
-                  :disabled="ws.state.selectedIdx < 0"
-                  :title="
-                    ws.state.selectedIdx >= 0 && ws.state.options[ws.state.selectedIdx]?.subscribed
-                      ? '取消订阅该项目（发布会静默）'
-                      : '订阅该项目（发布会横幅提醒）'
-                  "
-                  @click="ws.toggleSubscribe()"
-                >
-                  {{
-                    ws.state.selectedIdx >= 0 && ws.state.options[ws.state.selectedIdx]?.subscribed
-                      ? '★ 已订阅'
-                      : '☆ 订阅'
-                  }}
-                </button>
-                <button
-                  class="mini"
-                  type="button"
-                  :disabled="ws.state.registryLoading"
-                  title="拉取 /api/registry 最新版本列表"
-                  @click="ws.refreshRegistry()"
-                >
-                  {{ ws.state.registryLoading ? '拉取中…' : '↻ 刷新' }}
-                </button>
-              </span>
-            </div>
-
-            <p v-if="ws.state.registryLoading && ws.state.options.length === 0" class="tree-msg">
-              拉取中…
-            </p>
-            <p v-else-if="ws.state.options.length === 0" class="tree-msg">
-              {{ ws.state.registryMsg ?? '服务器暂无已发布项目' }}
-            </p>
-            <template v-else>
-              <template v-for="(opt, i) in ws.state.options" :key="opt.projectId + '/' + opt.variant">
-                <TreeItem
-                  :icon="isFolderOpen(opt) ? '📂' : '📁'"
-                  :label="opt.projectName + ' / ' + opt.variant"
-                  :sub="isFolderOpen(opt) ? undefined : `${releasesOf(opt).length} 版本`"
-                  :active="ws.state.selectedIdx === i"
-                  :tags="folderTags(opt)"
-                  @click="toggleFolder(opt, i)"
-                />
-                <TreeItem
-                  v-for="rel in releasesOf(opt)"
-                  v-show="isFolderOpen(opt)"
-                  :key="rel.id"
-                  :indent="1"
-                  :icon="rel.type === 'release' ? '★' : '·'"
-                  :label="rel.id"
-                  :tags="releaseTags(rel)"
-                  :active="rel.id === opt.release.id"
-                  @click="loadAndShow(opt, rel)"
-                />
-              </template>
-            </template>
-            <p v-if="ws.state.registryMsg && ws.state.options.length > 0" class="tree-msg">
-              {{ ws.state.registryMsg }}
-            </p>
-          </div>
-        </template>
-
         <template #pane-tl>
           <VersionTimeline
             v-if="selectedOption"
@@ -579,7 +614,7 @@ async function configureToken(): Promise<void> {
             @changed="ws.refreshRegistry()"
           />
           <div v-else class="tl-empty">
-            在「项目库」标签选择一个项目，即可在此晋升 / 回滚 / 设置保留数。
+            在侧栏「项目库」选择一个项目，即可在此晋升 / 回滚 / 设置保留数。
           </div>
         </template>
       </EditorTabs>
@@ -678,9 +713,7 @@ async function configureToken(): Promise<void> {
       :subscribed="subscribedCount"
       :service-label="serviceLabel"
       :flash-params="activeParams"
-      :theme="theme"
       @configure-token="configureToken"
-      @toggle-theme="toggleTheme"
     />
 
     <!-- 共享隐藏文件选择器（侧栏「添加 bin」与固件页共用） -->
@@ -692,18 +725,19 @@ async function configureToken(): Promise<void> {
 /* ══════════ IDE 主骨架 ══════════ */
 .ide {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 48px var(--sb-w, 250px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto 26px;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
 }
-/* 活动栏跨前两行 */
-.ide > .ab {
+/* 活动栏 + 侧栏跨前两行 */
+.ide > :first-child,
+.ide > .sb {
   grid-row: 1 / 3;
 }
 .ide__center {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   display: flex;
   flex-direction: column;
@@ -756,9 +790,9 @@ async function configureToken(): Promise<void> {
   cursor: pointer;
 }
 
-/* ── 设备卡 / 错误条 / 提示 / 树消息 ── */
+/* ── 侧栏：设备卡 / 错误条 / 提示 / 树消息 / side-card ── */
 .dev-card {
-  margin: 0;
+  margin: 4px 6px 8px;
   padding: 10px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -917,28 +951,130 @@ async function configureToken(): Promise<void> {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.lib {
+/* b-ide 侧栏底部卡：历史 + 服务 合一 */
+.side-card {
+  margin: 10px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 8px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
 }
-.lib__hd {
+.side-card__svc {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 2px 8px 10px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--ink);
 }
-.lib__title {
-  font-size: 13px;
-  font-weight: 650;
+.side-card__svc i {
+  font-style: normal;
+  color: var(--muted);
+  margin-right: 5px;
+  font-size: 11.5px;
 }
-.lib__actions {
-  margin-left: auto;
+.side-card__svc-live {
   display: flex;
+  align-items: center;
   gap: 6px;
+  font-weight: 600;
+}
+.side-card__svc-live::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.side-card__svc-live--bad {
+  color: var(--err);
+}
+.side-card__svc-live--bad::before {
+  background: var(--err);
+}
+.side-card__refresh {
+  margin-left: auto;
+}
+/* 底部面板头部控制行（b-ide 右侧组） */
+.bp-ctl {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.bp-ctl:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--border);
+}
+.bp-ctl:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.bp-ctl--on {
+  color: var(--accent);
+}
+.bp-ctl--select {
+  cursor: default;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bp-ctl--select select {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 2px 4px;
+}
+/* 问题 / 输出 列表（终端行样式） */
+.bp-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.75;
+  padding: 4px 6px;
+}
+.bp-empty {
+  margin: 6px;
+  color: var(--muted);
+}
+.bp-row {
+  margin: 0;
+  padding: 0 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: 3px;
+}
+.bp-row:hover {
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+}
+.bp-ts {
+  color: var(--muted);
+  margin-right: 8px;
+}
+.bp-lvl {
+  margin-right: 6px;
+}
+.bp-row--warn {
+  color: var(--warn);
+}
+.bp-row--error {
+  color: var(--err);
+}
+.bp-row--device {
+  color: var(--info);
 }
 .tl-empty {
   color: var(--muted);
@@ -954,27 +1090,35 @@ async function configureToken(): Promise<void> {
 @media (max-width: 960px) {
   .ide {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto 26px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto 26px;
     height: auto;
     min-height: 100vh;
     overflow: visible;
   }
-  .ide > .ab {
+  .ide > :first-child {
     display: none;
+  }
+  .ide > .sb {
+    grid-row: 2;
+    grid-column: 1;
+    max-height: 46vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
   .ide__center {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 3;
     overflow: visible;
   }
   .ide .bp {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 4;
     height: 240px;
   }
   .ide .st {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 5;
+    /* 窄屏不做 sticky：否则会压住底部面板的过滤按钮 */
     position: static;
   }
 }
