@@ -67,6 +67,17 @@ tests/verify.py  自验证脚本
 | `GET /api/meta` | 能力协商 JSON（`docs.canonical_path`） |
 | `GET /robots.txt` | 爬虫入口，指向 `/llms.txt` |
 
+## 部署到已有的 esp32-web 服务器（共存）
+
+```powershell
+powershell -File font-cloud-server/deploy/deploy.ps1
+```
+
+- 落地：`/opt/font-cloud-server`，systemd `font-cloud-server`，端口 **8788**
+- nginx 在 `firmware-server.conf` 插入分流，**不抢** firmware 的 `/llms.txt`、`/api/registry` 等
+- 对外入口：`/font-cloud`（工具指针）· `/font-bench/`（测试台）· `/api/subset`
+- 详见 `docs/SERVER.md` §5.5
+
 ## 自验证
 
 ```powershell

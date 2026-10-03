@@ -38,6 +38,15 @@
 - 方式A 裸 HTTP（无需任何代码库）: POST /api/publish multipart，字段 meta=JSON 元数据 + file=固件段；完整 meta 样例与 curl 示例见 /docs/PUBLISH.md §2.1
 - 方式B 官方 CLI（零依赖 Node）: 源码直接下载 /tools/publish/{index,once,lib,watch}.js，用法见 /docs/PUBLISH.md
 
+## 同机共存服务：font-cloud（字体云端子集化）
+- 工具指针: GET /font-cloud            (302 → /font-bench/font-cloud 工具卡)
+- 机器描述: GET /font-cloud.json       (tool_id=font-cloud，调用约定)
+- 测试台:   GET /font-bench/
+- 子集 API: POST /api/subset  {"font":"misans-regular","chars":"天青色等烟雨"}
+- 说明:     GET /llms-font-cloud.txt  (font-cloud 自己的 Agent 索引)
+- 协议:     GET /docs/protocol.md     (font-cloud API) · GET /docs/architecture.md (架构方案)
+- 注意:     本文件 /llms.txt 属 firmware-server；font-cloud 的索引在 /llms-font-cloud.txt
+
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
 - 使用手册(烧录/监视语义/取证操作卡): /docs/USER-GUIDE.md
 - 故障排查(实时日志无输出/连接/401): /docs/TROUBLESHOOTING.md

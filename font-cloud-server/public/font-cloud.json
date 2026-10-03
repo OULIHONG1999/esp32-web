@@ -8,6 +8,12 @@
   "description_zh": "面向嵌入式 UI 的字体云端子集化：输入一段动态文本，返回仅含所需汉字的子集 TTF。固定界面文案构建期预置；本工具只负责动态文本缺字。",
   "canonical_path": "/font-cloud",
   "canonical_url_hint": "Share the full base URL including the path /font-cloud",
+  "production_note": "Behind the shared nginx with esp32-web: tool pointer http://HOST/font-cloud redirects to /font-bench/font-cloud; test bench at /font-bench/; agent index at /llms-font-cloud.txt (root /llms.txt belongs to firmware-server)",
+  "endpoints_production_overrides": {
+    "test_bench": "/font-bench/",
+    "agent_index": "/llms-font-cloud.txt",
+    "subset": "/api/subset"
+  },
   "endpoints": {
     "tool_pointer_html": "/font-cloud",
     "tool_descriptor_json": "/font-cloud.json",
