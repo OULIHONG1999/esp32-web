@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>多人方案 · 托管固件工作站</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">ESP32 Web Flasher · 多人方案 · 回到目标</p>
+      <h1>别人不必自己部署<br />也能有和你一样的完整体验</h1>
+      <p class="lead">
+        从「我自用」走向「托管的多人固件工作站」：
+        每个人都是完整用户——<strong>能发布、能下载、能烧录、能看日志</strong>。
+        分享码不是产品，最多是授权访问时的顺带便利。
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 目标 -->
+    <section class="section" id="goal">
+      <h2>目标只有一句话</h2>
+      <div class="rule">
+        <p class="rule-main">把「我今天用的这套」变成服务，别人登录即用</p>
+        <p class="rule-sub">不需要每人装 Node、起 server、配 nginx；开箱就是完整工作站 + 自己的固件库。</p>
+      </div>
+
+      <div class="grid three" style="margin-top:22px">
+        <div class="card ok">
+          <h4>今天你拥有的</h4>
+          <ul>
+            <li>编译机一键发布固件</li>
+            <li>云端项目库 / 版本管理</li>
+            <li>网页烧录、擦除、复位</li>
+            <li>实时日志、复制、导出</li>
+          </ul>
+        </div>
+        <div class="card ok">
+          <h4>明天别人也有的</h4>
+          <ul>
+            <li>同一套工具，零部署</li>
+            <li>自己的固件库（唯一仓库）</li>
+            <li>发布自己的、用别人的</li>
+            <li>能力与你完全一致</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>不是目标（顺带）</h4>
+          <ul>
+            <li>分享码 / 口令页</li>
+            <li>「下载访客」残血模式</li>
+            <li>为陌生人做的轻量门户</li>
+            <li>网盘式文件中转</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 体验对等 -->
+    <section class="section" id="parity">
+      <h2>体验对等：一个产品，不是两种角色</h2>
+      <p class="section-lead">
+        不要区分「发布者界面」和「下载者界面」。所有登录用户用的是<strong>同一个工作站</strong>，差别只是库的归属与可见性。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>能力</th>
+              <th>你（单机时代）</th>
+              <th>托管后 · 任何用户</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>发布固件</td>
+              <td>tools/publish → 自建 server</td>
+              <td>tools/publish → 平台（绑自己的账号/仓库）</td>
+            </tr>
+            <tr>
+              <td>项目库 / 版本</td>
+              <td>registry.json</td>
+              <td>自己的仓库 + 被授权的项目</td>
+            </tr>
+            <tr>
+              <td>烧录 / 擦除 / 复位</td>
+              <td>Web Serial 工作站</td>
+              <td><strong>完全一致</strong></td>
+            </tr>
+            <tr>
+              <td>日志查看 / 复制 / 导出</td>
+              <td>有</td>
+              <td><strong>完全一致</strong></td>
+            </tr>
+            <tr>
+              <td>订阅新版本</td>
+              <td>SSE / NEW</td>
+              <td>按项目订阅</td>
+            </tr>
+            <tr>
+              <td>部署成本</td>
+              <td>自己维护 Ubuntu + 证书</td>
+              <td><strong>0</strong>（平台托管）</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 产品结构 -->
+    <section class="section" id="structure">
+      <h2>产品结构：一个工作站，库可多源</h2>
+
+      <div class="arch">
+        <div class="arch-col">
+          <div class="arch-node door-consumer">
+            <div class="arch-title">用户 A · 工作站</div>
+            <div class="arch-body">
+              发布 / 烧录 / 日志<br />
+              自己的仓库 + 被授权项目
+            </div>
+          </div>
+          <div class="arch-arrow">↕ 同等体验</div>
+          <div class="arch-node door-consumer">
+            <div class="arch-title">用户 B · 工作站</div>
+            <div class="arch-body">
+              发布 / 烧录 / 日志<br />
+              自己的仓库 + 被授权项目
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-col center">
+          <div class="arch-node door-api">
+            <div class="arch-title">托管平台</div>
+            <div class="arch-body">
+              账号 · 固件库多租户<br />
+              发布流水线 · 权限<br />
+              （现有 server 内核演进）
+            </div>
+            <div class="arch-tag">别人无需部署</div>
+          </div>
+        </div>
+
+        <div class="arch-col">
+          <div class="arch-node door-publisher">
+            <div class="arch-title">用户 A 的编译机</div>
+            <div class="arch-body">
+              tools/publish --watch<br />
+              自动上传到 A 的仓库
+            </div>
+            <div class="arch-tag">和你现在一样</div>
+          </div>
+          <div class="arch-arrow">↕</div>
+          <div class="arch-node door-publisher">
+            <div class="arch-title">用户 B 的编译机</div>
+            <div class="arch-body">
+              tools/publish --watch<br />
+              自动上传到 B 的仓库
+            </div>
+            <div class="arch-tag">和你现在一样</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>分享码的位置：</strong>
+        当 A 想让 B 能访问自己的私有项目时，发一条授权链接/码即可——这是权限的便捷入口，
+        不是产品主路径。B 拿到的是<strong>进工作站看这个库</strong>，不是进下载页。
+      </div>
+    </section>
+
+    <!-- 用户与仓库 -->
+    <section class="section" id="model">
+      <h2>身份与仓库（这才是「多人」的核心）</h2>
+
+      <div class="grid two">
+        <div class="card">
+          <h4>用户</h4>
+          <ul>
+            <li>登录后得到<strong>唯一身份</strong></li>
+            <li>名下有<strong>自己的固件仓库</strong></li>
+            <li>生成 publish token 给编译机</li>
+            <li>可被拉进项目协作（后续团队）</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>仓库（项目）</h4>
+          <ul>
+            <li>归属一个用户（远期一个团队）</li>
+            <li>含 variant / release / 时间线</li>
+            <li>可见性：私有 / 公开 / 授权访问</li>
+            <li>被授权的人可在工作站中使用</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-top:16px">
+        <table>
+          <thead>
+            <tr>
+              <th>动作</th>
+              <th>需要什么</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>用工作站烧录/看日志</td>
+              <td>能访问某个项目</td>
+              <td>自己的、公开的、或被授权的</td>
+            </tr>
+            <tr>
+              <td>发布到自己的仓库</td>
+              <td>登录 + publish token</td>
+              <td>CLI 自动发布，和你现在一致</td>
+            </tr>
+            <tr>
+              <td>下载/使用他人公开库</td>
+              <td>登录或直接访问</td>
+              <td>公开项目开箱即用</td>
+            </tr>
+            <tr>
+              <td>访问他人私有库</td>
+              <td>授权（邀请 / 链接）</td>
+              <td>分享码在这里，顺带</td>
+            </tr>
+            <tr>
+              <td>团队共管仓库</td>
+              <td>项目成员</td>
+              <td>后续扩展，不阻塞主路径</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 工作站本体 -->
+    <section class="section" id="workstation">
+      <h2>工作站本体（能力不缩水）</h2>
+      <p class="section-lead">任何人进入后的界面都是这个——不是下载列表，是开发工作站。</p>
+
+      <div class="preview-shell">
+        <div class="door-chrome">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="url">https://flash.example.com/</span>
+        </div>
+        <div class="door-body">
+          <div class="ide">
+            <nav class="ide-activity">
+              <div class="act is-on">⚡</div>
+              <div class="act">📁</div>
+              <div class="act">📟</div>
+              <div class="act">⚠</div>
+            </nav>
+
+            <aside class="ide-side">
+              <div class="side-head">项目库</div>
+              <div class="side-share">我的仓库 · Alice</div>
+              <div class="tree-item accent">传感器网关固件</div>
+              <div class="tree-sub">▸ v1.4.2 · latest</div>
+              <div class="tree-sub">▸ v1.4.1</div>
+              <div class="side-share">被授权 / 公开</div>
+              <div class="tree-item">Bob · 环境监测节点</div>
+              <div class="tree-item">开源参考固件</div>
+              <div class="tree-item">设备</div>
+              <div class="tree-item accent">连接设备</div>
+              <div class="side-foot">
+                <div>◉ 服务在线</div>
+                <div>★ 订阅 3</div>
+              </div>
+            </aside>
+
+            <section class="ide-main">
+              <div class="ide-tabs">
+                <div class="ide-tab is-on">固件 · 传感器网关</div>
+                <div class="ide-tab">日志监视器</div>
+              </div>
+              <div class="ide-toolbar">
+                <button class="btn-primary">⚡ 载入 v1.4.2 并烧录</button>
+                <button class="btn-ghost">软件擦除</button>
+                <button class="btn-ghost">硬复位</button>
+                <button class="btn-ghost">导出固件包</button>
+              </div>
+              <div class="parts-table">
+                <div class="part-row head">
+                  <span>分区</span><span>地址</span><span>文件</span><span>大小</span>
+                </div>
+                <div class="part-row">
+                  <span><em class="tag">bootloader</em></span>
+                  <span>0x0</span><span>bootloader.bin</span><span>14 KB</span>
+                </div>
+                <div class="part-row">
+                  <span><em class="tag">partition-table</em></span>
+                  <span>0x8000</span><span>partition-table.bin</span><span>3 KB</span>
+                </div>
+                <div class="part-row">
+                  <span><em class="tag">app</em></span>
+                  <span>0x10000</span><span>app.bin</span><span>1.2 MB</span>
+                </div>
+              </div>
+              <div class="flash-params">
+                烧录参数已注入：<code>mode=dio · freq=80m · size=2MB</code>
+              </div>
+            </section>
+
+            <section class="ide-bottom">
+              <div class="bt-tabs">
+                <div class="bt-tab">问题</div>
+                <div class="bt-tab">输出</div>
+                <div class="bt-tab is-on">日志监视器</div>
+              </div>
+              <div class="bt-tools">
+                <span>级别 ▾</span><span>⏸</span><span>⏹</span><span>⧉ 复制</span><span>导出</span><span>清空</span>
+              </div>
+              <div class="term">
+                <div><i>1</i> ESP-ROM:esp32s3-20210327</div>
+                <div><i>2</i> I (234) app: firmware v1.4.2 starting…</div>
+                <div><i>3</i> I (256) app: netif up<span class="cursor">❯</span></div>
+              </div>
+            </section>
+          </div>
+          <p class="hint">
+            能力全集：连接、烧录、擦除、复位、日志查看/复制/导出、版本载入、打包下载、SSE 订阅。
+            多人化之后用户无感——只是侧栏多了「我的 / 授权的 / 公开的」来源。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 与现状的关系 -->
+    <section class="section" id="evolve">
+      <h2>从现在的 v1.5 怎么长过去</h2>
+      <p class="section-lead">好消息：你要的「体验」已经全部存在于单机版。多人化主要是<strong>归属与权限</strong>，不是重做工具。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>层</th>
+              <th>现在（单机自用）</th>
+              <th>目标（托管多人）</th>
+              <th>改动量</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>前端工作站</td>
+              <td>IDE 五区 + 烧录 + 日志</td>
+              <td>基本不动；侧栏库分来源</td>
+              <td>小</td>
+            </tr>
+            <tr>
+              <td>publish CLI</td>
+              <td>Bearer token 发布</td>
+              <td>token 绑用户/仓库</td>
+              <td>小</td>
+            </tr>
+            <tr>
+              <td>registry / server</td>
+              <td>单租户目录</td>
+              <td>多租户：用户 → 项目 → 版本</td>
+              <td>中</td>
+            </tr>
+            <tr>
+              <td>身份</td>
+              <td>静态 token</td>
+              <td>账号（最少：邮箱/魔法链接）</td>
+              <td>中</td>
+            </tr>
+            <tr>
+              <td>权限</td>
+              <td>有无 token</td>
+              <td>项目可见性 + 成员</td>
+              <td>中</td>
+            </tr>
+            <tr>
+              <td>部署</td>
+              <td>你一台 Ubuntu</td>
+              <td>平台托管，用户零部署</td>
+              <td>运维</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 阶段 -->
+    <section class="section" id="roadmap">
+      <h2>建议阶段（每阶段都可独立使用）</h2>
+      <ol class="steps">
+        <li>
+          <strong>P0 · 让「另一个人」用起来</strong>
+          <span>最小账号 + 每人唯一仓库；他的编译机可发布，他的浏览器可用完整工作站。你与他体验一致。</span>
+        </li>
+        <li>
+          <strong>P1 · 项目可见性</strong>
+          <span>私有 / 公开 / 授权。公开库谁都能用；私有库经授权进入。分享链接作为授权方式补上。</span>
+        </li>
+        <li>
+          <strong>P2 · 团队共管</strong>
+          <span>项目成员与角色（owner/publisher/viewer），同一仓库多人发布与晋升。</span>
+        </li>
+        <li>
+          <strong>P3 · 开放服务</strong>
+          <span>注册策略、配额、反滥用、域名证书合规。到这步再谈规模化。</span>
+        </li>
+      </ol>
+      <p class="foot-note">
+        核心判断：<strong>你要的是「托管的同款体验」，不是「分享下载」。</strong>
+        账号存在的理由 = 每个人有自己的仓库；分享码只是私有库授权的顺手工具。
+      </p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span>结构决策示意 · 未改 esp32-web 代码</span>
+      <span>托管固件工作站 · 体验对等</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
