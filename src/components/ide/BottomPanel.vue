@@ -86,7 +86,7 @@ function startResize(e: PointerEvent): void {
 
 <style scoped>
 .bp {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 2;
   background: var(--panel);
   border-top: 1px solid var(--accent);

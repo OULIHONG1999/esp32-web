@@ -1032,7 +1032,7 @@ async function configureToken(): Promise<void> {
     overflow: visible;
   }
   .ide > .sb {
-    grid-row: 2;
+    grid-row: 1;
     grid-column: 1;
     max-height: 46vh;
     border-right: none;
@@ -1040,18 +1040,17 @@ async function configureToken(): Promise<void> {
   }
   .ide__center {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 2;
     overflow: visible;
   }
   .ide .bp {
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 3;
     height: 240px;
   }
   .ide .st {
     grid-column: 1;
-    grid-row: 5;
-    /* 窄屏不做 sticky：否则会压住底部面板的过滤按钮 */
+    grid-row: 4;
     position: static;
   }
 }

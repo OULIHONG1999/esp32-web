@@ -89,7 +89,7 @@ const STATE_LABEL: Record<DeviceState, string> = {
 
 <style scoped>
 .st {
-  grid-column: 1 / 4;
+  grid-column: 1 / 3;
   grid-row: 3;
   /* VS Code 同款：accent 色条通栏 */
   background: var(--status);
