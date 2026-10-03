@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# AI / LLM orientation
+# https://example.invalid/llms.txt  →  (local) /llms.txt
+
+Sitemap: /llms.txt

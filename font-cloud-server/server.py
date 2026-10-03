@@ -470,6 +470,18 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "proto": PROTO_VERSION,
                     "name": "font-cloud-server",
+                    "docs": {
+                        "tool_id": "font-cloud",
+                        "canonical_path": "/font-cloud",
+                        "tool_html": "/font-cloud",
+                        "tool_json": "/font-cloud.json",
+                        "index": "/docs/",
+                        "llms": "/llms.txt",
+                        "llms_full": "/llms-full.txt",
+                        "architecture": "/docs/architecture.md",
+                        "protocol": "/docs/protocol.md",
+                        "hint": "AI/Agent：先读 /font-cloud.json 或 /llms.txt，再抓 /docs/protocol.md 与 /docs/architecture.md",
+                    },
                     "subset": {
                         "method": ["POST", "GET"],
                         "path": "/api/subset",
@@ -478,12 +490,17 @@ class Handler(BaseHTTPRequestHandler):
                         "note": "chars 按段去重后一次请求；不含 px（字号属设备渲染维度）",
                     },
                     "endpoints": [
+                        "GET /health",
                         "GET /api/meta",
                         "GET /api/fonts",
                         "POST|GET /api/subset",
                         "GET /api/stats",
                         "GET /api/stats/history",
                         "POST /api/stats/reset",
+                        "GET /llms.txt",
+                        "GET /llms-full.txt",
+                        "GET /docs/architecture.md",
+                        "GET /docs/protocol.md",
                     ],
                     "fonts_count": len(REGISTRY.list()),
                     "cache": cache_info(),
@@ -511,6 +528,20 @@ class Handler(BaseHTTPRequestHandler):
             REGISTRY.reload()
             self._json({"fonts": REGISTRY.list()})
             return True
+        if path == "/llms-full.txt":
+            STATS.record_request()
+            parts = [
+                "# Font Cloud Server — llms-full\n",
+                "Generated bundle for AI/Agent single-fetch learning.\n",
+                "Entry point: /llms.txt · Capability: /api/meta\n",
+            ]
+            for name in ("protocol.md", "architecture.md"):
+                p = PUBLIC_DIR / "docs" / name
+                if p.exists():
+                    parts.append("\n\n" + "=" * 72 + "\n")
+                    parts.append(p.read_text(encoding="utf-8"))
+            self._bytes("".join(parts).encode("utf-8"), "text/plain; charset=utf-8")
+            return True
         if path in ("/api/subset", "/subset"):
             if method not in ("POST", "GET"):
                 self._json({"error": "method not allowed"}, 405)
@@ -528,6 +559,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if target.is_dir():
             target = target / "index.html"
+        if not target.exists():
+            # 无扩展名时尝试 name.html（如 /font-cloud → font-cloud.html）
+            html_try = PUBLIC_DIR / (rel + ".html")
+            if html_try.is_file() and str(html_try.resolve()).startswith(
+                str(PUBLIC_DIR.resolve())
+            ):
+                target = html_try
         if not target.exists():
             self._json({"error": f"not found: {rel}"}, 404)
             return

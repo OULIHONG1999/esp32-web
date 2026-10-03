@@ -54,12 +54,18 @@ tests/verify.py  自验证脚本
 
 ## 文档挂载（给 AI / Agent）
 
-站点自带可抓取文档，便于「访问链接即可学会」：
+**规范工具指针：`/font-cloud`**（分享地址时保留该路径；不要用泛化的 `/tool`）。
 
-- `GET /docs/architecture.md` — 字体云端架构方案（设计原文 + 实现差异点）
-- `GET /docs/protocol.md` — API 契约与设备端调用流程
-- `GET /docs/` — 文档索引页
-- `GET /api/meta` — 能力协商 JSON
+| 路径 | 作用 |
+|------|------|
+| `GET /font-cloud` | **工具卡**（本工具是谁、怎么测、去哪读） |
+| `GET /font-cloud.json` | **机器可读工具描述**（tool_id / 端点 / 调用约定） |
+| `GET /llms.txt` | Agent 总入口 |
+| `GET /llms-full.txt` | 协议 + 架构合并全文，单次抓取学完 |
+| `GET /docs/architecture.md` | 字体云端架构方案（设计原文 + 实现差异点） |
+| `GET /docs/protocol.md` | API 契约与设备端调用流程 |
+| `GET /api/meta` | 能力协商 JSON（`docs.canonical_path`） |
+| `GET /robots.txt` | 爬虫入口，指向 `/llms.txt` |
 
 ## 自验证
 

@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Font Cloud · 测试台</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- AI/Agent 入口：/llms.txt · /api/meta · /docs/protocol.md · /docs/architecture.md -->
+  <link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt" />
+  <link rel="alternate" type="text/plain" href="llms-full.txt" title="llms-full.txt" />
 </head>
 <body>
   <div class="app">
@@ -16,7 +19,9 @@
       </div>
       <div class="top-actions">
         <span id="health" class="pill">…</span>
+        <a class="btn ghost" href="font-cloud" title="工具指针">/font-cloud</a>
         <a class="btn ghost" href="docs/" title="架构方案 / API 协议">文档</a>
+        <a class="btn ghost" href="llms.txt" title="AI 入口">llms.txt</a>
         <button id="btn-reset" class="ghost">清空统计</button>
         <button id="btn-refresh" class="primary">刷新</button>
       </div>
@@ -152,13 +157,20 @@
     </section>
 
     <footer class="foot">
-      <div>协议 v1.0 · 对应架构方案腿 A · 本地验证用，不上线 · <a href="docs/architecture.md">架构方案</a> · <a href="docs/protocol.md">API 协议</a></div>
+      <div>协议 v1.0 · 对应架构方案腿 A · 本地验证用，不上线</div>
       <div class="api">
         <code>GET /api/meta</code>
         <code>GET /api/fonts</code>
         <code>POST /api/subset</code>
         <code>GET /api/stats</code>
       </div>
+      <div class="api">
+        <a class="btn ghost" href="llms.txt">llms.txt</a>
+        <a class="btn ghost" href="llms-full.txt">llms-full.txt</a>
+        <a class="btn ghost" href="docs/architecture.md">architecture.md</a>
+        <a class="btn ghost" href="docs/protocol.md">protocol.md</a>
+      </div>
+      <div>工具指针：<a href="font-cloud"><code>/font-cloud</code></a> · 机器描述：<a href="font-cloud.json"><code>/font-cloud.json</code></a> · AI 亦可先读 <a href="llms.txt"><code>/llms.txt</code></a></div>
     </footer>
   </div>
 

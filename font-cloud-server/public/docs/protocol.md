@@ -123,10 +123,16 @@
 
 `GET /` → 交互式测试页（请求、缺字比对、统计图表、历史日志）。
 
-## 文档（供 AI / Agent 抓取）
+## 工具指针与文档（供 AI / Agent 抓取）
 
 | 路径 | 内容 |
 |------|------|
-| `/docs/architecture.md` | 字体云端架构方案（设计原文 + 评估差异点） |
+| **`/font-cloud`** | **本工具的规范指针**（人读工具卡；分享 URL 时保留此路径） |
+| **`/font-cloud.json`** | **机器可读工具描述**（tool_id / 端点 / 调用约定） |
+| `/llms.txt` | Agent 总入口 |
+| `/llms-full.txt` | 协议 + 架构合并全文 |
+| `/docs/architecture.md` | 架构方案 |
 | `/docs/protocol.md` | 本文件 |
-| `/docs/` | 文档索引页 |
+| `/api/meta` | 能力协商（`docs.canonical_path = /font-cloud`） |
+
+推荐抓取顺序：`/font-cloud.json` → `/docs/protocol.md` + `/docs/architecture.md`（或 `/llms-full.txt`）。

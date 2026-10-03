@@ -1,0 +1,52 @@
+# Font Cloud Server (tool_id: font-cloud)
+
+Local font-subset cloud prototype (architecture leg A).
+
+**Canonical tool pointer (share this path): `/font-cloud`**
+- Machine descriptor: `/font-cloud.json`
+- Human tool card: `/font-cloud`
+- Human test bench: `/`
+
+Do NOT use a generic `/tool` path — it does not identify this tool.
+
+## Read these first
+
+1. `/font-cloud.json` — tool identity + how to call `/api/subset`
+2. `/docs/protocol.md` — API contract: /subset request/response, headers, errors, device call flow
+3. `/docs/architecture.md` — full design (positioning, decisions, data flow, cache model, roadmap)
+4. `/api/meta` — live capability negotiation JSON (includes `docs.canonical_path`) or fetch `/llms-full.txt` once.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /health | liveness |
+| GET | /api/meta | protocol + capability |
+| GET | /api/fonts | font registry |
+| POST/GET | /api/subset | subset TTF by chars (POST JSON preferred) |
+| GET | /api/stats | aggregated metrics |
+| GET | /api/stats/history | recent request log |
+| GET | / | interactive test bench (HTML) |
+| GET | /docs/ | docs index (HTML) |
+
+## Subset quick use
+
+POST /api/subset
+Content-Type: application/json
+
+{"font": "misans-regular", "chars": "天青色等烟雨", "include_latin": false}
+
+Returns font/ttf bytes. Key headers: X-Cache-Hit, X-Subset-Bytes, X-Subset-Ms, X-Subset-Missing, X-Cache-Key.
+
+No `px` parameter by design: font size is a device-side rendering concern; one TTF subset is shared across sizes.
+
+## Invariants
+
+- Fixed UI strings are subset at build time (offline); this server serves dynamic text glyphs only.
+- Server cache key = sha1(font_id + sorted(unique chars)); order/duplicates do not matter.
+- Cache hit returns identical bytes as the first miss.
+
+## Optional
+
+- llms-full.txt — concatenated protocol + architecture for single-fetch learning
+- /docs/protocol.md, /docs/architecture.md — source documents

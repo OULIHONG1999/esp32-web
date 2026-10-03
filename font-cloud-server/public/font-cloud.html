@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>font-cloud · 工具指针</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="alternate" type="application/json" href="font-cloud.json" title="tool descriptor" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Tool Pointer</p>
+        <h1><code>/font-cloud</code> 就是本工具</h1>
+        <p class="sub">
+          分享这个地址（含路径）即指向 <strong>Font Cloud Server</strong>——字体云端子集化服务。
+          远端 AI 从这里进入；人可直接去测试台。
+        </p>
+      </div>
+      <div class="top-actions">
+        <a class="btn primary" href="/">打开测试台</a>
+        <a class="btn ghost" href="font-cloud.json">tool.json</a>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>工具标识</h2>
+        <span class="hint">路径必须带 <code>font-cloud</code>，不写 <code>/tool</code> 这种泛名</span>
+      </div>
+      <div class="result-grid">
+        <div class="stat-card info">
+          <div class="lbl">tool_id</div>
+          <div class="val">font-cloud</div>
+        </div>
+        <div class="stat-card">
+          <div class="lbl">name</div>
+          <div class="val">Font Cloud Server</div>
+        </div>
+        <div class="stat-card">
+          <div class="lbl">version</div>
+          <div class="val">1.0.0</div>
+        </div>
+        <div class="stat-card ok">
+          <div class="lbl">canonical path</div>
+          <div class="val">/font-cloud</div>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:12px">
+        本页地址去掉 host 之后必须以 <code>/font-cloud</code> 结尾（或等于它）。
+        机器可读描述在 <a href="font-cloud.json"><code>/font-cloud.json</code></a>。
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>三条读取路径（按角色）</h2></div>
+      <table class="table">
+        <thead>
+          <tr><th>你是谁</th><th>先打开</th><th>再打开</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>人 · 在线测试</td>
+            <td><a href="/"><code>/</code> 测试台</a></td>
+            <td>直接发 <code>POST /api/subset</code></td>
+          </tr>
+          <tr>
+            <td>AI · 远端调用</td>
+            <td><a href="font-cloud.json"><code>/font-cloud.json</code></a></td>
+            <td><a href="llms.txt"><code>/llms.txt</code></a> → <a href="docs/protocol.md">protocol.md</a></td>
+          </tr>
+          <tr>
+            <td>AI · 单次学完</td>
+            <td><a href="llms-full.txt"><code>/llms-full.txt</code></a></td>
+            <td>按 protocol 调 <code>/api/subset</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>最小调用示例</h2></div>
+      <div class="api" style="margin-bottom:10px">
+        <code>POST /api/subset</code>
+        <code>Content-Type: application/json</code>
+      </div>
+      <pre class="preview" style="white-space:pre-wrap">{
+  "font": "misans-regular",
+  "chars": "天青色等烟雨"
+}</pre>
+      <p class="hint" style="margin-top:10px">
+        返回 <code>font/ttf</code>。响应头：<code>X-Cache-Hit</code> / <code>X-Subset-Bytes</code> / <code>X-Subset-Ms</code>。
+        无 <code>px</code> 参数（字号归设备端）。
+      </p>
+    </section>
+
+    <footer class="foot">
+      <div>
+        权威入口：<a href="font-cloud"><code>/font-cloud</code></a> ·
+        机器描述：<a href="font-cloud.json"><code>/font-cloud.json</code></a> ·
+        能力：<a href="api/meta"><code>/api/meta</code></a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
