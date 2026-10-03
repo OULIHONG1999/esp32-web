@@ -294,6 +294,34 @@ onUnmounted(() => {
 // ---- 发布 token：生成工作 token（主 token 换）或手动设置本机 ----
 const hasToken = ref(!!getStoredToken())
 
+/** P3 深链注入：`?settoken=wk_xxx` 打开即写入本机，随后把参数从地址栏抹掉 */
+{
+  const q = new URLSearchParams(location.search)
+  const incoming = (q.get('settoken') ?? '').trim()
+  if (incoming) {
+    setStoredToken(incoming)
+    hasToken.value = true
+    q.delete('settoken')
+    const clean = location.pathname + (q.toString() ? `?${q}` : '') + location.hash
+    history.replaceState(null, '', clean)
+    window.alert('✅ 已从链接注入发布 token——本机现在可以直接发布 / 晋升等操作。')
+  }
+}
+
+/** 一键注入链接：发到目标浏览器打开即完成配置（地址栏参数用后自动抹除） */
+function buildTokenDeepLink(token: string): string {
+  return `${location.origin}${location.pathname}?settoken=${encodeURIComponent(token)}`
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function configureToken(): Promise<void> {
   const current = getStoredToken()
   const wantGenerate = window.confirm(
@@ -313,10 +341,14 @@ async function configureToken(): Promise<void> {
         setStoredToken(entry.token)
         hasToken.value = true
       }
+      const copied = await copyText(entry.token)
+      const link = buildTokenDeepLink(entry.token)
       window.alert(
         `✅ 新工作 token 已生成${swap ? '（已设为本机 token）' : '（本机仍用原 token）'}：\n\n` +
-          `${entry.token}\n\n` +
-          `用途：复制给 AI 或其它发布设备做 Authorization: Bearer\n` +
+          `${entry.token}\n` +
+          `${copied ? '（已复制到剪贴板）' : '（自动复制失败，请手动复制上一行）'}\n\n` +
+          `免粘贴注入其它浏览器：把下面链接发过去打开即可（链接用后地址栏自动抹掉 token）：\n${link}\n\n` +
+          `用途：发布端 Authorization: Bearer / 其它浏览器本机 token\n` +
           `备注：${entry.note || '—'}\n` +
           `撤销：用主 token 调 DELETE /api/token`,
       )
@@ -340,6 +372,28 @@ async function configureToken(): Promise<void> {
   if (!t) return
   setStoredToken(t)
   hasToken.value = true
+  window.alert('✅ 本机 token 已设置。')
+}
+
+// ---- P3 首用向导卡（无连接 + 无版本 + 未关闭过） ----
+const GUIDE_KEY = 'fw.guideDismissed'
+const guideDismissed = ref(
+  (globalThis.localStorage?.getItem(GUIDE_KEY) ?? '') === '1',
+)
+const showGuide = computed(
+  () =>
+    !guideDismissed.value &&
+    report.value.ok &&
+    state.value === 'disconnected' &&
+    !ws.state.registryLoading,
+)
+function dismissGuide(): void {
+  guideDismissed.value = true
+  try {
+    globalThis.localStorage?.setItem(GUIDE_KEY, '1')
+  } catch {
+    /* 私隐模式忽略 */
+  }
 }
 </script>
 
@@ -527,6 +581,23 @@ async function configureToken(): Promise<void> {
 
       <EditorTabs v-else v-model="activeTab" :tabs="workTabs">
         <template #pane-fw>
+          <!-- P3 首用向导卡 -->
+          <div v-if="showGuide" class="guide">
+            <div class="guide__hd">
+              <span class="guide__title">🚀 三分钟上手</span>
+              <button class="guide__x" type="button" title="不再显示" @click="dismissGuide">✕</button>
+            </div>
+            <ol class="guide__steps">
+              <li><b>连接</b> —— 点左侧「▶ 连接设备」，浏览器里选串口（授权只弹一次）</li>
+              <li><b>取固件</b> —— 左侧「项目库」点版本载入（地址/参数自动注入），或「添加 bin…」手动选</li>
+              <li><b>烧录</b> —— 点「⚡ 烧录」，确认清单后自动写入并复位，日志里看新固件启动</li>
+            </ol>
+            <p class="guide__tip">
+              想看<b>完整启动日志</b>：连接后点面板「▶ 开始监视」——会自动复位设备，从 <code>ESP-ROM</code> 第一行开始抓。
+              <b>发布 / 晋升</b>才需要 token：状态栏 🔑 生成后可一键复制，或用链接注入其它浏览器。
+            </p>
+          </div>
+
           <FirmwarePanel
             :ws="ws"
             :disabled="!canOperate"
@@ -726,6 +797,54 @@ async function configureToken(): Promise<void> {
   cursor: pointer;
 }
 
+/* ── P3 首用向导卡 ── */
+.guide {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.guide__hd {
+  display: flex;
+  align-items: center;
+}
+.guide__title {
+  font-size: 13px;
+  font-weight: 650;
+}
+.guide__x {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+.guide__x:hover {
+  color: var(--ink);
+}
+.guide__steps {
+  margin: 8px 0 6px;
+  padding-left: 20px;
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+.guide__steps b {
+  color: var(--accent);
+}
+.guide__tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.guide__tip code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
 /* ── 侧栏：设备卡 / 错误条 / 提示 / 树消息 / side-card ── */
 .dev-card {
   margin: 4px 6px 8px;
