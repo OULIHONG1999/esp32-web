@@ -14,6 +14,29 @@
 | 域名 | 推荐有域名（Caddy 自动签证书）；只有 IP 也能跑（浏览器 Web Serial 要 HTTPS 或 localhost——**访问方是本地浏览器**，见 §5 说明） |
 | 端口 | 8787（服务，仅本机监听）+ 80/443（反代） |
 
+## 0.5 快速路径：本机 5 分钟体验版（localhost 即安全上下文）
+
+适合「先跑起来看看 / 单人本机用」——无需 nginx/证书/域名：
+
+```powershell
+# 1) 依赖与构建（Node >= 24）
+npm install
+npm run build
+
+# 2) 起服务（自含零依赖；默认 8787，静态托管 dist/）
+$env:PORT = "8787"
+$env:FIRMWARE_PUBLISH_TOKEN = "<随便一个强随机串，发布端要用>"
+node server/index.js
+
+# 3) 浏览器打开（localhost 是安全上下文，Web Serial 可用）
+#    http://localhost:8787
+```
+
+本机发布固件测试：把 `PUBLISH.md` 的 server 地址改为 `http://localhost:8787`、token 用上面设置的值即可。
+需要外网/多设备/HTTPS 时，再走下面的完整部署（§1 起）。
+
+---
+
 ## 1. 部署产物（本地构建后上传）
 
 ```powershell

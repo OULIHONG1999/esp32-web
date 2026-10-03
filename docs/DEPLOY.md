@@ -1,6 +1,6 @@
 # DEPLOY — Ubuntu 部署 Runbook（S2 · 门3 交付物）
 
-> 2026-09-29 · 关联：EXECUTION-PLAN.md（S2）、FIRMWARE-REGISTRY.md §0
+> 2026-09-29 · 关联：archive/EXECUTION-PLAN.md（S2）、FIRMWARE-REGISTRY.md §0
 > **当前实际部署的状态快照见 `SERVER.md`**（拓扑/通道/token/运维命令），本文是通用部署手册。
 > 目标：自含服务上 Ubuntu（registry + 发布 + SSE + 静态前端），零第三方运行时依赖。
 > 两种反代方案：**Caddy（推荐，自动 HTTPS）** 与 nginx（已有站点时用），SSE 缓冲配置都必须写对。
@@ -13,6 +13,29 @@
 | Node | **≥ 24**（原生 fetch/FormData；`node --version` 确认） <br> 没有则：`curl -fsSL https://deb.nodesource.com/setup_24.x \| sudo -E bash - && sudo apt install -y nodejs` |
 | 域名 | 推荐有域名（Caddy 自动签证书）；只有 IP 也能跑（浏览器 Web Serial 要 HTTPS 或 localhost——**访问方是本地浏览器**，见 §5 说明） |
 | 端口 | 8787（服务，仅本机监听）+ 80/443（反代） |
+
+## 0.5 快速路径：本机 5 分钟体验版（localhost 即安全上下文）
+
+适合「先跑起来看看 / 单人本机用」——无需 nginx/证书/域名：
+
+```powershell
+# 1) 依赖与构建（Node >= 24）
+npm install
+npm run build
+
+# 2) 起服务（自含零依赖；默认 8787，静态托管 dist/）
+$env:PORT = "8787"
+$env:FIRMWARE_PUBLISH_TOKEN = "<随便一个强随机串，发布端要用>"
+node server/index.js
+
+# 3) 浏览器打开（localhost 是安全上下文，Web Serial 可用）
+#    http://localhost:8787
+```
+
+本机发布固件测试：把 `PUBLISH.md` 的 server 地址改为 `http://localhost:8787`、token 用上面设置的值即可。
+需要外网/多设备/HTTPS 时，再走下面的完整部署（§1 起）。
+
+---
 
 ## 1. 部署产物（本地构建后上传）
 

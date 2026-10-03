@@ -167,7 +167,7 @@ interface FirmwareSet {
 
 ### 4.5 UI 流程（IDE 五区布局，2026-10-02 按 b-ide 预览复刻）
 
-> 蓝本：`public/design-preview/b-ide.html`（选型记录见 PAGE-REDESIGN.md）；accent 选型定案=**品牌绿**（状态栏为深绿色条 `--status`）。
+> 蓝本：`public/design-preview/b-ide.html`（选型记录见 archive/PAGE-REDESIGN.md）；accent 选型定案=**品牌绿**（状态栏为深绿色条 `--status`）。
 
 ```
 区1 活动栏 48px   ▣设备 ⬚固件 ◷版本(NEW红点) 📁项目 ▤历史 ◉服务 …(底)⚙设置
@@ -233,7 +233,7 @@ interface FirmwareSet {
 
 ## 7. 部署设计（自用放宽版）
 
-> ⚠️ **v1.5 起 superseded（2026-09-26）**：部署将改为**自含 Node 服务**（`server/`，registry + 发布 + SSE + 静态托管，见 `FIRMWARE-REGISTRY.md` §0 与 `EXECUTION-PLAN.md`）。本节"纯静态 dist/ + firmware/ 目录"的描述**仅适用于 v1**（本地 localhost / 无 registry 场景）；HTTPS 三选一与 iframe `allow="serial"` 的约束在 v1.5 仍有效（部署 runbook 随 S2 交付）。
+> ⚠️ **v1.5 起 superseded（2026-09-26）**：部署将改为**自含 Node 服务**（`server/`，registry + 发布 + SSE + 静态托管，见 `FIRMWARE-REGISTRY.md` §0 与 `archive/EXECUTION-PLAN.md`）。本节"纯静态 dist/ + firmware/ 目录"的描述**仅适用于 v1**（本地 localhost / 无 registry 场景）；HTTPS 三选一与 iframe `allow="serial"` 的约束在 v1.5 仍有效（部署 runbook 随 S2 交付）。
 
 ```
 https://your.host/

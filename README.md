@@ -19,6 +19,18 @@
 | AI 只读通道 | `http://firmware.example.com/`（`/llms.txt` `/docs/`） | 机器可读文档 / 指南 |
 | 本地开发 | `& $env:MIMO_NODE $env:MIMO_NPM run dev` → `localhost:5173` | 前端开发（API proxy 到 8787） |
 
+## 快速开始（两类读者）
+
+**① 我要使用页面烧录/看日志**（无需部署）：
+- 环境：Chrome/Edge + HTTPS（或 localhost）+ USB 线
+- 操作手册：**`docs/USER-GUIDE.md`**（三分钟上手 / 监视语义 / 抓全量启动日志与崩溃取证操作卡）
+- 常见故障：`docs/TROUBLESHOOTING.md`
+
+**② 我要自己部署一套**：
+- 本机 5 分钟体验版（localhost 即安全上下文，Web Serial 可用）：见 `docs/DEPLOY.md` **§快速路径**
+- 云服务器完整部署（nginx/SSE/token）：`docs/DEPLOY.md` 正文 + `docs/SERVER.md` 现状参考
+- 发布端（编译机）接入：`docs/PUBLISH.md`
+
 **当前核心能力**：
 
 - 🔌 **设备**：Web Serial 连接（S3 原生 USB 优先）、芯片识别（MAC/Rev/Flash）、常驻连接、跨标签 Web Locks 互斥
@@ -131,23 +143,25 @@ Ubuntu 22.04 @ firmware.example.com
 
 ## 6. 文档地图（按需取用）
 
+**文档组织**：`docs/` = 现行文档；`docs/archive/` = 开发过程历史产出；`docs/research/` = 专题调研（现行参考）；
+根目录仅保留 `README.md`（本文）、`AGENTS.md`（接手纪律）、`PROGRESS.md`（进度状态）。
+
 | 我想… | 看 |
 |---|---|
-| 理解架构与模块设计 | `DESIGN.md`（10 章：状态机/日志/错误/UI 五区/部署） |
-| 看需求与验收项（F-xx） | `REQUIREMENTS.md` |
+| **学习怎么用页面** | **`docs/USER-GUIDE.md`**（操作手册） |
+| 理解架构与模块设计 | `docs/DESIGN.md`（10 章：状态机/日志/错误/UI 五区/部署） |
+| 看需求与验收项（F-xx） | `docs/REQUIREMENTS.md` |
+| 部署（本机快速路径 / 云） | `docs/DEPLOY.md` + `docs/SERVER.md` |
+| 发布固件 | `docs/PUBLISH.md`（含裸 HTTP curl 示例） |
+| 排查故障 | `docs/TROUBLESHOOTING.md` |
+| v1.5 固件库设计 | `docs/FIRMWARE-REGISTRY.md` |
+| 为什么选这个方案 | `docs/research/esp32-web-flash/REPORT.md` |
+| 复位/监视能力依据（idf monitor 对齐） | `docs/research/serial-monitor-reset/REPORT.md` |
 | 了解当前进度 / 下一步 | `PROGRESS.md` |
 | 接手改代码（纪律/命令） | `AGENTS.md` |
-| 部署 / 运维 | `DEPLOY.md` + `SERVER.md` |
-| 发布固件 | `PUBLISH.md`（含裸 HTTP curl 示例） |
-| 排查故障（日志无输出/端口占用/401…） | `TROUBLESHOOTING.md` |
-| v1.5 固件库设计 | `FIRMWARE-REGISTRY.md` |
-| 为什么选这个方案 | `research/esp32-web-flash/REPORT.md` |
-| 复位/监视能力调研（idf monitor 对齐依据） | `research/serial-monitor-reset/REPORT.md` |
-| 页面重排选型记录 | `PAGE-REDESIGN.md` |
-| 工具链环境（IDF/坑） | `IDF-ENV.md` |
-| 执行路线（五道门） | `EXECUTION-PLAN.md` |
+| 查开发过程历史（路线/选型/实测） | `docs/archive/README.md` |
 
-公网文档站：`https://firmware.example.com/docs/`（源文件在 `public/docs/`，**改文档改源头**）。
+公网文档站：`https://firmware.example.com/docs/`（源文件在 `docs/`，构建拷入 `public/docs/`——**改文档改 `docs/` 源头**）。
 
 ---
 

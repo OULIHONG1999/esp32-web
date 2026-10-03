@@ -1,6 +1,6 @@
 # 固件项目库与远程发布 — 设计文档（FIRMWARE-REGISTRY）
 
-> 状态：需求定稿，实现走线以 **`EXECUTION-PLAN.md`（已批准）** 为准 · 2026-09-26 · 关联：DESIGN.md、REQUIREMENTS.md（F-20…F-24）、PROGRESS.md
+> 状态：需求定稿，实现走线以 **`archive/EXECUTION-PLAN.md`（已批准）** 为准 · 2026-09-26 · 关联：DESIGN.md、REQUIREMENTS.md（F-20…F-24）、PROGRESS.md
 > 本文是三轮需求讨论（项目管理 → 托管/订阅 → 任意烧录文件）的合并定稿。执行顺序/验收门/实现债见 EXECUTION-PLAN；本文不重复其线路细节。
 
 ## 0. 已拍板的技术选型（实现中不再讨论，与 EXECUTION-PLAN §0 同步）

@@ -7,19 +7,23 @@
 
 单用户自用的 ESP32 网页烧录工具：官方 esptool-js 做内核（只升不改），UI/日志/文件/命令控制全自研；第一目标芯片 ESP32-S3。当前模型：**设备常驻连接（方向1）+ 连接即自动日志监视**。v1.5 走 **`EXECUTION-PLAN.md`**（跨设备固件下载服务：远端 publish → 自含 server → 本地订阅烧录）。
 
-## 文档地图（阅读顺序）
+## 文档地图（阅读顺序 · 2026-10-03 文档重整后）
 
-0. **`README.md` — 方案总览（一页纸入口：能力/架构图/流程/文档导航）**
-1. `REQUIREMENTS.md` — 6 项决策（D1–D6）+ v1 验收清单（F-01…F-18）
-2. `DESIGN.md` — 三层架构、设备状态机（§4.1）、错误分类（§4.4）、部署（§7）
-3. `research/esp32-web-flash/REPORT.md` — 选型调研报告（为什么这么做）
-4. `research/serial-monitor-reset/REPORT.md` — Web 串口日志与「不掉 COM 复位」调研（监视中复位立项依据）
+> 组织：`docs/` 现行 · `docs/archive/` 开发历史产出 · `docs/research/` 专题调研 · 根目录仅 README/AGENTS/PROGRESS。
+> **改文档改 `docs/` 源头，改完同步拷贝到 `public/docs/`（公网 /docs/ 由 build 从 public 拷入 dist）。**
+
+0. **`README.md` — 方案总览（一页纸入口：能力/架构图/快速开始/文档导航）**
+1. **`docs/USER-GUIDE.md` — 使用手册（操作者：三分钟上手/监视语义/取证操作卡）**
+2. `docs/REQUIREMENTS.md` — 6 项决策（D1–D6）+ 验收清单（F-01…F-24）
+3. `docs/DESIGN.md` — 架构/状态机（§4.1）/错误（§4.4）/UI 五区（§4.5）/部署
 4. `AGENTS.md` — 接手纪律与命令
-5. `IDF-ENV.md` — IDF 环境激活/命令/坑（本机操作指南）
-6. `EXECUTION-PLAN.md` — 分片路线 + 五道验收门（唯一权威线路）
-7. `SERVER.md` — 当前部署状态详解（拓扑/双通道/token/运维命令/已知限制）
-8. `DEPLOY.md` — Ubuntu 部署 runbook（S2 交付，门3 依据）
-9. 本文 — 进度与下一步
+5. `docs/DEPLOY.md`（含本机快速路径）+ `docs/SERVER.md`（部署快照）
+6. `docs/PUBLISH.md` — 发布指南
+7. `docs/TROUBLESHOOTING.md` — 故障排查
+8. `docs/FIRMWARE-REGISTRY.md` — v1.5 固件库设计
+9. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
+10. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
+11. 本文 — 进度与下一步
 
 ## 当前状态（任务面板同步）
 
@@ -161,6 +165,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-10-03（文档重整）**：按"归档历史 + 现行全集 + 目录整理"重组——① **现行文档迁 `docs/`**（DESIGN/REQUIREMENTS/DEPLOY/SERVER/TROUBLESHOOTING/FIRMWARE-REGISTRY/PUBLISH），根目录只留 README/AGENTS/PROGRESS；② **新增 `docs/USER-GUIDE.md` 使用手册**（三分钟上手/五区导览/监视三语义/抓全量日志与崩溃取证操作卡/FAQ）+ **`docs/DEPLOY.md` §0.5 本机 5 分钟快速路径**（localhost 安全上下文直烧）；③ **历史产出归档 `docs/archive/`**（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/两份一次性分析报告 + 归档索引 README）；④ 专题调研移 `docs/research/`（仍为现行参考）；⑤ PUBLISH.md 源头化（原只存在于 public/docs，现以 docs/ 为源）；⑥ 清理根目录废件（deploy-package.zip / *.log / *.err ×8）；⑦ AGENTS/README/本文档地图全部指向新路径，双份纪律改为「改 docs/ 源头 → 拷 public/docs/」。
 - **2026-10-03（R-1 极性修正：开流后静默根因）**：用户实测「开监视后只有单行 ESP-ROM、随即永久静默」——根因=**esp_idf_monitor constants.py 标签反转（LOW=True / HIGH=False）**，首版把 RTS 极性写反：init 拉 true = 全程按住 EN 复位，hard() 变成放开 5ms 又按住（单行 ROM 正是 5ms 窗口冲进 USB FIFO 的残余）。修正：init=idle `requestToSend:false`（EN 释放）+ hard()=`true → 5ms → false`（EN 拉低→释放启动）；与 esptool USBJTAGSerialReset 注释（RTS=True # Reset）互证。教训入册：**抄官方源码必须连常量表一起抄，命名语义反直觉时以真值为准**。133 测试 + build 全绿。
 - **2026-10-02（R-1 监视对齐 idf.py monitor）**：调研驱动实现——① `glue/signalReset.ts`：**esp_idf_monitor 官方同源时序**（本地 IDF 源码核实：`Reset.hard()` = RTS低→**5ms**(esp32s3 MINIMAL_EN_LOW_DELAY)→RTS高 + Windows usbser DTR 重发变通；开流后先置 RTS/DTR=idle 防误复位）；② **▶开始监视 → 自动硬复位一次**（官方 `open_serial(reset=True)` 同款，`--no-reset` 等价语义留待需要）→ 从 ROM 第一行抓全启动日志；③ **「↻ 复位」按钮**（面板头）：硬复位智能路由——**监视开=signalReset 信号路径（端口不关/日志不断/COM 不掉）**、监视关=原 esptool 临界区兜底，快捷操作硬复位同享；④ 读取权威源码：`node_modules/esptool-js/lib/reset.js` + `D:\Espressif\...\esp_idf_monitor\base\reset.py/chip_specific_config.py/serial_reader.py`。core 依赖 `deps.signalReset` 注入，**+2 新测试**（信号路径不断流/启动自动复位），擦除与硬复位用例重写。**133 测试 + build 全绿**（publish-watch 防抖用例单独复跑 2 次过，判定计时偶发）。**待实机验证**：USB-Serial/JTAG 枚举保持 + 时序效果。
 - **2026-10-02（M1 默认折叠+启动日志引导）**：① 项目库文件夹**默认折叠**（openFolders 语义反转，显示「N 版本」，点开才列版本行）；② 启动日志缺失定位=**串口无缓冲**（监视开启前的输出无法追回，非丢读）——glue 开流路径无冗余延迟（port.open 直读）；引导两处：resume notice「先开监视、再复位设备，才能抓全启动日志」+ 空窗提示改写（点硬复位/RST 从头看起）。131 测试+build 全绿。
