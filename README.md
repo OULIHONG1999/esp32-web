@@ -157,6 +157,7 @@ Ubuntu 22.04 @ firmware.example.com
 | v1.5 固件库设计 | `docs/FIRMWARE-REGISTRY.md` |
 | 为什么选这个方案 | `docs/research/esp32-web-flash/REPORT.md` |
 | 复位/监视能力依据（idf monitor 对齐） | `docs/research/serial-monitor-reset/REPORT.md` |
+| 多用户托管方案调研（评估稿，未实现） | `docs/research/multi-user/README.md` |
 | 了解当前进度 / 下一步 | `PROGRESS.md` |
 | 接手改代码（纪律/命令） | `AGENTS.md` |
 | 查开发过程历史（路线/选型/实测） | `docs/archive/README.md` |
