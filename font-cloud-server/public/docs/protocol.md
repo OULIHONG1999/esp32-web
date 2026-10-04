@@ -56,9 +56,12 @@
 |------|------|------|
 | `font` | 是 | `/api/fonts` 返回的 `id` |
 | `chars` | 是 | 整段文本；服务端按码点去重（跳过控制字符） |
-| `include_latin` | 否 | **默认 `true`**：自动附带可打印 ASCII（字母/数字/标点）。仅当显式 `false`/`0` 才关闭 |
+| `include_latin` | 否 | **默认 `true`**：自动附带 `A-Z a-z 0-9` + ASCII 标点 + 常用中文标点（，。、；：？！等）。显式 `false`/`0` 关闭 |
+| `layout` | 否 | `min`（默认，无 GSUB/GPOS，体积小）/ `full`（保留全部排版特征，体积约 3–4 倍） |
 
 **不接受 `px`**：字号属设备端渲染维度，同一字体多字号共享字形源。
+
+> 默认 `layout=min`：设备端 `lv_tiny_ttf`/stb_truetype 几乎不用 OpenType 排版表，却会把子集从 ~10KB 拉到 ~45KB。需要 kern/liga 等再传 `layout=full`。
 
 响应：`Content-Type: font/ttf`，body 为子集 TTF 字节。
 
@@ -68,7 +71,8 @@
 | `X-Subset-Chars` | 去重后请求字数（不含自动附带的 ASCII） |
 | `X-Subset-Missing` | 源字体 cmap 中不存在的字数 |
 | `X-Subset-Glyphs` | 子集内字形总数（含拉丁/组合） |
-| `X-Latin-Included` | `1` 已附带可打印 ASCII / `0` 未附带 |
+| `X-Latin-Included` | `1` 已附带基础字符 / `0` 未附带 |
+| `X-Subset-Layout` | `min` 或 `full` |
 | `X-Cache-Hit` | `1` 服务端缓存命中 / `0` 实时子集化 |
 | `X-Subset-Bytes` | 返回字节数 |
 | `X-Subset-Ms` | 服务端处理耗时 |

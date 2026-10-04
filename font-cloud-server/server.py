@@ -40,8 +40,14 @@ PROTO_VERSION = "1.0.0"
 HISTORY_MAX = 200
 LATENCY_WINDOW = 200
 
-# 基础拉丁：字母/数字/常用标点（空格~波浪）。默认并入，体积代价很小
+# 默认并入的基础字符：字母大小写 + 数字 + ASCII 标点 + 常用中文标点
+# 体积敏感：不要开全量 GSUB/GPOS，否则一个 ASCII 会拖进数百个替代字形
 ASCII_BASIC = "".join(chr(c) for c in range(0x20, 0x7F))
+CJK_PUNCT = "，。、；：？！“”‘’（）【】《》—…·～￥"
+BASIC_EXTRA = ASCII_BASIC + CJK_PUNCT
+
+# 动态文本子集：默认关掉 OpenType 排版表（stb/tiny_ttf 几乎用不到，却能放大 4×）
+LAYOUT_FEATURES_MIN: list[str] = []
 
 
 class Stats:
@@ -293,15 +299,28 @@ def cache_key(font_id: str, chars: str) -> str:
 
 
 def build_subset(
-    font_path: Path, chars: str, include_latin: bool, out_path: Path
+    font_path: Path,
+    chars: str,
+    include_latin: bool,
+    out_path: Path,
+    layout: str = "min",
 ) -> tuple[int, str, int]:
-    """生成子集，返回 (文件大小, 缺字字符串, 字形数)。"""
-    text = chars + (ASCII_BASIC if include_latin else "")
+    """生成子集，返回 (文件大小, 缺字字符串, 字形数)。
+
+    layout:
+      min  — 默认，无 GSUB/GPOS（体积小，tiny_ttf 足够）
+      full — 保留全部排版特征（体积大 3–4 倍，一般不需要）
+    """
+    text = chars + (BASIC_EXTRA if include_latin else "")
     options = Options()
-    options.layout_features = ["*"]
+    if layout == "full":
+        options.layout_features = ["*"]
+        options.drop_tables = []
+    else:
+        options.layout_features = list(LAYOUT_FEATURES_MIN)
+        options.drop_tables = ["DSIG"]
     options.hinting = True
     options.desubroutinize = False
-    options.drop_tables = []
     options.notdef_outline = True
     options.recalc_bounds = True
     options.canonical_order = True
@@ -393,10 +412,22 @@ class Handler(BaseHTTPRequestHandler):
                 "false",
                 "no",
             }
+        layout = "min"
+        if "layout" in qs:
+            layout = (qs.get("layout") or ["min"])[0].strip().lower() or "min"
+        try:
+            payload2 = json.loads(body.decode("utf-8") or "{}") if body else {}
+            if isinstance(payload2, dict) and payload2.get("layout"):
+                layout = str(payload2["layout"]).strip().lower()
+        except Exception:
+            pass
+        if layout not in {"min", "full"}:
+            layout = "min"
         return {
             "font": font_id.strip().lower(),
             "chars": chars,
             "include_latin": bool(include_latin),
+            "layout": layout,
         }
 
     def handle_subset(self, qs: dict, body: bytes, content_type: str) -> None:
@@ -405,6 +436,7 @@ class Handler(BaseHTTPRequestHandler):
         font_id = req["font"]
         raw_chars = req["chars"]
         include_latin = req["include_latin"]
+        layout = req.get("layout", "min")
 
         if not font_id or not raw_chars:
             STATS.record_error("subset: missing font/chars")
@@ -423,7 +455,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "no valid characters"}, 400)
             return
 
-        key = cache_key(font_id, chars + ("|latin" if include_latin else ""))
+        key = cache_key(
+            font_id + ("|latin" if include_latin else "") + ("|full" if layout == "full" else ""),
+            chars,
+        )
         cache_path = CACHE_DIR / font_id / f"{key}.ttf"
         t0 = time.perf_counter()
         cache_hit = cache_path.exists()
@@ -443,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 font_path = Path(meta["path"])
                 out_bytes, missing, glyphs = build_subset(
-                    font_path, chars, include_latin, cache_path
+                    font_path, chars, include_latin, cache_path, layout
                 )
                 data = cache_path.read_bytes()
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -468,6 +503,7 @@ class Handler(BaseHTTPRequestHandler):
                 "X-Subset-Missing": str(len(missing)),
                 "X-Subset-Glyphs": str(glyphs),
                 "X-Latin-Included": "1" if include_latin else "0",
+                "X-Subset-Layout": layout,
                 "X-Cache-Hit": "1" if cache_hit else "0",
                 "X-Subset-Bytes": str(out_bytes),
                 "X-Subset-Ms": f"{elapsed_ms:.2f}",

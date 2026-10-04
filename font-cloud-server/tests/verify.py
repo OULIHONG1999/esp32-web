@@ -150,6 +150,12 @@ def main() -> int:
         check("默认附带拉丁字母", hdr1.get("X-Latin-Included") == "1", str(hdr1.get("X-Latin-Included")))
         glyphs1 = int(hdr1.get("X-Subset-Glyphs") or 0)
         check("回报字形数", 20 < glyphs1 < 2000, f"glyphs={glyphs1}")
+        # 精简子集预算：默认（含字母数字标点）不应膨胀到几十 KB
+        check(
+            "默认子集体积预算 < 20KB",
+            len(data1) < 20_000,
+            f"bytes={len(data1)} glyphs={glyphs1}",
+        )
 
         from fontTools.ttLib import TTFont as _TTF
         import io as _io
