@@ -59,7 +59,7 @@ node tools\publish\index.js once --config publish.config.json
 | `--config <path>` | 指定配置文件（默认 ./publish.config.json） |
 | `--build-dir <path>` | 覆盖 build 目录 |
 | `--server <url>` | 覆盖服务地址 |
-| `--release-id <id>` | 指定版本 id（默认 时间戳-commit短哈希） |
+| `--release-id <id>` | 指定版本 id（默认 YYYYMMDD-HHmmss-短哈希，2026-10-03 起含秒） |
 
 通用参数：`--help`
 
