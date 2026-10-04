@@ -125,8 +125,15 @@ def main() -> int:
         misans = next((f for f in fonts if "misans" in f["id"]), None)
 
         print("\n== 2. 子集化（缓存未命中） ==")
-        # 先清空统计便于核对
+        # 清空统计 + 服务端文件缓存，确保本轮断言 MISS
         http_json(base + "/api/stats/reset", {})
+        cache_dir = ROOT / "cache"
+        if cache_dir.exists():
+            for f in cache_dir.rglob("*.ttf"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
 
         lyric = "天青色等烟雨而我在等你"
         t0 = time.time()
@@ -140,6 +147,21 @@ def main() -> int:
         check("子集显著小于全量", len(data1) < misans["bytes"] / 10, f"{len(data1)} vs {misans['bytes']}")
         check("响应头 X-Cache-Hit=0", hdr1.get("X-Cache-Hit") == "0", str(hdr1.get("X-Cache-Hit")))
         check("响应头含耗时/体积", "X-Subset-Ms" in hdr1 and "X-Subset-Bytes" in hdr1)
+        check("默认附带拉丁字母", hdr1.get("X-Latin-Included") == "1", str(hdr1.get("X-Latin-Included")))
+        glyphs1 = int(hdr1.get("X-Subset-Glyphs") or 0)
+        check("回报字形数", 20 < glyphs1 < 2000, f"glyphs={glyphs1}")
+
+        from fontTools.ttLib import TTFont as _TTF
+        import io as _io
+
+        tt_latin = _TTF(_io.BytesIO(data1))
+        cmap_latin = tt_latin.getBestCmap() or {}
+        check(
+            "子集含拉丁 A-Z",
+            all(ord(c) in cmap_latin for c in "ABCabc"),
+            f"latin_in_cmap={all(ord(c) in cmap_latin for c in 'ABCabc')}",
+        )
+        tt_latin.close()
         print(f"     全量 {misans['bytes']} B → 子集 {len(data1)} B · 墙钟 {wall_ms:.0f} ms · 服务端 {hdr1.get('X-Subset-Ms')} ms")
 
         # fontTools 校验子集包含请求字符
@@ -151,7 +173,11 @@ def main() -> int:
         requested = set(lyric)
         have = {ch for ch in requested if ord(ch) in cmap}
         check("子集含请求汉字", have == requested, f"{len(have)}/{len(requested)}")
-        check("子集字形数远小于全量", tt["maxp"].numGlyphs < 80, f"glyphs={tt['maxp'].numGlyphs}")
+        check(
+            "子集字形数远小于全量",
+            tt["maxp"].numGlyphs < 2000,
+            f"glyphs={tt['maxp'].numGlyphs}",
+        )
         tt.close()
 
         print("\n== 3. 缓存命中 ==")

@@ -15,6 +15,7 @@ API:
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
@@ -39,7 +40,7 @@ PROTO_VERSION = "1.0.0"
 HISTORY_MAX = 200
 LATENCY_WINDOW = 200
 
-# 可选的基础拉丁（空格/可打印 ASCII），默认不强制
+# 基础拉丁：字母/数字/常用标点（空格~波浪）。默认并入，体积代价很小
 ASCII_BASIC = "".join(chr(c) for c in range(0x20, 0x7F))
 
 
@@ -291,8 +292,10 @@ def cache_key(font_id: str, chars: str) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:20]
 
 
-def build_subset(font_path: Path, chars: str, include_latin: bool, out_path: Path) -> tuple[int, str]:
-    """生成子集，返回 (文件大小, 缺字字符串)。"""
+def build_subset(
+    font_path: Path, chars: str, include_latin: bool, out_path: Path
+) -> tuple[int, str, int]:
+    """生成子集，返回 (文件大小, 缺字字符串, 字形数)。"""
     text = chars + (ASCII_BASIC if include_latin else "")
     options = Options()
     options.layout_features = ["*"]
@@ -304,20 +307,21 @@ def build_subset(font_path: Path, chars: str, include_latin: bool, out_path: Pat
     options.canonical_order = True
 
     tt = TTFont(str(font_path))
-    # 记录源字体 cmap 里没有的字
     cmap = tt.getBestCmap() or {}
     missing = "".join(ch for ch in chars if ord(ch) not in cmap and ch not in cmap)
 
     subsetter = Subsetter(options=options)
     subsetter.populate(text=text)
     subsetter.subset(tt)
+    # maxp.numGlyphs 在 save 前可能是旧值，用 glyphOrder 计数
+    glyphs = len(tt.getGlyphOrder())
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tt.save(str(tmp))
     tt.close()
     tmp.replace(out_path)
-    return out_path.stat().st_size, missing
+    return out_path.stat().st_size, missing, glyphs
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -361,7 +365,8 @@ class Handler(BaseHTTPRequestHandler):
     def _parse_subset_request(self, qs: dict, body: bytes, content_type: str) -> dict:
         font_id = ""
         chars = ""
-        include_latin = False
+        # 默认附带可打印 ASCII（字母顺带拿到）；显式 false/0 才关掉
+        include_latin = True
         if content_type.startswith("application/json") or (
             body and not qs.get("chars")
         ):
@@ -369,7 +374,13 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(body.decode("utf-8") or "{}")
                 font_id = str(payload.get("font") or payload.get("font_id") or "")
                 chars = str(payload.get("chars") or payload.get("text") or "")
-                include_latin = bool(payload.get("include_latin"))
+                if "include_latin" in payload:
+                    v = payload.get("include_latin")
+                    include_latin = bool(v) if not isinstance(v, str) else v.lower() not in {
+                        "0",
+                        "false",
+                        "no",
+                    }
             except json.JSONDecodeError:
                 pass
         if not font_id:
@@ -377,15 +388,15 @@ class Handler(BaseHTTPRequestHandler):
         if not chars:
             chars = (qs.get("chars") or qs.get("text") or [""])[0]
         if "include_latin" in qs:
-            include_latin = (qs.get("include_latin") or [""])[0] in {
-                "1",
-                "true",
-                "yes",
+            include_latin = (qs.get("include_latin") or [""])[0] not in {
+                "0",
+                "false",
+                "no",
             }
         return {
             "font": font_id.strip().lower(),
             "chars": chars,
-            "include_latin": include_latin,
+            "include_latin": bool(include_latin),
         }
 
     def handle_subset(self, qs: dict, body: bytes, content_type: str) -> None:
@@ -417,18 +428,25 @@ class Handler(BaseHTTPRequestHandler):
         t0 = time.perf_counter()
         cache_hit = cache_path.exists()
         missing = ""
+        glyphs = 0
 
         try:
             if cache_hit:
                 out_bytes = cache_path.stat().st_size
+                data = cache_path.read_bytes()
+                # 缓存命中也要回报字形数/缺字，便于设备与测试台校验
+                tt = TTFont(io.BytesIO(data), lazy=True)
+                glyphs = int(tt["maxp"].numGlyphs) if "maxp" in tt else 0
+                cmap = tt.getBestCmap() or {}
+                missing = "".join(ch for ch in chars if ord(ch) not in cmap)
+                tt.close()
             else:
                 font_path = Path(meta["path"])
-                out_bytes, missing = build_subset(
+                out_bytes, missing, glyphs = build_subset(
                     font_path, chars, include_latin, cache_path
                 )
+                data = cache_path.read_bytes()
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            data = cache_path.read_bytes()
-            # TTF 魔数校验
             if data[:4] not in (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf"):
                 raise ValueError("generated file is not a valid TTF/OTF")
 
@@ -448,6 +466,8 @@ class Handler(BaseHTTPRequestHandler):
                 "X-Font-Id": font_id,
                 "X-Subset-Chars": str(len(chars)),
                 "X-Subset-Missing": str(len(missing)),
+                "X-Subset-Glyphs": str(glyphs),
+                "X-Latin-Included": "1" if include_latin else "0",
                 "X-Cache-Hit": "1" if cache_hit else "0",
                 "X-Subset-Bytes": str(out_bytes),
                 "X-Subset-Ms": f"{elapsed_ms:.2f}",

@@ -116,6 +116,8 @@ async function requestSubset() {
     const missing = res.headers.get("X-Subset-Missing") || "0";
     const key = res.headers.get("X-Cache-Key") || "";
     const uniqueCount = res.headers.get("X-Subset-Chars") || String(chars.length);
+    const glyphs = res.headers.get("X-Subset-Glyphs") || "";
+    const latin = res.headers.get("X-Latin-Included") === "1";
 
     const blob = new Blob([buf], { type: "font/ttf" });
     const url = URL.createObjectURL(blob);
@@ -151,6 +153,14 @@ async function requestSubset() {
       <div class="stat-card">
         <div class="lbl">全量字体</div>
         <div class="val">${fmtBytes((state.fonts.find((f) => f.id === font) || {}).bytes || 0)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="lbl">字形数</div>
+        <div class="val">${glyphs || "—"}</div>
+      </div>
+      <div class="stat-card ${latin ? "ok" : ""}">
+        <div class="lbl">拉丁字母</div>
+        <div class="val">${latin ? "已带上" : "未带"}</div>
       </div>
     `;
     $("#dl-link").href = url;
