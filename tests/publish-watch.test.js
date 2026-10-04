@@ -105,21 +105,23 @@ describe('runWatch（防抖/触发/失败补传）', () => {
 
   it('产物变化 → 防抖静默后再次发布（共 2 次）', async () => {
     const done = watchOnce()
-    await sleep(80) // 首发完成
+    // 事件等待（并行负载下计时不可靠）：等首发
+    const d1 = Date.now() + 8000
+    while (publishCalls < 1 && Date.now() < d1) await sleep(30)
     expect(publishCalls).toBe(1)
     const app = path.join(buildDir, 'hello_world.bin')
-    const d = new Date(Date.now() + 7000)
-    fs.utimesSync(app, d, d) // 触发签名变化
-    // 等待二次发布真正发生（防抖/轮询在并行负载下时序不稳——改为事件等待，5s 上限）
-    const deadline = Date.now() + 5000
-    while (publishCalls < 2 && Date.now() < deadline) await sleep(50)
+    const ft = new Date(Date.now() + 7000)
+    fs.utimesSync(app, ft, ft) // 触发签名变化
+    // 等二次发布真正发生（防抖+轮询），再收尾
+    const d2 = Date.now() + 8000
+    while (publishCalls < 2 && Date.now() < d2) await sleep(30)
     ac.abort()
     await done
     expect(publishCalls).toBe(2)
     // 还原
     const now = new Date()
     fs.utimesSync(app, now, now)
-  }, 10_000)
+  }, 20_000)
 
   it('发布失败 → pending 保留，服务恢复后下轮补传', async () => {
     let failing = true

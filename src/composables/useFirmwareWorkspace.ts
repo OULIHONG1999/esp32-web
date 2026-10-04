@@ -70,6 +70,10 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     loadedProject: null as string | null,
     /** 最近注入的烧录参数（参数卡用；手动添加时为 null=未注入） */
     flashParams: null as FlashParams | null,
+    /** 载入中的版本 id（防重复点击；树行/固件页 loading 态） */
+    loading: null as string | null,
+    /** 载入进度（并行下载计数） */
+    loadProgress: null as { done: number; total: number; bytes: number } | null,
   })
 
   async function refreshRegistry(): Promise<void> {
@@ -99,6 +103,7 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     opt: Pick<RegistryOption, 'projectId' | 'projectName' | 'variant'>,
     rel: RegistryRelease,
   ): Promise<void> {
+    if (state.loading) return // 已有载入进行中——防重复点击
     state.registryMsg = null
     const chipName = deps.getChipName()
     if (
@@ -112,22 +117,36 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       state.registryMsg = `已取消载入（chipFamily 不符：${rel.chipFamily} ≠ ${chipName}）`
       return
     }
+    state.loading = rel.id
+    state.loadProgress = { done: 0, total: rel.parts.length, bytes: 0 }
     try {
-      const loaded: FlashRow[] = []
-      for (const p of rel.parts) {
-        const bytes = await fetchReleasePart(opt.projectId, opt.variant, rel.id, p.file)
-        const file = new File([bytes as BlobPart], p.file, {
-          type: 'application/octet-stream',
-        })
-        loaded.push({
-          id: nextId++,
-          label: p.label,
-          address: p.address,
-          file,
-          type: (p as { type?: string }).type,
-          subType: (p as { subType?: string }).subType,
-        })
-      }
+      // 并行下载（文件越多越明显）+ 进度计数 + 失败定位到具体文件
+      let done = 0
+      let bytes = 0
+      const loaded: FlashRow[] = await Promise.all(
+        rel.parts.map(async (p) => {
+          try {
+            const b = await fetchReleasePart(opt.projectId, opt.variant, rel.id, p.file)
+            done += 1
+            bytes += p.size ?? b.byteLength
+            state.loadProgress = { done, total: rel.parts.length, bytes }
+            return {
+              id: nextId++,
+              label: p.label,
+              address: p.address,
+              file: new File([b as BlobPart], p.file, {
+                type: 'application/octet-stream',
+              }),
+              type: (p as { type?: string }).type,
+              subType: (p as { subType?: string }).subType,
+            }
+          } catch (e) {
+            throw new Error(
+              `段「${p.file}」下载失败：${e instanceof Error ? e.message : String(e)}`,
+            )
+          }
+        }),
+      )
       state.rows.splice(0, state.rows.length, ...loaded)
       state.from = 'registry'
       state.loadedRelease = rel.id
@@ -140,6 +159,9 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     } catch (e) {
       console.error('[api] loadRelease 失败:', e)
       state.registryMsg = `载入失败：${e instanceof Error ? e.message : String(e)}`
+    } finally {
+      state.loading = null
+      state.loadProgress = null
     }
   }
 

@@ -528,6 +528,7 @@ function dismissGuide(): void {
               :indent="1"
               :icon="rel.type === 'release' ? '★' : '·'"
               :label="rel.id"
+              :sub="ws.state.loading === rel.id ? '载入中…' : undefined"
               :tags="releaseTags(rel)"
               :active="rel.id === opt.release.id"
               @click="loadAndShow(opt, rel)"

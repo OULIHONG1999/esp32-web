@@ -173,8 +173,8 @@ describe('pickMissing（查缺差集）', () => {
 })
 
 describe('releaseId / toMeta / parseAddress', () => {
-  it('releaseId 形如 YYYYMMDD-HHmm-xxxx', () => {
-    expect(releaseId()).toMatch(/^\d{8}-\d{4}-[0-9a-f]{4,}$/)
+  it('releaseId 形如 YYYYMMDD-HHmmss-xxxx', () => {
+    expect(releaseId()).toMatch(/^\d{8}-\d{6}-[0-9a-f]{4,}$/)
   })
 
   it('toMeta 结构符合数据模型 v3（parts 仅元数据）', () => {

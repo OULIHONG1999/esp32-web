@@ -138,7 +138,10 @@ async function exportPack(): Promise<void> {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${base}-${Date.now()}.zip`
+  const now = new Date()
+  const pz = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pz(now.getMonth() + 1)}${pz(now.getDate())}-${pz(now.getHours())}${pz(now.getMinutes())}${pz(now.getSeconds())}`
+  a.download = `${base}-${stamp}.zip`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -217,6 +220,13 @@ async function exportPack(): Promise<void> {
       </button>
     </div>
 
+    <div v-if="ws.state.loading" class="fw__loading">
+      ⏳ 正在载入 <code>{{ ws.state.loading }}</code>
+      <template v-if="ws.state.loadProgress">
+        —— {{ ws.state.loadProgress.done }}/{{ ws.state.loadProgress.total }} 段
+        · {{ fmtSize(ws.state.loadProgress.bytes) }}
+      </template>
+    </div>
     <p v-if="ws.state.registryMsg" class="fw__msg">{{ ws.state.registryMsg }}</p>
 
     <!-- 烧录表格 -->
@@ -412,6 +422,18 @@ async function exportPack(): Promise<void> {
   background: transparent;
   border-style: dashed;
   color: var(--muted);
+}
+.fw__loading {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.fw__loading code {
+  font-family: ui-monospace, monospace;
 }
 .fw__msg {
   margin: 0;

@@ -248,13 +248,13 @@ export function collectShaSet(registry, projectId, variant) {
   return set
 }
 
-/** release id：YYYYMMDD-HHmm-<commit短哈希|随机4hex>（FIRMWARE-REGISTRY §4.1） */
+/** release id：YYYYMMDD-HHmmss-<commit短哈希|随机4hex>（时间到秒，突出可读时间） */
 export function releaseId(cwd = process.cwd()) {
   const d = new Date()
   const pad = (n) => String(n).padStart(2, '0')
   const ts =
     `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-    `-${pad(d.getHours())}${pad(d.getMinutes())}`
+    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   let suffix
   try {
     suffix = execSync('git rev-parse --short=4 HEAD', { cwd, stdio: ['ignore', 'pipe', 'ignore'] })
