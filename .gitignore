@@ -19,3 +19,4 @@ font-cloud-server/data/
 font-cloud-server/fonts/*.ttf
 font-cloud-server/fonts/*.otf
 font-cloud-server/fonts/*.ttc
+.tmp-*.cjs
