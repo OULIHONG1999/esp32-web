@@ -42,6 +42,14 @@ const totalBytes = computed<number>(() =>
   rows.reduce((n, r) => n + (r.file?.size ?? 0), 0),
 )
 
+/** ISO 时间 → 可读时间戳（含秒） */
+function fmtStamp(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pz = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pz(d.getMonth() + 1)}-${pz(d.getDate())} ${pz(d.getHours())}:${pz(d.getMinutes())}:${pz(d.getSeconds())}`
+}
+
 function fmtSize(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -150,7 +158,21 @@ async function exportPack(): Promise<void> {
 <template>
   <div class="fw">
     <div class="fw__crumbs">{{ crumbs }}</div>
-    <h2 class="fw__title">烧录清单</h2>
+    <div v-if="ws.state.loadedMeta" class="fw__meta">
+  <span class="fw__meta-item"><i>来源</i>{{ ws.state.loadedProject }}</span>
+  <span class="fw__meta-item"><i>版本</i><code>{{ ws.state.loadedMeta.id }}</code></span>
+  <span
+    class="fw__meta-badge"
+    :class="ws.state.loadedMeta.type === 'release' ? 'fw__meta-badge--rel' : ''"
+  >
+    {{ ws.state.loadedMeta.type === 'release' ? '★ 发布版' : '快照' }}
+  </span>
+  <span class="fw__meta-item"><i>创建于</i>{{ fmtStamp(ws.state.loadedMeta.createdAt) }}</span>
+  <span v-if="ws.state.loadedMeta.chipFamily" class="fw__meta-item"><i>固件芯片</i>{{ ws.state.loadedMeta.chipFamily }}</span>
+  <span v-if="ws.state.loadedMeta.note" class="fw__meta-item fw__meta-note"><i>说明</i>{{ ws.state.loadedMeta.note }}</span>
+</div>
+
+<h2 class="fw__title">烧录清单</h2>
 
     <!-- 参数卡（b-ide 同款 stat cards） -->
     <div class="fw__stats">
@@ -422,6 +444,44 @@ async function exportPack(): Promise<void> {
   background: transparent;
   border-style: dashed;
   color: var(--muted);
+}
+.fw__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+.fw__meta-item i {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  margin-right: 6px;
+}
+.fw__meta-item code {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+}
+.fw__meta-badge {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--muted);
+}
+.fw__meta-badge--rel {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.fw__meta-note {
+  flex-basis: 100%;
+  line-height: 1.6;
 }
 .fw__loading {
   margin: 0;

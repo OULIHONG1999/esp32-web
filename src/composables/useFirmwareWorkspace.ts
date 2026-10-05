@@ -67,6 +67,10 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     from: null as 'registry' | 'manual' | null,
     /** 最近一次载入的版本（面包屑用） */
     loadedRelease: null as string | null,
+    /** 载入版本元信息（面包屑下的来源信息栏：时间/类型/说明/chipFamily） */
+    loadedMeta: null as
+      | { id: string; type: string; createdAt: string; note?: string; chipFamily?: string }
+      | null,
     loadedProject: null as string | null,
     /** 最近注入的烧录参数（参数卡用；手动添加时为 null=未注入） */
     flashParams: null as FlashParams | null,
@@ -150,6 +154,13 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       state.rows.splice(0, state.rows.length, ...loaded)
       state.from = 'registry'
       state.loadedRelease = rel.id
+      state.loadedMeta = {
+        id: rel.id,
+        type: rel.type,
+        createdAt: rel.createdAt,
+        note: rel.note,
+        chipFamily: rel.chipFamily,
+      }
       state.loadedProject = `${opt.projectName}/${opt.variant}`
       const fp = toFlashParams(rel.flashParams)
       state.flashParams = fp
@@ -196,6 +207,7 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
         file,
       })
     }
+    state.loadedMeta = null
     state.from = 'manual'
     state.loadedRelease = null
     state.loadedProject = null
@@ -209,6 +221,7 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
 
   function resetRows(): void {
     state.rows.splice(0, state.rows.length)
+    state.loadedMeta = null
     state.from = null
     state.loadedRelease = null
     state.loadedProject = null
