@@ -141,6 +141,18 @@ export function useSession() {
     return Math.min(100, Math.round((p.written / p.total) * 100))
   })
 
+  /** 烧录逐段状态（表格行背景进度用） */
+  const flashPart = computed(() => {
+    const p = progress.value
+    if (!p) return null
+    return { index: p.partIndex, written: p.partWritten ?? 0, total: p.partTotal ?? 0 }
+  })
+  /** 失败段索引（该行标红后停止；载入新固件时复位） */
+  const flashFailedIndex = ref<number | null>(null)
+  function resetFlashMarks(): void {
+    flashFailedIndex.value = null
+  }
+
   async function run(fn: () => Promise<void>): Promise<void> {
     try {
       await fn()
@@ -177,17 +189,23 @@ export function useSession() {
     connected,
     canOperate,
     percent,
+    flashPart,
+    flashFailedIndex,
+    resetFlashMarks,
     connect: () => runWithLock(() => device.connect()),
     switchPort: () => runWithLock(() => device.switchPort()),
     disconnect: () => run(() => device.disconnect()),
     flash: async (parts: FlashPart[]) => {
       let ok = true
       let errMsg: string | undefined
+      flashFailedIndex.value = null
       try {
         await device.flash(parts)
       } catch (e) {
         ok = false
         errMsg = e instanceof Error ? e.message : String(e)
+        // 失败即停（esptool 段间串行）：标红当前段，其余段不会被写入
+        flashFailedIndex.value = progress.value?.partIndex ?? 0
       }
       pushHistory({
         ts: Date.now(),

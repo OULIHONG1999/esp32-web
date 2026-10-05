@@ -18,6 +18,9 @@ export interface Progress {
   written: number
   total: number
   partIndex: number
+  /** 当前段已写字节 / 段总字节（逐段行进度条用，glue 提供） */
+  partWritten?: number
+  partTotal?: number
 }
 
 /**

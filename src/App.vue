@@ -49,6 +49,9 @@ const {
   logs,
   canOperate,
   percent,
+  flashPart,
+  flashFailedIndex,
+  resetFlashMarks,
   viewPaused,
   connect,
   switchPort,
@@ -106,6 +109,7 @@ function onBannerView(): void {
 }
 
 function onReleaseLoaded(key: string, releaseId?: string): void {
+  resetFlashMarks() // 新固件载入：清掉上次烧录的失败/进度标记
   const { [key]: _gone, ...rest } = newReleases.value
   newReleases.value = rest
   if (releaseId) {
@@ -605,6 +609,8 @@ function dismissGuide(): void {
             :percent="percent"
             :chip-name="chip?.name ?? null"
             :chip-detail="chip"
+            :flash-part="flashPart"
+            :flash-failed-index="flashFailedIndex"
             :pick-files="pickFiles"
             @flash="flash"
             @erase="onErase"

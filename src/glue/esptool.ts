@@ -96,13 +96,16 @@ export async function writeFlash(
     // D5：写入后芯片读回 MD5 比对（日志 File md5 / Flash md5 / Hash of data verified.）
     calculateMD5Hash: (image: Uint8Array) => md5Hex(image),
     reportProgress: (fileIndex, written, bytesTotal) => {
+      // esptool-js 语义：written/bytesTotal 为【当前段】进度（image.length）；整体进度自行累计
       const before = parts
         .slice(0, fileIndex)
         .reduce((n, p) => n + p.data.byteLength, 0)
       onProgress({
         written: before + written,
-        total: bytesTotal ?? total,
+        total,
         partIndex: fileIndex,
+        partWritten: written,
+        partTotal: bytesTotal ?? parts[fileIndex]?.data.byteLength ?? 0,
       })
     },
   }

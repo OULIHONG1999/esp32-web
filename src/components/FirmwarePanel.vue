@@ -18,6 +18,10 @@ const props = defineProps<{
   chipName: string | null
   /** F-12：芯片详情（烧录前二次确认用） */
   chipDetail: ChipInfo | null
+  /** 烧录逐段状态（行背景进度） */
+  flashPart: { index: number; written: number; total: number } | null
+  /** 失败段索引（标红即停） */
+  flashFailedIndex: number | null
   /** 打开共享的隐藏文件选择器（App 持有 input） */
   pickFiles: () => void
 }>()
@@ -41,6 +45,26 @@ const crumbs = computed<string>(() => {
 const totalBytes = computed<number>(() =>
   rows.reduce((n, r) => n + (r.file?.size ?? 0), 0),
 )
+
+/** 烧录逐段状态 → 行样式/标记（失败标红即停；进度背景条） */
+function rowClass(i: number): string {
+  if (props.flashFailedIndex === i) return 'fw__row--failed'
+  if (props.flashPart && props.flashPart.index === i) return 'fw__row--writing'
+  if (props.flashPart && i < props.flashPart.index) return 'fw__row--done'
+  return ''
+}
+function rowMark(i: number): string {
+  if (props.flashFailedIndex === i) return '✖'
+  if (props.flashPart && props.flashPart.index === i) return '▶'
+  if (props.flashPart && i < props.flashPart.index) return '✓'
+  return ''
+}
+function rowStyle(i: number): string {
+  const fp = props.flashPart
+  if (!fp || fp.index !== i || !fp.total) return ''
+  const pct = Math.min(100, Math.round((fp.written / fp.total) * 100))
+  return `background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, transparent) ${pct}%, transparent ${pct}%);`
+}
 
 /** ISO 时间 → 可读时间戳（含秒） */
 function fmtStamp(iso: string): string {
@@ -257,8 +281,8 @@ async function exportPack(): Promise<void> {
         <tr><th>段</th><th>文件</th><th>分区</th><th>地址</th><th>大小</th><th></th></tr>
       </thead>
       <tbody>
-        <tr v-for="r in rows" :key="r.id">
-          <td><code>{{ r.label }}</code></td>
+        <tr v-for="(r, i) in rows" :key="r.id" :class="rowClass(i)" :style="rowStyle(i)">
+          <td><code>{{ r.label }}</code><span v-if="rowMark(i)" class="fw__mark">{{ rowMark(i) }}</span></td>
           <td class="fw__file">{{ r.file?.name }}</td>
           <td>
             <span
@@ -415,8 +439,8 @@ async function exportPack(): Promise<void> {
   color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 7px 16px;
-  font-size: 13.5px;
+  padding: 5px 12px;
+  font-size: 13px;
   cursor: pointer;
   font-family: inherit;
 }
@@ -600,6 +624,20 @@ async function exportPack(): Promise<void> {
   justify-content: center;
   font-size: 11.5px;
   color: var(--ink);
+}
+/* 烧录逐段行状态 */
+.fw__row--done {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.fw__row--failed {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+}
+.fw__row--failed td {
+  color: var(--err);
+}
+.fw__mark {
+  margin-left: 8px;
+  font-size: 11px;
 }
 /* A2 固件详情 */
 .fw__info {
