@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-10-07（**推送固件到指定设备**已实现并上线：服务器离线准入 412 + 撤销端点 + `push` CLI + `/OTA` 页面撤销/置灰 + 描述符）
+> 最后更新：2026-10-07（**推送固件到指定设备已上线并真机验证**：远端编译 → `push --build` 直推真机成功、速度与 USB 相当；设备端过程上报待补）
 
 ## 一句话
 
@@ -50,7 +50,7 @@
 
 | **OTA 三端（页面+服务器）** | ✅ 页面与服务器就绪 | 页面 `/OTA`（`public/ota/`）+ 描述符 `/ota.json` + 契约 `docs/ota.md` + 静态托管 8 用例；**服务器四端点已实现**（`server/devices.js` 存储 + `app.js` 接线，`tests/devices.test.js` 30 用例）；设备模拟器 `tools/device-sim/`（12 用例）+ **端到端 24/24 实测**（上报→派发→投递→下载→sha256 校验→回执→版本回写，含重投递/409+force/篡改失败）。**未实现：设备端固件（在另一台电脑上开发）**，其入口文档为 `docs/DEVICE-OTA.md`。注：全量套件 1 红在 `tests/progress.test.ts`（烧录进度在途改动，非本次引入） |
 
-| **推送固件到指定设备（push）** | ✅ 已实现并上线 | 规则：**离线不下发（412 + cancelled 记录，不排队）**、可撤销未决命令（pending 真拦住 / delivered 停掉重复投递）、迟到回执不覆盖终态；入口：CLI `push`（`--build`/`--release`/`--latest`/`--status`/`--cancel`/`--json`，退出码 0–12 + 130）+ 页面离线置灰与「撤销」按钮 + 按 id 复查端点；**341 测试全绿**（`push-cli.test.js` 纯逻辑 36 + 端到端 30，含三条故障注入），页面 DOM 桩 28/28；文档 `docs/PUSH-TO-DEVICE.md`（§8 验收全通过）+ `/push.json` + `llms.txt` 推送段 |
+| **推送固件到指定设备（push）** | ✅ 已实现并上线 | 规则：**离线不下发（412 + cancelled 记录，不排队）**、可撤销未决命令（pending 真拦住 / delivered 停掉重复投递）、迟到回执不覆盖终态；入口：CLI `push`（`--build`/`--release`/`--latest`/`--status`/`--cancel`/`--json`，退出码 0–12 + 130）+ 页面离线置灰与「撤销」按钮 + 按 id 复查端点；**341 测试全绿**（`push-cli.test.js` 纯逻辑 36 + 端到端 30，含三条故障注入），页面 DOM 桩 28/28；**2026-10-07 真机端到端验证通过**（远端编译→直推真机 42s 成功，速度与 USB 相当）；文档 `docs/PUSH-TO-DEVICE.md`（§8 验收全通过）+ `/push.json` + `llms.txt` 推送段 |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -187,6 +187,12 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
   ④ **提示音**：`glue/audioFeedback.ts`（Web Audio 合成，零音频文件）——完成=上行三音 C5→E5→G5，失败=双低音下行 G4→E4。**关键修复**：完成音发生在点击后数分钟，手势早已过期，直接 new AudioContext 会被自动播放策略挂起=没声音；改为首次 `pointerdown/keydown` 即 `primeAudio()` 解锁。状态栏右侧 🔊/🔇 静音开关（localStorage `fw.sound`）。面板新增**烧录回执行**（✅完成/❌失败 · 段数 · 字节 · 耗时）。
   ⑤ **清单控件瘦身**：原 5 张参数卡 + 6 个平铺按钮 + 2 行提示 → **一行参数条**（模式/频率/容量/芯片/合计）+ **⚡烧录 + ＋添加bin + ⋯更多菜单**（原生 `<details>`，收 完全擦除/硬复位/重新载入/导出固件包，点外部自动收起）+ 1 行短提示；删掉冗余 `<h2>烧录清单</h2>` 与死样式。**158 测试 + build 全绿**。
   未做：实机复测（待用户插板验证心跳行/提示音）、UI 视觉核验（本机无 Playwright 浏览器，未截图）。
+
+- **2026-10-07（真机端到端验证通过：远端编译 → 直推 → 速度与 USB 相当）**：用户在设备机跑 `push --build` 直推真机 `b81f3fc8768c` 成功，**这是"发布推送端"第一次在真实链路上闭环**（此前只有模拟器端到端）。服务器记录：发布 `20261007-0033-a062`（lvgl-demo-v9/ESP32-S3 **snapshot**）→ 9s 后设备取走（deliveryCount=1）→ 42s 回执 `success`（detail `OTA ok, rebooted to 20261007-0033-a062`），firmwareVersion 回写 **0.6.0**、设备在线。
+  ① **用户实测结论（重要）**：远端编译完直接推送的速度**与 USB 下载差不多**——回答了一直悬着的"OTA 走 HTTP 会不会慢"，也让"设备机上编译完一条命令推真机"成为可用的日常闭环（不再依赖插 USB/串口）。
+  ② **已知残留（如实记）**：设备端**仍未实现过程上报**（该命令 `progress`/`trail` 均为 null），所以这次过程只能看到下发/取走/回执三个服务器时间点，看不到下载/写入的阶段细节；要阶段细节需在设备工程接 `POST …/progress`（`docs/DEVICE-OTA.md` §4.5，与 §7.8 骨架）。
+  ③ **顺带纠偏 latest 语义**：查记录时发现 `variant.latest` 在**发布那一刻**就指向新 release（不管 snapshot/release），`promote` 只把 type 改成 release 并写 note、**不改 latest**；此前 `PUSH-TO-DEVICE.md` 与 `push.json` 写成了"promote 之后 latest 变了 / moves latest"，与实现对不上，已纠偏（`eb62d15`，重新部署 `ExecMainStartTimestamp` → **00:49:06 CST**，线上文案已核验）。
+  ④ **待办**：`20261007-0033-a062` 仍是 snapshot——要转正式版在设备机跑 `node tools/publish/index.js promote 20261007-0033-a062 --note "0.6.0 直推验证通过"`（不 promote 会被 retention 按 snapshot 清理）。
 
 - **2026-10-07（推送固件到指定设备：开工 → 实现 → 上线，一次做完八步）**：用户说「开始吧，补下剩余的问题，然后开发上线」。按 `docs/PUSH-TO-DEVICE.md` §9 八步全部落地，**341 测试 + build 全绿**，验收清单 §8 逐条通过（每条都指向自动化断言）。
   ① **服务器**（`devices.js`/`app.js`）：`cancelled` 状态 + `recordCancelled()`（离线未下发留记录、**不占未决位**）+ `cancelCommand()`（撤销未决、`wasDelivered` 如实区分能力）+ `lateResult`（迟到回执**不覆盖**终态）+ `isDeviceOnline()`（服务端唯一在线口径）；`POST /commands` 入队前判在线 → **412**；新增 `POST …/commands/{cid}/cancel`。
