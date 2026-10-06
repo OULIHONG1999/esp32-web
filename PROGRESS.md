@@ -171,6 +171,11 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 
 ## 变更日志
+- **2026-10-06（部署上线 + 打包脚本修坑）**：按纪律 9 走完云端部署——build（bundle `index-DPC6vB74`）→ `tools/package-deploy.ps1` → scp → 远端 unzip → `systemctl restart firmware-server`。**核对通过**：`ExecMainStartTimestamp` 00:19:11 → **19:59:08**（新 PID 3166615）；HTTP 与 HTTPS 入口页面均引用 `index-DPC6vB74.js`；`/api/status`、`/api/devices`、`/OTA`、`/llms.txt` 全 200；新 JS 资源 200（306 KB）。踩坑与修复：
+  ① `Compress-Archive` 在 Windows 写 `\` 作路径分隔符 → 远端 `unzip` 报 backslash 警告并**以退出码 1 结束**，`unzip && systemctl restart` 链在此中断——文件解出来了、服务却没重启（正是 SERVER.md 记过的「unzip 成功≠进程重启」，本次复现）。改为脚本自建 zip、显式写 `/` 条目名，并加产出自检（条目数 / 反斜杠数 / 体积），远端实测 `unzip_exit=0`。
+  ② 编辑 `.ps1` 会丢掉 UTF-8 **BOM** → PowerShell 5.1 按 ANSI 读中文注释乱码、引号错位直接解析失败（问题 21 的变体）。**纪律：改完 `.ps1` 必须确认前 3 字节是 239,187,191**。
+  ③ `ZipArchive/ZipArchiveMode` 在 `System.IO.Compression`、`ZipFileExtensions` 在 `System.IO.Compression.FileSystem`——两个程序集都要 `Add-Type`；只加后者时 `New-Object` 静默失败并产出 **0 字节 zip**（中央目录损坏）。脚本已加 `$ErrorActionPreference='Stop'` + 产出后自检兜住。
+  ⚠ **遗留（非本次改动）**：部署包**必带未提交的 `server/devices.js`**——已提交的 `server/app.js` 顶部 import 它，缺了这个文件服务器启动即崩（`ERR_MODULE_NOT_FOUND` → systemd 重启循环）。该文件是并行开发中的 OTA 后端产物，**仍需补提交**，否则仓库处于「app.js 引用未跟踪文件」的不可自洽状态。
 
 - **2026-10-06（「烧录卡住到一半」根因修复 + 提示音 + 清单控件瘦身）**：用户报「烧录经常卡住到一半，不知道为什么」——查出**两条独立原因**，都在自研层，与 esptool-js 本身无关：
   ① **进度口径不一致（观感"卡住"的主因）**：`reportProgress` 的 `written/bytesTotal` 是**压缩后**字节（`compress:true`），而分母是**未压缩**总量（各段 `data.byteLength` 之和）。2MB app 段 deflate 后约剩一半 → 进度条在最长的这一段最多爬到 ~50%，且 `device.progress` 结束后不清空 → **烧完永久停在半途**。新增 `core/progress.ts`（纯函数：按段内比例换算回真实字节，+8 单测），glue 调用；新增 `DeviceManager.clearProgress()` + useSession `finally` 结束时清 → 进度条正确走满再消失。

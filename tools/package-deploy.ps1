@@ -11,6 +11,9 @@ param(
   [string]$PanelHost
 )
 
+# 部署脚本：任何异常都必须炸出来（曾因 .NET 类型缺失静默产出 0 字节 zip 而继续往下走）
+$ErrorActionPreference = 'Stop'
+
 $root = Split-Path -Parent $PSScriptRoot
 $local = Join-Path $root '.fw-deploy.local'
 if ((-not $ServerHost) -and (Test-Path $local)) {
@@ -38,6 +41,38 @@ Get-ChildItem -Path $dist -Recurse -Include *.html, *.txt, *.js, *.css, *.json, 
 }
 
 $zip = Join-Path $env:TEMP ('fw-deploy-' + (Get-Date -Format 'yyyyMMdd-HHmm') + '.zip')
-Compress-Archive -Path (Join-Path $root 'server'), $dist, (Join-Path $root 'package.json') -DestinationPath $zip -Force
+# 自建 zip：Compress-Archive 在 Windows 上写 `\` 作路径分隔符，远端 `unzip -o` 会报
+# "appears to use backslashes as path separators" 并**以退出码 1 结束**——文档里的
+# `unzip && systemctl restart` 链会在这里断掉（东西解出来了，服务却没重启，
+# 表现为 ExecMainStartTimestamp 不变）。这里显式用 `/` 写条目名，unzip 干净退 0。
+# ZipArchive / ZipArchiveMode 在 System.IO.Compression；ZipFileExtensions 在 .FileSystem——两个都要载
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$files = Get-ChildItem -Path (Join-Path $root 'server'), (Join-Path $root 'dist'), (Join-Path $root 'package.json') -Recurse -File |
+  Where-Object { $_.FullName -notmatch '\\server-data\\' }
+if ($files.Count -eq 0) { throw '待打包文件为 0——检查 server/ 与 dist/ 是否存在' }
+$fs = [IO.File]::Create($zip)
+try {
+  $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($f in $files) {
+      $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')
+      [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $za, $f.FullName, $rel, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+  } finally { $za.Dispose() }
+} finally { $fs.Dispose() }
+
+# 自检：条目数一致 + 无 `\` 路径 + 体积合理（0 字节 zip 会静默害死部署）
+$check = [IO.Compression.ZipFile]::OpenRead($zip)
+try {
+  $bad = @($check.Entries | Where-Object { $_.FullName -match '\\' })
+  $count = $check.Entries.Count
+} finally { $check.Dispose() }
+$size = (Get-Item $zip).Length
+if ($count -ne $files.Count -or $bad.Count -gt 0 -or $size -lt 1024) {
+  throw "打包自检失败：条目 $count/$($files.Count)、反斜杠条目 $($bad.Count)、体积 $size 字节"
+}
+
 Write-Host "INJECTED -> $ServerHost (panel: $PanelHost)"
-Write-Host "ZIP: $zip"
+Write-Host "ZIP: $zip  ($($files.Count) 个文件，路径分隔符 = /)"
