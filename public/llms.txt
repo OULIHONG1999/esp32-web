@@ -47,6 +47,19 @@
 - 协议:     GET /docs/protocol.md     (font-cloud API) · GET /docs/architecture.md (架构方案)
 - 注意:     本文件 /llms.txt 属 firmware-server；font-cloud 的索引在 /llms-font-cloud.txt
 
+## OTA 设备下发台（独立页，页面端先行）
+- 页面入口: GET /OTA                 (等价 /ota、/ota/；独立页，非主 SPA)
+- 机器描述符: GET /ota.json          (tool_id=ota-console；接口清单/数据模型/mock-real 说明)
+- 契约文档: GET /docs/ota.md        (设备上报 + 命令下发 + 页面端三端设计)
+- 用途: 查看在线/离线设备、选固件版本、下发 OTA 命令、跟踪命令状态（pending→delivered→success/failed）
+- 页面数据源: 顶栏 mock/real 开关；mock=内置假设备（默认，无需后端），real=真实 /api/devices
+- 状态: 页面端已实现；**服务器端 /api/devices* 与设备端 components/ota 尚未实现**
+- 相关接口（契约见 /docs/ota.md §4）:
+  - GET  /api/devices                               (设备列表；未实现)
+  - POST /api/devices/{deviceId}/commands           (下发 OTA；未实现)
+  - GET  /api/registry                              (固件版本下拉；已实现)
+- 约定: deviceId = base MAC 去冒号小写十六进制；在线判定由服务器按 lastSeen 完成（>45s 离线）；HTTP 轮询 pull
+
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
 - 使用手册(烧录/监视语义/取证操作卡): /docs/USER-GUIDE.md
 - 故障排查(实时日志无输出/连接/401): /docs/TROUBLESHOOTING.md
@@ -54,6 +67,7 @@
 - 当前部署状态详解(拓扑/通道/token/运维): /docs/SERVER.md
 - 部署运维(runbook): /docs/DEPLOY.md
 - 设计与数据模型: /docs/FIRMWARE-REGISTRY.md
+- OTA 三端设计契约(设备/云端/页面): /docs/ota.md
 - 验收清单(F-01..F-24): /docs/REQUIREMENTS.md
 - CLI 源码: /tools/publish/index.js (及 once/lib/watch 同目录)
 
@@ -61,4 +75,6 @@
 - curl http://firmware.example.com/llms.txt               # 本说明文件
 - curl http://firmware.example.com/api/registry            # 查看全部固件
 - curl http://firmware.example.com/docs/PUBLISH.md         # 发布操作手册(含裸HTTP示例)
+- curl http://firmware.example.com/ota.json                # OTA 页机器描述符
+- curl http://firmware.example.com/docs/ota.md             # OTA 设计契约
 - curl https://firmware.example.com/api/registry           # HTTPS 也可(自签证书)

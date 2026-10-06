@@ -12,6 +12,8 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
@@ -141,12 +143,22 @@ function servePart(dataDir, urlPath, res) {
   res.end(data)
 }
 
+/** 独立页路径归一：/OTA、/OTA/… → /ota（Linux 大小写敏感，显式归一保证 /OTA 可访问） */
+function normalizePagePath(urlPath) {
+  return /^\/ota(\/|$)/i.test(urlPath) ? '/ota' + urlPath.slice(4) : urlPath
+}
+
 function serveStatic(distDir, urlPath, res) {
-  const rel = urlPath === '/' ? 'index.html' : decodeURIComponent(urlPath.slice(1))
+  const rel = urlPath === '/' ? 'index.html' : decodeURIComponent(normalizePagePath(urlPath).slice(1))
   const root = path.resolve(distDir)
   let abs = path.resolve(root, rel)
   if (!abs.startsWith(root + path.sep) && abs !== root) {
     return send(res, 400, { error: 'bad path' })
+  }
+  // 目录 → 目录内 index.html（如 /ota/ → ota/index.html）；未命中再走 SPA 兜底
+  if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+    const idx = path.join(abs, 'index.html')
+    if (fs.existsSync(idx)) abs = idx
   }
   if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
     abs = path.join(root, 'index.html') // SPA fallback

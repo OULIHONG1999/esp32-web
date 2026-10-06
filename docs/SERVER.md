@@ -35,7 +35,9 @@
 | `https://firmware.example.com/` | 443 TLS | 浏览器主入口（Web Serial 需安全上下文） | **自签** `CN=firmware.example.com`（`/etc/ssl/certs/firmware-server.crt`），浏览器信任一次 |
 | `http://firmware.example.com/` | 80 明文 | **AI/爬虫只读通道**（文档/源码/registry） | 无——秘密勿走此通道 |
 | `/llms.txt` | 同上 | AI 速查（API/数据结构/认证/文档索引） | 公开 |
-| `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER） | 公开 |
+| `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
+| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；mock/real 双模式） | 公开 |
+| `/ota.json` | 同上 | OTA 页机器描述符（AI 入口，tool_id=ota-console） | 公开 |
 | `/tools/publish/*.js` | 同上 | 发布 CLI 源码下载（4 文件，零依赖） | 公开 |
 | `/api/registry*` 等 | 同上 | 读接口公开；写接口需 Bearer | 见 §4 |
 
@@ -115,4 +117,5 @@ node server/rebuild.js
 - 发布操作：`/docs/PUBLISH.md`（CLI/裸 HTTP/config/token）
 - AI 速查：`/llms.txt`
 - 设计：`/docs/FIRMWARE-REGISTRY.md` · 验收：`/docs/REQUIREMENTS.md`
+- OTA 独立页：`/OTA`（=`/ota`、`/ota/`）· 描述符 `/ota.json` · 契约 `/docs/ota.md`（设备端与服务器端 `/api/devices*` 未实现）
 - 本地进度与问题清单：仓库 `PROGRESS.md`（不挂公网）

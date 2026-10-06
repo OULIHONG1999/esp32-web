@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-09-29（**门5 已过**——S4 版本管理流程用户实测基本跑通、日志可用；v1.5 核心关账，进入页面功能优化阶段）
+> 最后更新：2026-10-06（**新增独立页 `/OTA`**——OTA 设备下发台前端落地、mock 可跑；设备端与服务器端 `/api/devices*` 尚未实现）
 
 ## 一句话
 
@@ -21,9 +21,10 @@
 6. `docs/PUBLISH.md` — 发布指南
 7. `docs/TROUBLESHOOTING.md` — 故障排查
 8. `docs/FIRMWARE-REGISTRY.md` — v1.5 固件库设计
-9. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
-10. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
-11. 本文 — 进度与下一步
+9. **`docs/ota.md` — OTA 三端设计契约（设备/云端/页面）；页面端已落地为独立页 `/OTA`（§6.0）**
+10. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
+11. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
+12. 本文 — 进度与下一步
 
 ## 当前状态（任务面板同步）
 
@@ -46,6 +47,8 @@
 | **S3 SSE 订阅** | ✅ 门4 已过 | 用户确认横幅+●NEW（20260929-2029）；SSE hub/广播/subscribe/前端横幅/角标/★开关/轮询降级全实测；108 测试全绿；文档挂载公网 /docs/ |
 | **S4 版本管理** | ✅ 门5 已过 | server promote/回滚/retention（Bearer 鉴权）+CLI `promote --note`+前端时间线（晋升/回滚/保留数确认/F-13 芯片比对）+SSE promote/latest 刷新+parts 分区类型 type/subType；115 测试+build 全绿；**用户实测：流程基本跑通、日志可用（2026-09-29）** |
 
+| **OTA 独立页（页面端）** | ✅ 已落地 | `/OTA` 独立页（`public/ota/` 三件套）+ `/ota.json` 描述符 + `/docs/ota.md` 契约；mock 全链路（选设备→选版本→下发→pending→delivered→success）DOM 桩 30/30 通过；静态托管 8 用例全绿 + build 全绿。**未实现：服务器端 `/api/devices*`、设备端 `components/ota`**。注：全量套件当前 156 用例有 1 红，在 `tests/progress.test.ts`（烧录进度在途改动，非本页引入，见变更日志） |
+
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
 ## 代码结构（2026-09-27 S1 后）
@@ -67,7 +70,9 @@ src/components/ide/           # 五区组件：ActivityBar/Sidebar/TreeSection/T
 src/components/               # EnvCheck / FirmwarePanel / LogPanel / FlashHistory / VersionTimeline / ide/(五区组件)
 
 src/api/registry.ts           # v1.5 项目库客户端（registry/parts 下载、flattenLatest、flashParams 映射）
-server/{config,registry,multipart,publish,app,index}.js  # 自含服务（纯 JS 零依赖 node:http）+ rebuild.js 自愈
+public/ota/{index.html,ota.css,ota.js}  # OTA 独立页（服务 ip/OTA；原生 JS 零依赖，不进主 SPA 构建）
+public/ota.json               # OTA 页机器描述符（AI 入口；tool_id=ota-console）
+server/{config,registry,multipart,publish,app,index}.js  # 自含服务（纯 JS 零依赖 node:http）+ rebuild.js 自愈（serveStatic 含 /OTA 归一 + 目录 index.html）
 tools/publish/{lib,index}.js  # 发布 CLI：flash_args/assets 解析、查缺、multipart 上传（once）
 vite.config.ts                # /api/registry* /api/publish* proxy（→8787；dev 中间件已移除）
 tests/{device,log,errors,lines}.test.ts   # 前端核心 43 用例
@@ -165,6 +170,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 ## 变更日志
 
+- **2026-10-06（OTA 独立页 `/OTA`）**：按 `docs/ota.md` 契约把**页面端**先落地为**独立页**（不进主 SPA 构建）——① **页面** `public/ota/{index.html,ota.css,ota.js}`：深色运维控制台风格（品牌绿 accent），设备卡（MAC/芯片/固件/IP/心跳/最近命令）+ 概览计数（在线/离线/待执行/成功/失败）+ 设备与 release 双下拉 + 下发 + 命令状态流转 + 5s 轮询；**mock/real 双模式**（mock 内置 §4.2 形状三台假设备，默认；real 打真实 `/api/devices`+`/api/registry`，选择持久化 `localStorage.ota.mode`，后端未实现时明确提示而非静默失败）。② **AI 可读**：`/ota.json` 机器描述符（tool_id=ota-console，接口清单/数据模型/不变量/mock-real 说明）+ 页内 meta 标签与 `#ai-data` 结构化摘要 + `/llms.txt` 新增 OTA 段 + 契约文档 `/docs/ota.md` 挂公网（`docs/ota.md` 补 §6.0 已实现说明）。③ **服务器路由** `server/app.js`：`serveStatic` 新增 `/OTA`→`/ota` 大小写归一（Linux 大小写敏感）+ 目录命中 `index.html`（`/ota/` 可访问），SPA 兜底不变；MIME 补 `.md`/`.txt`（此前 `/docs/*.md`、`/llms.txt` 以 octet-stream 下发，对 AI 直读不友好）。④ **验证**：新 `tests/static-pages.test.js` 8 用例（大小写/尾斜杠/资源/描述符/SPA 兜底/dist 缺失）+ 真实 dist 起服务 9 条路由 200 实测 + 页面逻辑 DOM 桩 30/30（含 pending→delivered→success 流转）+ build 全绿。**未做**：服务器端 `/api/devices*`、设备端 `components/ota`。
+- **2026-10-06（烧录进度在途：`tests/progress.test.ts` 1 红，待用户定）**：全量套件 156 用例 1 红，位于 `tests/progress.test.ts`「写入最后一段的过程中百分比能爬到 100%」——期望 `1072128`、实得 `1047552`。**根因在断言口径而非实现**：该用例把 `partWritten=500*1024`、`partTotal=1024*1024` 当作「正好一半」，但 `512000/1048576 = 48.83%`，`23552 + 2MB×0.4883 = 1047552` 才是正确的线性插值；若想表达「恰好一半」应写 `partTotal = 1000*1024`。属在途未提交改动（`src/core/progress.ts` / `tests/progress.test.ts`），与 `/OTA` 无关，未代为修改。
 - **2026-10-03（命名/载入体验/多文件）**：用户反馈三连修——① **命名**：release id 升为 YYYYMMDD-HHmmss-短哈希（时间到秒）；时间线日期改 YYYY-MM-DD HH:mm（含年）；导出 zip 文件名弃 epoch 时间戳改可读 …-YYYYMMDD-HHmmss.zip；② **载入反馈**：防重复点击（loading 守卫）、树行「载入中…」、固件页醒目进度条（n/N 段 · 字节）；③ **多文件载入**：串行改**并行下载**、进度实时计数、失败定位到具体文件名（「段 X 下载失败」）。另 flaky 再加固（双段事件等待+20s 上限，全量三连跑 141 全绿）。
 - **2026-10-03（A1–A3 打磨批次）**：① **A1 时间线高度自适应**——.tl__list 去掉写死 max-height:220px，高度随内容自然生长（外层滚动）；② **A2 bin 解析展示**——新 core/binInfo.ts（镜像头 0xE9：芯片/段数/入口/flash mode·freq·size、分区表 0x50AA/0x50EB、strings 提取、SHA-256；芯片 ID 映射抄 esptool-js targets）+ 烧录表格每行「ⓘ 固件详情」弹层（字段网格/分区表/字符串/校验和）；**+6 单测**（含 crc 向量级 sha256 标准向量）；③ **A3 GitHub Actions CI**（push/PR 跑 test+build）+ **flaky 修复**（watch 防抖用例改事件等待 5s 上限，双跑全绿）。141 测试 + build 全绿。
 - **2026-10-03（P4 可观测性）**：程序日志三入口落地——① 前端编排日志：信号复位**逐步打点**（[复位] 步骤 x/2…，超时单步告警继续），fetch 失败进 console（[api] …）；② 后端**访问日志**（[http] 方法 路径 状态 耗时，4xx/5xx 走 stderr）+ 错误堆栈带请求路径；③ TROUBLESHOOTING 新增「程序日志去哪看」对照表（页面日志 / F12 / journalctl）。本地冒烟验证 [http] GET /api/status 200 18ms；135 测试+build 全绿。

@@ -14,6 +14,7 @@
 | 验收标准（F-xx） | `docs/REQUIREMENTS.md` §2 |
 | 架构与状态机定义 | `docs/docs/DESIGN.md` §3–§4 |
 | v1.5 固件库设计 | `docs/FIRMWARE-REGISTRY.md` |
+| **OTA 三端契约 / 独立页** | `docs/ota.md`（契约）· `public/ota/`（页面）· `/OTA`（线上，描述符 `/ota.json`） |
 | 部署 / 运维 | `docs/DEPLOY.md`（含本机快速路径）+ `docs/docs/SERVER.md` |
 | 为什么选这条路线 | `docs/research/esp32-web-flash/REPORT.md` |
 | 历史路线/选型存档 | `docs/archive/README.md`（EXECUTION-PLAN 等） |
@@ -48,7 +49,8 @@ src/glue/     esptool-js 粘合层 — 唯一允许 import esptool-js 的地方
 src/env/      环境自检
 src/api/      外部数据客户端（registry=v1.5 自含服务；dev 中间件 buildArtifacts 已移除）
 src/components/  Vue UI（ide/=五区骨架组件：活动栏/侧栏树/标签/底部面板/状态栏）
-server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发布/静态托管
+public/       静态资源（build 拷入 dist）：ota/=OTA 独立页 · docs/=公网文档 · llms.txt · ota.json
+server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发布/静态托管（serveStatic 含 /OTA 归一）
 tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch 等）
 docs/          现行文档（USER-GUIDE/DESIGN/REQUIREMENTS/DEPLOY/SERVER/PUBLISH/TROUBLESHOOTING/FIRMWARE-REGISTRY）
 docs/archive/  开发过程历史产出（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV 等）

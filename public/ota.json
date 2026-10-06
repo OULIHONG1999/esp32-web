@@ -1,0 +1,104 @@
+{
+  "tool_id": "ota-console",
+  "name": "OTA Console",
+  "name_zh": "OTA 设备下发台",
+  "version": "0.1.0",
+  "status": "page-only (device-side & server-side OTA endpoints not implemented yet)",
+  "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). Frontend is developed first against a mock, per the contract in /docs/ota.md.",
+  "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed）。页面端先行开发，按 /docs/ota.md 的接口契约，可先用内置 mock 数据。",
+  "canonical_path": "/OTA",
+  "canonical_path_aliases": ["/ota", "/ota/", "/OTA/"],
+  "canonical_url_hint": "Share the full base URL including the path /OTA (host is the shared firmware-server)",
+  "entrypoints": {
+    "page": "/OTA",
+    "descriptor_json": "/ota.json",
+    "contract_doc": "/docs/ota.md",
+    "agent_index": "/llms.txt",
+    "home": "/"
+  },
+  "read_order_for_ai": [
+    "/ota.json",
+    "/docs/ota.md",
+    "/OTA"
+  ],
+  "read_order_for_human": [
+    "/OTA",
+    "/docs/ota.md"
+  ],
+  "apis": {
+    "list_devices": {
+      "method": "GET",
+      "path": "/api/devices",
+      "auth": "none (read)",
+      "returns": "{ devices: Device[] }",
+      "implemented": false
+    },
+    "list_releases": {
+      "method": "GET",
+      "path": "/api/registry",
+      "auth": "none (read)",
+      "returns": "{ _meta, projects: { [id]: Project } }",
+      "implemented": true,
+      "note": "Existing endpoint. Page flattens projects/*/variants/*/releases/* into release options."
+    },
+    "dispatch_command": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/commands",
+      "auth": "Bearer token (write)",
+      "body": { "type": "ota", "releaseId": "string" },
+      "returns": "{ command: { id, deviceId, type, releaseId, state, createdAt } }",
+      "implemented": false
+    },
+    "device_report": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/report",
+      "auth": "device-side",
+      "implemented": false,
+      "note": "Device responsibility (ESP32). Not used by this page."
+    },
+    "command_result": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/commands/{commandId}/result",
+      "auth": "device-side",
+      "implemented": false,
+      "note": "Device responsibility (ESP32). Not used by this page."
+    }
+  },
+  "data_model": {
+    "Device": {
+      "deviceId": "base MAC, lowercase hex without colons, e.g. 3485a1b2c3d4",
+      "chip": "string, e.g. ESP32-S3",
+      "firmwareVersion": "string, e.g. v0.6.0-3-g64de242",
+      "appSha256": "string, app-partition sha256 (version gate criterion)",
+      "sdkVersion": "string",
+      "ip": "string",
+      "online": "boolean, computed by server (now - lastSeen > 45s => offline)",
+      "lastSeen": "ISO8601 UTC",
+      "createdAt": "ISO8601 UTC",
+      "lastCommand": "Command | null"
+    },
+    "Command": {
+      "id": "string, e.g. cmd_2f3c9a",
+      "type": "ota",
+      "releaseId": "string",
+      "state": "pending | delivered | success | failed",
+      "createdAt": "ISO8601 UTC"
+    }
+  },
+  "invariants": [
+    "Transport is HTTP polling (pull), not push/MQTT",
+    "deviceId is the base MAC in lowercase hex without separators",
+    "online/offline is decided by the server via lastSeen, never recomputed in the page",
+    "At most one unresolved command per device",
+    "Firmware download reuses the existing registry parts endpoint"
+  ],
+  "page_modes": {
+    "mock": "default; built-in fake devices, no backend required",
+    "real": "calls live /api/devices and /api/registry; toggle in the top bar (persisted in localStorage key ota.mode)"
+  },
+  "not_implemented": [
+    "Device side: ESP32 components/ota (report / poll / download / OTA / ack)",
+    "Server side: /api/devices/* endpoints (devices + commands store)"
+  ],
+  "open_questions_ref": "/docs/ota.md §7"
+}

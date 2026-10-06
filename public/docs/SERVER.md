@@ -12,7 +12,8 @@
         ▼                                             ▼
   跨网设备 AI ──http://IP（只读学习）──▶ nginx（宝塔） ──proxy──▶ node firmware-server :8787
   本地浏览器 ──https://IP:443（自签）──▶                │            （systemd 常驻）
-  本地浏览器 ──SSE /api/registry/stream ◀───────────────┘            └─▶ server-data/（磁盘数据）
+  本地浏览器 ──SSE /api/registry/stream ◀───────────────┤            └─▶ server-data/（磁盘数据）
+                                                     └─proxy──▶ python font-cloud :8788（字体子集化，共存）
 ```
 
 ## 2. 服务器环境
@@ -34,7 +35,9 @@
 | `https://firmware.example.com/` | 443 TLS | 浏览器主入口（Web Serial 需安全上下文） | **自签** `CN=firmware.example.com`（`/etc/ssl/certs/firmware-server.crt`），浏览器信任一次 |
 | `http://firmware.example.com/` | 80 明文 | **AI/爬虫只读通道**（文档/源码/registry） | 无——秘密勿走此通道 |
 | `/llms.txt` | 同上 | AI 速查（API/数据结构/认证/文档索引） | 公开 |
-| `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER） | 公开 |
+| `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
+| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；mock/real 双模式） | 公开 |
+| `/ota.json` | 同上 | OTA 页机器描述符（AI 入口，tool_id=ota-console） | 公开 |
 | `/tools/publish/*.js` | 同上 | 发布 CLI 源码下载（4 文件，零依赖） | 公开 |
 | `/api/registry*` 等 | 同上 | 读接口公开；写接口需 Bearer | 见 §4 |
 
@@ -81,6 +84,22 @@ node server/rebuild.js
 - SSE 经 nginx 实测无缓冲（`X-Accel-Buffering: no` 生效）
 - 写接口 401 鉴权实测生效
 
+## 5.5 共存服务 font-cloud（2026-10-04 起）
+
+| 项 | 值 |
+|---|---|
+| 用途 | 字体云端子集化（动态文本缺字 → 子集 TTF），与 firmware-server 同机共存 |
+| 服务 | systemd `font-cloud-server`（`/opt/font-cloud-server`，Python3.10 venv + fontTools） |
+| 端口 | **8788**（仅本机 127.0.0.1；由 nginx 分流对外） |
+| 部署 | `font-cloud-server/deploy/deploy.ps1`（tar.gz → scp → install-on-server.sh） |
+| 入口 | `/font-cloud`（工具指针）· `/font-bench/`（测试台）· `/api/subset` 等 |
+| Agent | `/llms-font-cloud.txt` · `/font-cloud.json` · `/docs/protocol.md` · `/docs/architecture.md` |
+| nginx | `firmware-server.conf` 内插入分流块（备份 `.conf.bak-before-font-cloud`） |
+| 不冲突 | firmware 保留 `/llms.txt`、`/docs/*.md`（其一）、`/api/registry|status|token|publish` |
+
+运维：`systemctl status font-cloud-server` · `journalctl -u font-cloud-server -f` ·
+`systemctl show font-cloud-server -p ExecMainStartTimestamp --value`（部署后必查）
+
 ## 6. 已知限制与尾巴
 
 | 项 | 状态 |
@@ -98,4 +117,5 @@ node server/rebuild.js
 - 发布操作：`/docs/PUBLISH.md`（CLI/裸 HTTP/config/token）
 - AI 速查：`/llms.txt`
 - 设计：`/docs/FIRMWARE-REGISTRY.md` · 验收：`/docs/REQUIREMENTS.md`
+- OTA 独立页：`/OTA`（=`/ota`、`/ota/`）· 描述符 `/ota.json` · 契约 `/docs/ota.md`（设备端与服务器端 `/api/devices*` 未实现）
 - 本地进度与问题清单：仓库 `PROGRESS.md`（不挂公网）

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OTA Console — 设备 OTA 下发台</title>
+
+<!-- 机器可读入口：AI 抓这一页就能定位契约与文档 -->
+<meta name="description" content="ESP32 OTA 设备管理台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态。API 契约见 /docs/ota.md，机器描述符见 /ota.json。" />
+<meta name="ota:canonical-path" content="/OTA" />
+<meta name="ota:agent-descriptor" content="/ota.json" />
+<meta name="ota:api-contract-doc" content="/docs/ota.md" />
+<meta name="ota:agent-index" content="/llms.txt" />
+<link rel="alternate" type="application/json" href="/ota.json" title="OTA tool descriptor" />
+<link rel="stylesheet" href="/ota/ota.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__in">
+    <a class="brand" href="/OTA">
+      <span class="brand__sq" aria-hidden="true"></span>
+      <span>OTA Console</span>
+      <code class="brand__path">/OTA</code>
+    </a>
+    <nav class="topbar__nav">
+      <a href="#devices">设备</a>
+      <a href="#dispatch">下发</a>
+      <a href="#ai">AI 速读</a>
+      <a href="/docs/ota.md">文档</a>
+      <a href="/ota.json">ota.json</a>
+    </nav>
+    <div class="topbar__ops">
+      <label class="switch" title="mock 用内置假设备；real 打真实 /api/devices">
+        <input type="checkbox" id="modeToggle" />
+        <span>mock</span>
+        <span class="switch__track" aria-hidden="true"><i></i></span>
+        <span>real</span>
+      </label>
+      <button class="iconbtn" id="refreshBtn" title="立即刷新">↻</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── AI 速读：给智能体的一屏摘要 ───────────────────────── -->
+  <section class="panel panel--ai" id="ai">
+    <div class="panel__hd">
+      <h2>AI 速读 · 本页是什么</h2>
+      <span class="hint">机器可读描述符 <a href="/ota.json"><code>/ota.json</code></a></span>
+    </div>
+    <p class="lead">
+      本页是 <strong>OTA 设备下发台</strong>：从云端看到当前在线/曾在线设备，选中设备 + 选中固件版本，
+      下发一条 OTA 命令；设备在下次心跳（<code>report</code>）时把命令取走并自升级。
+      设备端尚未实现，本页可先用 <strong>mock 数据</strong>开发验证（默认即 mock）。
+    </p>
+    <div class="ai-grid">
+      <div class="ai-col">
+        <h3>三个接口（契约详见 <a href="/docs/ota.md">/docs/ota.md</a> §4）</h3>
+        <ul class="ai-api">
+          <li><code>GET  /api/devices</code><span>设备列表（含 online / lastCommand）</span></li>
+          <li><code>GET  /api/registry</code><span>固件版本列表（下拉选项）</span></li>
+          <li><code>POST /api/devices/{deviceId}/commands</code><span>下发 OTA 命令</span></li>
+          <li class="dim"><code>POST /api/devices/{deviceId}/report</code><span>设备上报（设备端职责）</span></li>
+          <li class="dim"><code>POST /api/devices/{deviceId}/commands/{id}/result</code><span>设备回执（设备端职责）</span></li>
+        </ul>
+      </div>
+      <div class="ai-col">
+        <h3>命名与约定</h3>
+        <dl class="ai-kv">
+          <div><dt>deviceId</dt><dd>base MAC，去冒号小写十六进制，如 <code>3485a1b2c3d4</code></dd></div>
+          <div><dt>命令状态</dt><dd><span class="chip chip--pending">pending</span> → <span class="chip chip--delivered">delivered</span> → <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span></dd></div>
+          <div><dt>在线判定</dt><dd>服务器按 <code>now - lastSeen &gt; 45s</code> 判离线，页面不自行计算</dd></div>
+          <div><dt>版本依据</dt><dd>app 段 <code>sha256</code>（复用 registry）</dd></div>
+          <div><dt>通信模型</dt><dd>HTTP 轮询 pull，非推送</dd></div>
+        </dl>
+      </div>
+    </div>
+    <p class="foot-note">
+      推荐抓取顺序：<code>/ota.json</code> → <code>/docs/ota.md</code> → 本页。
+      本页地址以 <code>/OTA</code> 结尾（大小写均可，等价 <code>/ota/</code>）。
+    </p>
+  </section>
+
+  <!-- ── 概览胶囊 ──────────────────────────────────────────── -->
+  <section class="pills" id="pills" aria-label="设备概览">
+    <div class="pill"><span class="dot dot--on"></span><span class="m">在线</span><b id="cOnline">0</b></div>
+    <div class="pill"><span class="dot dot--off"></span><span class="m">离线</span><b id="cOffline">0</b></div>
+    <div class="pill"><span class="dot dot--warn"></span><span class="m">待执行</span><b id="cPending">0</b></div>
+    <div class="pill"><span class="dot dot--on"></span><span class="m">成功</span><b id="cSuccess">0</b></div>
+    <div class="pill"><span class="dot dot--err"></span><span class="m">失败</span><b id="cFailed">0</b></div>
+    <div class="pill pill--src"><span class="m">数据源</span><b id="srcLabel">mock</b></div>
+  </section>
+
+  <!-- ── 设备清单 ──────────────────────────────────────────── -->
+  <section id="devices">
+    <div class="eyebrow">
+      <span>设备清单</span>
+      <span class="eyebrow__right">
+        轮询 <b id="pollLabel">5s</b> · 上次刷新 <b id="lastRefresh">—</b>
+      </span>
+    </div>
+    <div class="devices" id="deviceGrid"></div>
+    <p class="empty" id="deviceEmpty" hidden>暂无设备。切到 mock 可看样例；或等设备端实现后上报。</p>
+  </section>
+
+  <!-- ── 下发面板 ──────────────────────────────────────────── -->
+  <section class="panel" id="dispatch">
+    <div class="panel__hd">
+      <h2>下发 OTA 命令</h2>
+      <span class="hint">POST /api/devices/{deviceId}/commands</span>
+    </div>
+    <div class="dispatch">
+      <div class="field">
+        <label for="dDevice">目标设备</label>
+        <select id="dDevice"><option value="">— 先在上方选一台设备 —</option></select>
+      </div>
+      <div class="field">
+        <label for="dRelease">目标版本（来自 /api/registry）</label>
+        <select id="dRelease"><option value="">— 选择 release —</option></select>
+      </div>
+      <div class="field field--btn">
+        <label>&nbsp;</label>
+        <button class="btn btn--p" id="sendBtn">⚡ 下发 OTA</button>
+      </div>
+    </div>
+    <div class="resolved" id="resolved" hidden></div>
+    <div class="notice" id="notice" hidden></div>
+    <p class="foot-note">
+      命令生命周期：<span class="chip chip--pending">pending</span> 已入队 →
+      <span class="chip chip--delivered">delivered</span> 设备已取走 →
+      <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span> 回执。
+      每个设备至多一条未决命令（覆盖 / 报冲突待定，见 <a href="/docs/ota.md">ota.md</a> §7）。
+    </p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span>OTA Console · 独立页（非主 SPA）· 服务器 firmware-server</span>
+  <span>
+    <a href="/ota.json">/ota.json</a> ·
+    <a href="/docs/ota.md">/docs/ota.md</a> ·
+    <a href="/llms.txt">/llms.txt</a> ·
+    <a href="/">返回主站</a>
+  </span>
+</footer>
+
+<!-- 给 AI 的结构化摘要（人不可见，机器可读） -->
+<script type="application/json" id="ai-data">
+{
+  "page": "OTA Console",
+  "canonical_path": "/OTA",
+  "aliases": ["/ota", "/ota/", "/OTA/"],
+  "purpose": "下发并跟踪 ESP32 设备 OTA 命令（页面端先行开发，设备端未实现）",
+  "descriptor": "/ota.json",
+  "contract_doc": "/docs/ota.md",
+  "agent_index": "/llms.txt",
+  "apis": {
+    "list_devices": { "method": "GET", "path": "/api/devices" },
+    "list_releases": { "method": "GET", "path": "/api/registry" },
+    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "body": { "type": "ota", "releaseId": "string" } }
+  },
+  "device_id": "base MAC lower-hex without colons, e.g. 3485a1b2c3d4",
+  "command_states": ["pending", "delivered", "success", "failed"],
+  "online_rule": "now - lastSeen > 45s => offline (server-side)",
+  "transport": "HTTP polling (pull)",
+  "modes": { "mock": "built-in fake devices, no backend needed (default)", "real": "calls live /api/devices" },
+  "not_implemented": ["device-side component (ESP32 components/ota)", "server-side /api/devices endpoints"]
+}
+</script>
+
+<script src="/ota/ota.js"></script>
+</body>
+</html>
