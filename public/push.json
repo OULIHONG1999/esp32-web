@@ -51,7 +51,7 @@
     "forceChip": { "note": "allow a chip-family mismatch (default: refuse; pushing the wrong chip can brick a device)" },
     "allowUnknown": { "note": "skip the local 'device must exist in GET /api/devices' gate and let the server decide (a device that never reported cannot be online, so expect exit 9)" },
     "skipIfSame": { "default": true, "note": "--no-skip-if-same forces a re-flash when the device is already on the target release" },
-    "promote": { "note": "--build produces a snapshot; --promote turns it into an official release and moves latest" },
+    "promote": { "note": "--build produces a snapshot; --promote changes its type to 'release' (and attaches the note). `variant.latest` already points at it from the moment it was published — promote does NOT move latest" },
     "status": { "note": "read-only recheck: prints the state and the full process chain, zero side effects; exit code matches what --wait would have concluded (5 = still unresolved)" },
     "cancel": { "note": "cancel the device's unresolved command (the server's `unresolved` field decides which one, not `lastCommand`)" },
     "reason": { "note": "with --cancel only; stored as cancelReason" },

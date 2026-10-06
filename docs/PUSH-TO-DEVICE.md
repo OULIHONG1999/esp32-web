@@ -82,7 +82,7 @@ B 的输出（阶段行来自 `command.trail`，与页面「OTA 过程」面板�
 | `--list` | — | 只打印设备清单（id / 芯片 / 固件 / 在线 / 最后心跳 / 最近命令）后退出；`--to <mac>` 时只列那一台 |
 | `--status` | — | **只读复查**：打印该设备最近命令的状态与**完整过程链**，不下发、零副作用（`--wait` 超时或被 Ctrl+C 之后用它看结果）。**退出码与 `--wait` 的结论一致**（未回执 → 5），只是立即返回 |
 | `--cancel` | — | **撤销设备上的未决命令**（推错了握停）；配合 `--reason "<说明>"` 留痕；语义与退出码见 §3.4。**不能与 `--dry-run` 一起用**（要看会撤哪条用 `--status`） |
-| `--promote` | off | `--build` 造出的快照**顺手晋升为正式版**（默认不晋升，保持快照） |
+| `--promote` | off | `--build` 造出的快照**顺手晋升为正式版**（默认不晋升，保持快照；`latest` 在发布时就已指向它，promote 不改 latest，只改 type + 写 note） |
 | `--json` | off | 机器可读输出（§2.4） |
 | `--dry-run` | off | 只打印**将会发生什么**，不发任何请求（因此闸门未校验、设备清单也没读——输出里会写明） |
 | `--config` / `--server` | 同 `once` | 复用 `publish.config.json` 与其中的 `${FIRMWARE_PUBLISH_TOKEN}` |
@@ -326,7 +326,7 @@ curl -s http://<host>/api/devices                     # 3) 现在有哪些设备
 | 网络/服务器错误 | 6 | 连不上、5xx | 两步可分离：重跑时 `--build` 会因增量上传（按 sha 复用）秒回，不会重传固件 |
 | **撤销后设备仍完成了** | 11 | 撤销时命令已被取走，设备本地照旧写完并回执 | 服务器**不覆盖** `cancelled`，回执记进 `lateResult`；页面标注"设备已完成（撤销来晚了）"——要回到旧版本就再推一条 |
 | **撤销时命令已结束** | 12 | 想停但已经跑完/被顶替 | 无需操作；`--status` 看最终状态 |
-| `--promote` 之后 latest 变了 | — | 快照被晋升为正式版 | 这是显式要求；不想要就用 `promote`/回滚接口切回（页面时间线也能操作） |
+| `--promote` 之后 latest 没变 | — | 发布那一刻 `variant.latest` 就指向了新 release（不管 snapshot 还是 release） | promote **只把快照的 type 改成正式版**并写 note，不改 latest。要 latest 指向别的版本用「回滚/切换 latest」接口 |
 | 超时 | 5 | 下发时在线、之后掉了/正忙/断电 | `--json` 看 `trail` 停在哪一步；页面 `/OTA` 有同款过程视图 |
 | 设备回执 failed | 1 | 下载校验失败、写入失败等 | 看输出里的 `detail`（设备给的原文）；再跑一次通常能区分偶发/必然 |
 
@@ -336,7 +336,7 @@ curl -s http://<host>/api/devices                     # 3) 现在有哪些设备
 
 - [x] `push --list` 列出设备（id/芯片/固件/在线/最后心跳/最近命令）；`--list --to <陌生 MAC>` → exit 4（e2e）
 - [x] `--release` 推已有版本：下发 → 取走 → 各阶段过程行 → 回执 → exit 0（e2e，断言 `过程：下载固件 100%`、`✓ success 总耗时`）
-- [x] `--build` 发布 + 推送一条龙，输出含 release id 与上传段数；`--promote` 后 latest 指向新 release（e2e）
+- [x] `--build` 发布 + 推送一条龙，输出含 release id 与上传段数；默认产出 **snapshot**（`--promote` 才把 type 转成 release；`latest` 在发布时就已指向它）（e2e）
 - [x] MAC 打错 → exit 4，且**没有**在服务器上建出幽灵设备（前后对比 `GET /api/devices` 数量一致）（e2e）
 - [x] 芯片不匹配 → exit 7 且未下发；`--force-chip` 才放行（e2e）
 - [x] 设备已在目标版本 → exit 8 且未下发；`--no-skip-if-same` 可照推（e2e）
