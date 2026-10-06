@@ -123,7 +123,11 @@
       <div class="field">
         <label for="dToken">Token（下发是写操作，需要它）<span class="tokstate" id="tokenState"></span></label>
         <input id="dToken" type="password" autocomplete="off" spellcheck="false"
-               placeholder="主 token 或 wk_ 工作 token —— 只存本机 localStorage，不上传" />
+               placeholder="粘贴一个 wk_ 工作 token 或主 token" />
+        <p class="hintline">
+          只下发需要它，<strong>设一次就长期有效</strong>——与主站共用同一个 <code>fw.token</code>，所以在主站 🔑 设过之后这里会自动就有。<br />
+          要新 token：打开 <a href="/">主站首页</a> → 右上角 🔑 → 生成（需输入主 token）；或直接粘贴别人给你的 <code>wk_</code> 工作 token。
+        </p>
       </div>
       <div class="field field--check">
         <label>&nbsp;</label>

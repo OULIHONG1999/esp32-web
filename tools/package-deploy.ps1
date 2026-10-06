@@ -30,6 +30,19 @@ if (-not $PanelHost) { $PanelHost = $ServerHost }
 $dist = Join-Path $root 'dist'
 if (-not (Test-Path $dist)) { throw 'dist/ 不存在——先 npm run build' }
 
+# 新鲜度自检：dist/index.html 必须晚于 src/ 与 public/ 的最新改动。
+# 否则说明 build 没跑（或跑失败被吞了），打出来的包是旧产物——
+# 曾因此「部署成功、改动却没生效」（改了 public/ota/index.html，包里还是上一版）。
+$distIndex = Get-Item (Join-Path $dist 'index.html') -ErrorAction SilentlyContinue
+$newestSrc = Get-ChildItem -Path (Join-Path $root 'src'), (Join-Path $root 'public') -Recurse -File -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($distIndex -and $newestSrc -and $newestSrc.LastWriteTime -gt $distIndex.LastWriteTime) {
+  throw ("dist/ 比源码旧，拒绝打包（否则会发出旧产物）：`n" +
+    "  最新源码 $($newestSrc.FullName)  $($newestSrc.LastWriteTime)`n" +
+    "  dist/index.html  $($distIndex.LastWriteTime)`n" +
+    "  → 先跑 npm run build（并确认它真的成功，vue-tsc 失败会静默跳过 vite build）")
+}
+
 $map = @{ 'firmware.example.com' = $ServerHost; 'panel.example.com' = $PanelHost }
 Get-ChildItem -Path $dist -Recurse -Include *.html, *.txt, *.js, *.css, *.json, *.md | ForEach-Object {
   $c = [IO.File]::ReadAllText($_.FullName)
