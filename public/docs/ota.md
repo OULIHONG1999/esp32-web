@@ -236,7 +236,7 @@
 | 机器描述符 | `/ota.json`（tool_id=`ota-console`，含接口清单 / 数据模型 / 鉴权说明） |
 | 契约文档 | `/docs/ota.md`（本文件，公网可读） |
 | 数据源 | **只有实时接口**（页面内无假数据）：每 5s 拉 `GET /api/devices` + `GET /api/registry`；取数失败时胶囊显示「连接失败」并给出原因 |
-| 鉴权 | 下发是写操作：页面有 **Token 输入框**（存 `localStorage.fw.token`，与主站共用同一键、不上传），请求带 `Authorization: Bearer`；无 token 时前置拦截并提示。**report / 回执免鉴权**，设备侧无需 token |
+| 鉴权 | 下发是写操作：页面有 **Token 输入框**（存 `localStorage.fw.token`，与主站共用同一键、不上传），请求带 `Authorization: Bearer`；无 token 时前置拦截并提示。**免记口令**：设置链接 `https://<host>/OTA#token=<token>` 打开即写入本机并抹掉地址栏（片段不上行 → 不进日志/Referer），页面可「🔗 复制设置链接」存书签，换浏览器/换电脑打开书签即完成配置；旧的 `?settoken=` 仍兼容但会进日志，不用。**report / 回执免鉴权**，设备侧无需 token |
 | 失败提示 | 按状态码给「下一步做什么」：401→填 token、409→勾「顶替未决命令(force)」重试、404→release 不存在、其他→透传服务端文案 |
 | 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发（含 force 顶替）· 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
 | 未实现 | **无**——§4 四个端点均已实现并实测（见 §6.2）；设备端固件由另一台电脑开发，入口见 `docs/DEVICE-OTA.md` |

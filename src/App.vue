@@ -12,6 +12,7 @@ import EditorTabs, { type WorkTab } from './components/ide/EditorTabs.vue'
 import BottomPanel, { type BottomTab } from './components/ide/BottomPanel.vue'
 import StatusBar from './components/ide/StatusBar.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
+import { buildTokenLink, parseTokenLink } from './core/tokenLink'
 import { primeAudio } from './glue/audioFeedback'
 import { useSession } from './composables/useSession'
 import { useFirmwareWorkspace } from './composables/useFirmwareWorkspace'
@@ -308,23 +309,23 @@ onUnmounted(() => {
 // ---- 发布 token：生成工作 token（主 token 换）或手动设置本机 ----
 const hasToken = ref(!!getStoredToken())
 
-/** P3 深链注入：`?settoken=wk_xxx` 打开即写入本机，随后把参数从地址栏抹掉 */
+/**
+ * 设置链接注入：`#token=wk_xxx`（推荐形态，片段不上行、不进服务器日志）打开即写入本机，
+ * 随后把 token 从地址栏抹掉；旧的 `?settoken=` 形态仍兼容。解析逻辑见 core/tokenLink.ts。
+ */
 {
-  const q = new URLSearchParams(location.search)
-  const incoming = (q.get('settoken') ?? '').trim()
+  const { token: incoming, cleanHref } = parseTokenLink(location.href)
   if (incoming) {
     setStoredToken(incoming)
     hasToken.value = true
-    q.delete('settoken')
-    const clean = location.pathname + (q.toString() ? `?${q}` : '') + location.hash
-    history.replaceState(null, '', clean)
-    window.alert('✅ 已从链接注入发布 token——本机现在可以直接发布 / 晋升等操作。')
+    history.replaceState(null, '', cleanHref)
+    window.alert('✅ 已从设置链接写入 token——本机记住了，以后不用再粘贴。')
   }
 }
 
-/** 一键注入链接：发到目标浏览器打开即完成配置（地址栏参数用后自动抹除） */
+/** 一键注入链接：发到目标浏览器打开即完成配置（token 在片段里，用后地址栏自动抹除） */
 function buildTokenDeepLink(token: string): string {
-  return `${location.origin}${location.pathname}?settoken=${encodeURIComponent(token)}`
+  return buildTokenLink(location.href, token)
 }
 
 async function copyText(text: string): Promise<boolean> {

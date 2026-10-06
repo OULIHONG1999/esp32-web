@@ -3,7 +3,7 @@
   "name": "OTA Console",
   "name_zh": "OTA 设备下发台",
   "version": "0.1.0",
-  "status": "server endpoints + page implemented and live; device-side firmware not implemented yet (developed on another machine)",
+  "status": "server endpoints + page implemented and live; device side (developed on another machine) already completed a real OTA round-trip against this server",
   "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). All data comes from the live API — no mock data. Dispatch is a write operation and requires a Bearer token.",
   "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed）。数据全部来自服务器实时接口，页面内无假数据；下发是写操作，需要 Bearer token。",
   "canonical_path": "/OTA",
@@ -30,8 +30,8 @@
       "method": "GET",
       "path": "/api/devices",
       "auth": "none (read)",
-      "returns": "{ devices: Device[] }",
-      "implemented": false
+      "returns": "{ _meta: { service, docs, onlineTimeoutMs }, devices: Device[] }",
+      "implemented": true
     },
     "list_releases": {
       "method": "GET",
@@ -58,16 +58,16 @@
     "device_report": {
       "method": "POST",
       "path": "/api/devices/{deviceId}/report",
-      "auth": "device-side",
-      "implemented": false,
-      "note": "Device responsibility (ESP32). Not used by this page."
+      "auth": "device-side (no Bearer token by design — the MAC is the identity)",
+      "implemented": true,
+      "note": "Called by the device, not by this page. Live: devices appear in GET /api/devices after their first report."
     },
     "command_result": {
       "method": "POST",
       "path": "/api/devices/{deviceId}/commands/{commandId}/result",
-      "auth": "device-side",
-      "implemented": false,
-      "note": "Device responsibility (ESP32). Not used by this page."
+      "auth": "device-side (no Bearer token by design)",
+      "implemented": true,
+      "note": "Called by the device, not by this page. Live: it is what turns pending/delivered into success/failed with a detail string."
     }
   },
   "data_model": {
@@ -87,8 +87,11 @@
       "id": "string, e.g. cmd_2f3c9a",
       "type": "ota",
       "releaseId": "string",
-      "state": "pending | delivered | success | failed",
-      "createdAt": "ISO8601 UTC"
+      "state": "pending | delivered | success | failed | superseded",
+      "deliveryCount": "number — how many times the device picked this command up (redelivery guard)",
+      "createdAt": "ISO8601 UTC",
+      "finishedAt": "ISO8601 UTC | null",
+      "detail": "string | null — device-reported detail, e.g. 'OTA ok, rebooted to <releaseId>'"
     }
   },
   "invariants": [
@@ -108,10 +111,17 @@
     "dispatch_requires_token": true,
     "token_storage": "localStorage key fw.token — shared with the main app, never uploaded",
     "how_to_get_a_token": "main app top-right key button generates a wk_ work token (needs the master token), or ask the operator",
+    "settings_link": {
+      "format": "https://<host>/OTA#token=<token>",
+      "behaviour": "opening the link writes the token into localStorage (same fw.token key), strips it from the address bar, and shows a confirmation",
+      "why_fragment": "the URL fragment is never sent to the server, so the token stays out of access logs, Referer and proxies",
+      "legacy_format": "https://<host>/?settoken=<token> — still parsed for compatibility, but it is sent to the server, so prefer the fragment form",
+      "human_use": "the page has a copy-settings-link button — bookmark it once, then any browser/computer can be configured by opening the bookmark"
+    },
     "report_and_result_are_unauthenticated": true
   },
   "not_implemented": [
-    "Device side: ESP32 firmware (developed on another machine) — see /docs/DEVICE-OTA.md"
+    "Nothing on the server/page side. Device-side firmware lives in another repository (see /docs/DEVICE-OTA.md) and has already performed a real OTA against this server."
   ],
   "open_questions_ref": "/docs/ota.md §7"
 }

@@ -525,6 +525,9 @@ curl http://<SERVER>/api/devices
 curl http://<SERVER>/api/registry
 
 # 3) 下发命令（需要 token；向运维者索取，或用页面右上角 🔑 生成一个工作 token）
+#    不想记 token：让运维者给一个设置链接 https://<host>/OTA#token=<token>，
+#    打开即写入本机浏览器（片段不上行，不进服务器日志），或把 /OTA 页的
+#    「🔗 复制设置链接」存成书签，换电脑时打开书签即可。
 curl -X POST http://<SERVER>/api/devices/3485a1b2c3d4/commands \
   -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
   -d '{"type":"ota","releaseId":"20261005-1609-278773"}'
@@ -536,7 +539,7 @@ node tools/device-sim/index.js --server http://<SERVER> --id 3485a1b2c3d4 --once
 curl http://<SERVER>/api/devices     # lastCommand.state 应为 success，firmwareVersion 已更新
 ```
 
-**或者更省事**：直接在浏览器打开 `http://<SERVER>/OTA`，页面点「选择并下发」，不用敲 curl。页面数据源切到 **real** 模式即可看到真设备。
+**或者更省事**：直接在浏览器打开 `http://<SERVER>/OTA`，页面点「选择并下发」，不用敲 curl（页面读的是实时设备列表，需要先在上方填 Token）。
 
 ### 9.4 模拟器会替你验证什么
 

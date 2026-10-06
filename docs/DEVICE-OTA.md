@@ -525,6 +525,9 @@ curl http://<SERVER>/api/devices
 curl http://<SERVER>/api/registry
 
 # 3) 下发命令（需要 token；向运维者索取，或用页面右上角 🔑 生成一个工作 token）
+#    不想记 token：让运维者给一个设置链接 https://<host>/OTA#token=<token>，
+#    打开即写入本机浏览器（片段不上行，不进服务器日志），或把 /OTA 页的
+#    「🔗 复制设置链接」存成书签，换电脑时打开书签即可。
 curl -X POST http://<SERVER>/api/devices/3485a1b2c3d4/commands \
   -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
   -d '{"type":"ota","releaseId":"20261005-1609-278773"}'

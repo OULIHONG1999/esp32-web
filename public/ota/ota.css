@@ -229,6 +229,10 @@ h2, h3 { margin: 0; }
 .tokstate { margin-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .tokstate--ok { color: var(--accent); }
 .tokstate--warn { color: var(--warn); }
+/* Token 输入 + 复制设置链接（同一行，窄屏自动换行） */
+.tokrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tokrow input { flex: 1 1 220px; min-width: 0; width: auto; }
+.tokrow .btn { flex: 0 0 auto; white-space: nowrap; }
 .hintline {
   margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--faint);
 }

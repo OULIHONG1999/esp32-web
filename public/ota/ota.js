@@ -15,7 +15,7 @@
   var TOKEN_KEY = 'fw.token'
 
   // ── 契约常量 ──────────────────────────────────────────────
-  var STATE_LABEL = { pending: '待执行', delivered: '已投递', success: '成功', failed: '失败' }
+  var STATE_LABEL = { pending: '待执行', delivered: '已投递', success: '成功', failed: '失败', superseded: '已顶替' }
 
   // ── DOM ──────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id) }
@@ -27,6 +27,7 @@
     pollLabel: $('pollLabel'), lastRefresh: $('lastRefresh'),
     dDevice: $('dDevice'), dRelease: $('dRelease'), sendBtn: $('sendBtn'),
     dToken: $('dToken'), dForce: $('dForce'), tokenState: $('tokenState'),
+    copyLinkBtn: $('copyLinkBtn'),
     resolved: $('resolved'), notice: $('notice')
   }
 
@@ -39,6 +40,62 @@
     timer: null,
     lastError: '',
     hadError: false
+  }
+
+  // ══ 设置链接 / 剪贴板 ═══════════════════════════════════
+  /**
+   * 设置链接：`/OTA#token=wk_xxx` 打开即写入本机。
+   * 用片段（`#`）而不是查询串：浏览器不把片段发给服务器，所以不会进 nginx 日志。
+   * 兼容旧形态 `?settoken=`。返回本次从链接读到的 token（没有则空串）。
+   */
+  function consumeTokenFromUrl() {
+    var fragText = (location.hash || '').replace(/^#/, '')
+    var frag = new URLSearchParams(fragText)
+    var query = new URLSearchParams(location.search)
+    var token = (frag.get('token') || '').trim() || (query.get('settoken') || '').trim()
+    if (!token) return ''
+    try { localStorage.setItem(TOKEN_KEY, token) } catch (e) { /* 隐私模式忽略 */ }
+    frag.delete('token')
+    query.delete('settoken')
+    try {
+      var hash = frag.toString() ? '#' + frag.toString() : ''
+      var search = query.toString() ? '?' + query.toString() : ''
+      history.replaceState(null, '', location.pathname + search + hash)
+    } catch (e) { /* ignore */ }
+    return token
+  }
+
+  /** 复制到剪贴板（非安全上下文没有 clipboard API → 退回 execCommand） */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(
+        function () { return true },
+        function () { return legacyCopy(text) }
+      )
+    }
+    return Promise.resolve(legacyCopy(text))
+  }
+
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      var ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch (e) {
+      return false
+    }
+  }
+
+  /** 本页的设置链接（同源同路径 + 片段） */
+  function settingsLink() {
+    return location.origin + location.pathname + '#token=' + encodeURIComponent(state.token)
   }
 
   // ══ 取数 ════════════════════════════════════════════════
@@ -289,6 +346,25 @@
       renderResolved()
     })
   }
+
+  // 复制设置链接：存成书签，换浏览器/换电脑时打开即自动写入 token
+  if (el.copyLinkBtn) {
+    el.copyLinkBtn.addEventListener('click', function () {
+      if (!state.token) {
+        notice('err', '还没有 Token：先在输入框填一次（或打开你的设置链接），再复制。')
+        return
+      }
+      var link = settingsLink()
+      copyText(link).then(function (ok) {
+        notice(
+          ok ? 'ok' : 'info',
+          ok
+            ? '设置链接已复制——存成浏览器书签即可：换浏览器/换电脑时打开它会自动写入 Token（片段不上行，不进服务器日志）。'
+            : '复制失败，请手动复制：' + link
+        )
+      })
+    })
+  }
   if (el.dForce) el.dForce.addEventListener('change', renderResolved)
 
   el.sendBtn.addEventListener('click', function () {
@@ -326,13 +402,17 @@
   el.refreshBtn.addEventListener('click', function () { load() })
 
   // ══ 启动 ════════════════════════════════════════════════
-  try { state.token = localStorage.getItem(TOKEN_KEY) || '' } catch (e) { /* ignore */ }
+  var fromLink = consumeTokenFromUrl()
+  try { state.token = fromLink || localStorage.getItem(TOKEN_KEY) || '' } catch (e) { state.token = fromLink }
   if (el.dToken) el.dToken.value = state.token
+  renderTokenState()
   state.selectedId = ''
 
   load().then(function () {
     // 连接失败/恢复由 load() 内的跃迁逻辑提示；这里只管启动期的引导
-    if (!state.lastError && state.devices.length === 0) {
+    if (fromLink) {
+      notice('ok', '✅ Token 已从设置链接写入本机并记住——以后打开本页不用再填。')
+    } else if (!state.lastError && state.devices.length === 0) {
       notice('info', '已连通，但暂无设备上报。设备端第一次 report 后就会出现在这里。')
     } else if (!state.lastError && !state.token) {
       notice('info', '下发是写操作，需要先在下方填 Token；上报与回执是免鉴权的。')

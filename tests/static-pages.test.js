@@ -94,6 +94,30 @@ describe('独立页 /OTA 静态托管', () => {
     expect(js).not.toContain('MODE_KEY')
   })
 
+  // 回归守卫：Token 的「设置链接」必须是片段形态（# 不上行、不进日志），且页面能解析 + 能复制。
+  it('/OTA 页支持设置链接（#token=）与复制设置链接', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    expect(html).toContain('id="copyLinkBtn"')
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).toContain('#token=')
+    expect(js).toContain('consumeTokenFromUrl')
+    expect(js).toContain('replaceState') // 写入后把 token 从地址栏抹掉
+    expect(js).toContain('settingsLink')
+    const j = await (await fetch(base + '/ota.json')).json()
+    expect(j.auth.settings_link.format).toContain('#token=')
+    expect(j.auth.settings_link.why_fragment).toBeTruthy()
+  })
+
+  // 回归守卫：描述符里的 implemented 必须与实现一致——曾把已上线的端点写成 false，
+  // 让 AI/接手者以为「设备上报没实现」（实际线上已有设备在报）。
+  it('/ota.json 的 implemented 标记与实现一致', async () => {
+    const j = await (await fetch(base + '/ota.json')).json()
+    for (const [name, api] of Object.entries(j.apis)) {
+      expect(api.implemented, `${name} 应为已实现`).toBe(true)
+    }
+    expect(j.status).not.toContain('not implemented')
+  })
+
   it('/ota.json 描述符如实声明下发需鉴权且端点已实现', async () => {
     const j = await (await fetch(base + '/ota.json')).json()
     expect(j.auth.dispatch_requires_token).toBe(true)
