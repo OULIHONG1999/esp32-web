@@ -40,6 +40,7 @@
 8. **日志渲染纪律**（实测洪峰卡页教训）：LogEntry 必须带 `seq` 作稳定 key；批量 flush（120ms）后才推视图；显示上限 500；不得恢复"每行一次响应式更新/索引 key 全量 diff"的写法。
 9. **自动发布（2026-10-02 用户授权）**：`test` + `run build` 全绿并提交后，**直接发布云端，不再询问**。打包必须用 tools/package-deploy.ps1（dist 占位符 firmware.example.com 注入真实地址后再 zip；真实地址仅存本机 .fw-deploy.local（gitignored），严禁写入仓库/远端）→ scp → 远端 unzip → systemctl restart → 核对 `ExecMainStartTimestamp` 与外网入口 bundle 名，失败必须报告。
 10. **font-cloud 自动上线（2026-10-04 用户授权）**：`font-cloud-server/` 改动同步部署，**不再询问**。`powershell -File font-cloud-server/deploy/deploy.ps1` → 核对 `font-cloud-server` 的 `ExecMainStartTimestamp` 与 `/font-cloud`、`/api/subset`。与 firmware-server 共存（8788），勿抢 `/llms.txt`。详见 docs/SERVER.md §5.5。
+11. **烧录进度与 esptool tracing 纪律（2026-10-06「卡住到一半」教训）**：① esptool 的 `reportProgress(fileIndex, written, total)` 报的是**压缩后**字节（`compress:true`），整体进度的分母是**未压缩**总量——跨压缩必须走段内比例换算（`core/progress.ts` 的 `overallWritten`），且烧录结束必须 `clearProgress()`，否则进度条停在半途就是"卡住"的假象；② `new Transport(port, ...)` 第二参**必须 false**（tracing）：开启后每次读写都 hex dump 进 console 并往无界字符串累积，2MB 固件足以把主线程拖死。
 
 ## 目录约定
 

@@ -112,6 +112,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 21. **PowerShell 5.1 编码双坑（已踩，勿再犯）**：① `Get-Content` 不带 `-Encoding` 按 ANSI 读 UTF-8 中文 → `Set-Content` 写回=**双重编码写坏**；② `Set-Content -Encoding UTF8`=**带 BOM**，Node JSON.parse 报 `Unexpected token '﻿'`。**正解**：`[IO.File]::ReadAllText/WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))`，或用 Node/Write 工具写含中文的 JSON。
 22. **Web Locks 判定时序 bug（门2 后线上误报，已修）**：`tryAcquire` 用 `setTimeout(0)` 等锁 callback 决策——callback 调度晚于定时器时 ①误报"被其它标签占用"②锁已实际拿到却记为失败（**幽灵锁**）→ 后续每次重试都撞自己这把无人认领的锁 = **自锁死，连续连接必失败**（用户实测连续 3 次全拒）。**修复**：granted/rejected 的 resolve 全部移到 callback **内部**（零时序赌博）+ 失败后 30ms 短重试一次（覆盖"自己刚 release、锁未回收"重入窗口）+ 延迟调度回归测试。教训：**异步原语的判定必须发生在回调内，禁止用定时器赌调度顺序**。
 23. **拔线后句柄残留 → 重连必须刷新（已修）**：`SerialMonitor.readLoop` 出错路径 ①不置 `running=false`（循环风暴重复报错）②**从不 `port.close()`**——Web Serial 句柄残留，下次 `port.open()` 报错、只能刷新页面（用户 22:17 实测）。**修复双保险**：monitor 错误即自终止+关端口；deviceOps 加 `preparePort()`（detect/ensureSynced/startStream/reopenForRetry 四入口强制归零残留句柄，命中时打日志）。同轮按用户要求**移除 IDF 编译命令块**（🔨🧹■ + useIdfBuild 接线，⚡载入本地构建保留）。122 测试+build 全绿。注：烧录后仍无设备输出 = 问题 19（menuconfig 未做，非本 bug）。
+24. **进度口径与 tracing 洪峰（2026-10-06 用户报「烧录卡住到一半」）**：① `reportProgress(fileIndex, written, bytesTotal)` 的三个数字都按**压缩后**字节给（`compress:true` 时 `written` 是已发压缩字节、`bytesTotal` 是该段压缩长度），而整体进度的分母是**未压缩**总量——分子压缩、分母未压缩，2MB app 段 deflate 后约剩一半，进度条在这最长的一段最多爬到 ~50%，且 `device.progress` 不随烧录结束清空，于是**烧完永久停在半途**（表现为"卡住"）。**纪律：跨压缩使用 esptool 进度时必须走段内比例换算**（`core/progress.ts` 的 `overallWritten`），不要直接把 `written` 加进真实字节。② `new Transport(port, true)` 打开的是 **tracing**：每次读写都做 hex dump 进 `console.log` 并把内容追加进 `traceLog` 字符串（无界）——16KB/块、2MB 固件就是数 MB 字符串洪峰，开 DevTools 时足以让主线程假死；**Transport 第二参必须为 false**（要调试就用 `LoaderOptions.debugLogging`，别再开 tracing）。
 
 ### 门2 首轮实测问题记录（2026-09-27，真机烧录暴露）
 
@@ -160,6 +161,7 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 ## 下一步
 
 1. **页面功能优化（进行中）**：门5 过、v1.5 核心关账——当前阶段=收集用户对页面功能的优化建议并落地。
+2. **等实机复测（2026-10-06「卡住到一半」修复后）**：插板烧一次，核对 ①进度条能走到 100% 并消失（不再停在半途）②完成/失败提示音是否响（状态栏 🔊 开着）③日志每 5s 的 `写入进度 N%…` 心跳与异常时的 ⚠「已 15s 无写入进度——卡在第 N/M 段」；若仍卡，把这两行日志贴回来定位。
 2. **硬复位按钮不可用（2026-10-02 用户报告，backlog 待查）**：页面点击无响应——先记录不动，排查方向：runCritical assert / glue hardReset 序列。
 3. **watch 后台网络问题（问题 20，backlog）**：发布暂用手动 once；根因定位（疑进程会话网络策略/安全软件）。
 3. **HTTPS 尾巴**：文档已挂 `https://firmware.example.com/docs/`（DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS）；后续可加使用说明页。
@@ -169,6 +171,14 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 
 ## 变更日志
+
+- **2026-10-06（「烧录卡住到一半」根因修复 + 提示音 + 清单控件瘦身）**：用户报「烧录经常卡住到一半，不知道为什么」——查出**两条独立原因**，都在自研层，与 esptool-js 本身无关：
+  ① **进度口径不一致（观感"卡住"的主因）**：`reportProgress` 的 `written/bytesTotal` 是**压缩后**字节（`compress:true`），而分母是**未压缩**总量（各段 `data.byteLength` 之和）。2MB app 段 deflate 后约剩一半 → 进度条在最长的这一段最多爬到 ~50%，且 `device.progress` 结束后不清空 → **烧完永久停在半途**。新增 `core/progress.ts`（纯函数：按段内比例换算回真实字节，+8 单测），glue 调用；新增 `DeviceManager.clearProgress()` + useSession `finally` 结束时清 → 进度条正确走满再消失。
+  ② **esptool Transport tracing 开着**：`openSession` 里是 `new Transport(port, true)`——每写一个 16KB 块就把整块 hex dump 进 `console.log`，并往 `traceLog` 字符串无界累积，一次 2MB 烧录就是数 MB 字符串洪峰，开 DevTools 时主线程被拖到假死。改 `false`（带注释说明为何不能开）。
+  ③ **卡死可观测**：glue 烧录期间每 5s 检查——进度推进 ≥5% 打一行心跳（百分比/段号/已写/已用），15s 无进度打 ⚠ 告警（写明卡在第几段、已写多少），随后由 60s 空闲超时判失败；完成日志带总耗时。以后卡住直接看日志最后两行。
+  ④ **提示音**：`glue/audioFeedback.ts`（Web Audio 合成，零音频文件）——完成=上行三音 C5→E5→G5，失败=双低音下行 G4→E4。**关键修复**：完成音发生在点击后数分钟，手势早已过期，直接 new AudioContext 会被自动播放策略挂起=没声音；改为首次 `pointerdown/keydown` 即 `primeAudio()` 解锁。状态栏右侧 🔊/🔇 静音开关（localStorage `fw.sound`）。面板新增**烧录回执行**（✅完成/❌失败 · 段数 · 字节 · 耗时）。
+  ⑤ **清单控件瘦身**：原 5 张参数卡 + 6 个平铺按钮 + 2 行提示 → **一行参数条**（模式/频率/容量/芯片/合计）+ **⚡烧录 + ＋添加bin + ⋯更多菜单**（原生 `<details>`，收 完全擦除/硬复位/重新载入/导出固件包，点外部自动收起）+ 1 行短提示；删掉冗余 `<h2>烧录清单</h2>` 与死样式。**158 测试 + build 全绿**。
+  未做：实机复测（待用户插板验证心跳行/提示音）、UI 视觉核验（本机无 Playwright 浏览器，未截图）。
 
 - **2026-10-06（OTA 独立页 `/OTA`）**：按 `docs/ota.md` 契约把**页面端**先落地为**独立页**（不进主 SPA 构建）——① **页面** `public/ota/{index.html,ota.css,ota.js}`：深色运维控制台风格（品牌绿 accent），设备卡（MAC/芯片/固件/IP/心跳/最近命令）+ 概览计数（在线/离线/待执行/成功/失败）+ 设备与 release 双下拉 + 下发 + 命令状态流转 + 5s 轮询；**mock/real 双模式**（mock 内置 §4.2 形状三台假设备，默认；real 打真实 `/api/devices`+`/api/registry`，选择持久化 `localStorage.ota.mode`，后端未实现时明确提示而非静默失败）。② **AI 可读**：`/ota.json` 机器描述符（tool_id=ota-console，接口清单/数据模型/不变量/mock-real 说明）+ 页内 meta 标签与 `#ai-data` 结构化摘要 + `/llms.txt` 新增 OTA 段 + 契约文档 `/docs/ota.md` 挂公网（`docs/ota.md` 补 §6.0 已实现说明）。③ **服务器路由** `server/app.js`：`serveStatic` 新增 `/OTA`→`/ota` 大小写归一（Linux 大小写敏感）+ 目录命中 `index.html`（`/ota/` 可访问），SPA 兜底不变；MIME 补 `.md`/`.txt`（此前 `/docs/*.md`、`/llms.txt` 以 octet-stream 下发，对 AI 直读不友好）。④ **验证**：新 `tests/static-pages.test.js` 8 用例（大小写/尾斜杠/资源/描述符/SPA 兜底/dist 缺失）+ 真实 dist 起服务 9 条路由 200 实测 + 页面逻辑 DOM 桩 30/30（含 pending→delivered→success 流转）+ build 全绿。**未做**：服务器端 `/api/devices*`、设备端 `components/ota`。
 - **2026-10-06（烧录进度在途：`tests/progress.test.ts` 1 红，待用户定）**：全量套件 156 用例 1 红，位于 `tests/progress.test.ts`「写入最后一段的过程中百分比能爬到 100%」——期望 `1072128`、实得 `1047552`。**根因在断言口径而非实现**：该用例把 `partWritten=500*1024`、`partTotal=1024*1024` 当作「正好一半」，但 `512000/1048576 = 48.83%`，`23552 + 2MB×0.4883 = 1047552` 才是正确的线性插值；若想表达「恰好一半」应写 `partTotal = 1000*1024`。属在途未提交改动（`src/core/progress.ts` / `tests/progress.test.ts`），与 `/OTA` 无关，未代为修改。

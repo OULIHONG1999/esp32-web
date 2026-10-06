@@ -12,6 +12,7 @@ import EditorTabs, { type WorkTab } from './components/ide/EditorTabs.vue'
 import BottomPanel, { type BottomTab } from './components/ide/BottomPanel.vue'
 import StatusBar from './components/ide/StatusBar.vue'
 import { checkEnvironment, type EnvReport } from './env/environment'
+import { primeAudio } from './glue/audioFeedback'
 import { useSession } from './composables/useSession'
 import { useFirmwareWorkspace } from './composables/useFirmwareWorkspace'
 import { useServiceStatus, fmtSize } from './composables/useServiceStatus'
@@ -51,7 +52,10 @@ const {
   percent,
   flashPart,
   flashFailedIndex,
+  flashResult,
   resetFlashMarks,
+  soundOn,
+  toggleSound,
   viewPaused,
   connect,
   switchPort,
@@ -288,11 +292,17 @@ onMounted(() => {
       refreshSignal.value += 1
     },
   })
+  // 提示音解锁：浏览器要求 AudioContext 在用户手势里创建/恢复。挂首次点击（捕获阶段，
+  // 保证先于业务处理）——烧录完成发生在几分钟后，那时手势早已过期，只能现在解锁。
+  window.addEventListener('pointerdown', primeAudio, { once: true, capture: true })
+  window.addEventListener('keydown', primeAudio, { once: true, capture: true })
 })
 onUnmounted(() => {
   unsubscribe?.()
   unsubscribe = null
   streamStatus.value = 'off'
+  window.removeEventListener('pointerdown', primeAudio, { capture: true })
+  window.removeEventListener('keydown', primeAudio, { capture: true })
 })
 
 // ---- 发布 token：生成工作 token（主 token 换）或手动设置本机 ----
@@ -611,6 +621,7 @@ function dismissGuide(): void {
             :chip-detail="chip"
             :flash-part="flashPart"
             :flash-failed-index="flashFailedIndex"
+            :flash-result="flashResult"
             :pick-files="pickFiles"
             @flash="flash"
             @erase="onErase"
@@ -727,8 +738,10 @@ function dismissGuide(): void {
       :service-label="serviceLabel"
       :flash-params="activeParams"
       :theme="theme"
+      :sound-on="soundOn"
       @configure-token="configureToken"
       @toggle-theme="toggleTheme"
+      @toggle-sound="toggleSound"
     />
 
     <!-- 共享隐藏文件选择器（侧栏「添加 bin」与固件页共用） -->

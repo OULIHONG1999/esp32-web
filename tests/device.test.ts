@@ -456,6 +456,23 @@ describe('D3 ready 态错误可见与清除', () => {
   })
 })
 
+describe('烧录进度清理（2026-10-06「卡住到一半」修复）', () => {
+  it('烧录结束后 progress 保留在最后位置 → clearProgress 清空且幂等', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true })
+    deps.flash = async (_p, on) => {
+      on({ written: 50, total: 100, partIndex: 0 })
+    }
+    const d = await connectReady(deps)
+    await d.flash(parts)
+    // core 不自动清：失败段索引要在接线层 catch 里读，清理交给 useSession 的 finally
+    expect(d.progress?.written).toBe(50)
+    d.clearProgress()
+    expect(d.progress).toBeNull()
+    d.clearProgress() // 幂等
+    expect(d.progress).toBeNull()
+  })
+})
+
 describe('手动监视开关（F-16 / N4 默认关闭 · pause/resume）', () => {
   it('ready 态 pause：停流 + notice 提示让出端口；再次 pause 幂等', async () => {
     const { deps, rec } = makeDeps({ hasExistingPort: true })

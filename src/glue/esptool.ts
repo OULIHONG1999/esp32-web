@@ -7,6 +7,7 @@ import {
 } from 'esptool-js'
 import type { ChipInfo, FlashPart, Progress } from '../core/device'
 import { md5Hex } from '../core/md5'
+import { overallWritten } from '../core/progress'
 import type { Logger } from '../core/log'
 
 /** esptool 原始输出 → Logger（ESLint 无法替换的官方注入点，DESIGN §3） */
@@ -42,7 +43,10 @@ export async function requestPort(): Promise<SerialPort> {
 }
 
 export function openSession(port: SerialPort, log: Logger, baudrate = 115200): PortSession {
-  const transport = new Transport(port, true)
+  // tracing 必须为 false：开启后 Transport 会把**每一次读写的原始字节**做 hex dump 进
+  // console.log，并往 traceLog 字符串里无界累积。一次 2MB 烧录（16KB/块、每块数十行）
+  // 就是数 MB 字符串洪峰，主线程被拖到假死——表现为「烧录卡住到一半」（2026-10-06 定位）。
+  const transport = new Transport(port, false)
   const options: LoaderOptions = {
     transport,
     baudrate,
@@ -85,7 +89,8 @@ export async function writeFlash(
   params?: Partial<Pick<FlashOptions, 'flashMode' | 'flashFreq' | 'flashSize'>>,
 ): Promise<void> {
   const fileArray = parts.map((p) => ({ data: p.data, address: p.address }))
-  const total = parts.reduce((n, p) => n + p.data.byteLength, 0)
+  const partSizes = parts.map((p) => p.data.byteLength)
+  const total = partSizes.reduce((n, s) => n + s, 0)
   const options: FlashOptions = {
     fileArray,
     flashMode: params?.flashMode ?? 'dio',
@@ -96,16 +101,15 @@ export async function writeFlash(
     // D5：写入后芯片读回 MD5 比对（日志 File md5 / Flash md5 / Hash of data verified.）
     calculateMD5Hash: (image: Uint8Array) => md5Hex(image),
     reportProgress: (fileIndex, written, bytesTotal) => {
-      // esptool-js 语义：written/bytesTotal 为【当前段】进度（image.length）；整体进度自行累计
-      const before = parts
-        .slice(0, fileIndex)
-        .reduce((n, p) => n + p.data.byteLength, 0)
+      // esptool-js 语义：written/bytesTotal 是【当前段压缩后】的字节（compress:true）；
+      // 整体进度按段内比例换算回真实字节，否则百分比到不了 100%（见 core/progress.ts）。
+      const partTotal = bytesTotal ?? partSizes[fileIndex] ?? 0
       onProgress({
-        written: before + written,
+        written: overallWritten(partSizes, fileIndex, written, partTotal),
         total,
         partIndex: fileIndex,
         partWritten: written,
-        partTotal: bytesTotal ?? parts[fileIndex]?.data.byteLength ?? 0,
+        partTotal,
       })
     },
   }

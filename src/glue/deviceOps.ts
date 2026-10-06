@@ -164,8 +164,78 @@ export function createDeviceOps(log: Logger, baudrate = 115200): DeviceOps {
         text: `开始烧录 ${parts.length} 段，共 ${total} 字节`,
       })
       const session = await ensureSynced()
-      await writeFlash(session, parts, onProgress, flashParams)
-      log.add({ level: 'info', source: 'app', text: '烧录写入完成' })
+      let lastPart = -1
+      let written = 0
+      const startedAt = Date.now()
+      let lastAt = startedAt
+      let lastPct = -1
+      let warned = false
+
+      // 卡死可观测（2026-10-06）：烧录中途没有任何输出是「不知道为什么卡住」的主因——
+      // 每 5s 检查一次：进度有 5% 以上推进就打一行心跳；超过 STALL_WARN_MS 没有进度就告警
+      // （core 的 flash 空闲超时随后会判超时并归位，这里只负责让原因可见）。
+      const STALL_WARN_MS = 15_000
+      const mb = (n: number): string => `${(n / 1048576).toFixed(2)} MB`
+      // 尚未收到任何段进度时 lastPart=-1：那段时间是写入前的区域擦除，属正常等待
+      const partLabel = (): string =>
+        lastPart < 0 ? '尚未开始写入（写入前擦除目标区域）' : `卡在第 ${lastPart + 1}/${parts.length} 段`
+      const timer: ReturnType<typeof setInterval> = setInterval(() => {
+        const idle = Date.now() - lastAt
+        if (idle >= STALL_WARN_MS) {
+          if (!warned) {
+            warned = true
+            log.add({
+              level: 'warn',
+              source: 'app',
+              text:
+                `⚠ 已 ${Math.round(idle / 1000)}s 无写入进度——` +
+                `${partLabel()}（已写 ${mb(written)}/${mb(total)}）；` +
+                '仍在等待芯片响应，长时间无进度会自动判超时中止。',
+            })
+          }
+          return
+        }
+        const pct = total > 0 ? Math.floor((written / total) * 100) : 0
+        if (pct >= lastPct + 5) {
+          lastPct = pct
+          log.add({
+            level: 'info',
+            source: 'app',
+            text:
+              `写入进度 ${pct}%（${lastPart < 0 ? '准备中' : `段 ${lastPart + 1}/${parts.length}`} · ` +
+              `${mb(written)}/${mb(total)} · 已用 ${Math.round((Date.now() - startedAt) / 1000)}s）`,
+          })
+        }
+      }, 5000)
+
+      try {
+        await writeFlash(
+          session,
+          parts,
+          (prog) => {
+            lastAt = Date.now()
+            written = prog.written
+            if (warned) warned = false // 恢复推进：允许下次停顿再告警
+            if (prog.partIndex !== lastPart) {
+              lastPart = prog.partIndex
+              log.add({
+                level: 'info',
+                source: 'app',
+                text: `写入段 ${prog.partIndex + 1}/${parts.length}（${parts[prog.partIndex]?.label ?? '?'}）…`,
+              })
+            }
+            onProgress(prog)
+          },
+          flashParams,
+        )
+      } finally {
+        clearInterval(timer)
+      }
+      log.add({
+        level: 'info',
+        source: 'app',
+        text: `烧录写入完成（用时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s）`,
+      })
     },
 
     async erase(): Promise<void> {

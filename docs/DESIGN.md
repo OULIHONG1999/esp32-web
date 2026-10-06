@@ -41,7 +41,7 @@
 | 我们要定制的东西 | esptool-js 注入点 | 粘合层职责 |
 |---|---|---|
 | 日志系统（分级/面板/导出） | 实现 `IEspLoaderTerminal`（clean/writeLine/write） | TerminalBridge 把字节流解析成带 level 的 `LogEntry` 推给 Logger |
-| 进度展示 | `FlashOptions.reportProgress(fileIndex, written, total)` | 归一化为 `ProgressState` |
+| 进度展示 | `FlashOptions.reportProgress(fileIndex, written, total)` | 归一化为 `ProgressState`；**注意 reportProgress 报的是压缩后字节**（`compress:true`），整体进度须按段内比例换算回真实字节（`core/progress.ts`）——否则百分比停在约 50%（2026-10-06 「卡住到一半」根因） |
 | 下载命令控制（连接/切换端口/擦除/烧录/硬复位） | `main()` / `writeFlash()` / `eraseFlash()` / `after()` | DeviceManager 临界区编排：stopStream → esptool → startStream，working 单飞行 |
 | 复位策略（S3 USB / 普通 UART / 自定义硬件） | `resetConstructors`：`classicReset` / `hardReset` / `usbJtagSerialReset` / 自定义 `D0\|R1\|W…` 序列 | ResetBridge 按检测到的芯片/端口类型选择策略，失败时给出手动 BOOT 指引 |
 | 波特率策略 | `LoaderOptions.baudrate` | PresetTable 提供默认值（先低后高策略见 §8） |
@@ -79,6 +79,7 @@ ready ─(日志流意外中断/拔线, onStopped error)→ disconnected + notic
 - **拔线感知**：日志流 error 停止 → 自动回 disconnected 并出 notice。
 - **操作超时（D2，2026-09-26）**：`detect` 20s 无响应 → `TimeoutError` → 归位 **error**（ChipDetectFail 超时文案），UI 不再锁死；`flash` **空闲 60s 无进度** → `TimeoutError` → 走临界区失败路径归位 ready（TransferFail 超时文案）。进度回调会重置 flash 空闲计时。超时值经 `DeviceTimeouts` 注入，测试可覆盖。
 - **自动降速重试（D1，2026-09-26）**：flash 失败且错误 `retryable` → 调 `deps.reopenForRetry()`（glue：释放会话 → 波特率/2 下限 115200 → 重建 → 重新同步）后**重试一次**；仅一次，重试仍失败才上抛。
+- **卡死可观测（2026-10-06）**：glue 烧录期间每 5s 检查——进度推进 ≥5% 打一行心跳（百分比/段号/已写字节/已用时间）；**15s 无进度**打 ⚠ 告警（写明卡在第几段、已写多少），随后由上面的 60s 空闲超时判失败。目的：卡住时日志能直接指出卡在哪，不用猜。烧录结束（成功/失败）后 `clearProgress()` 清空进度——否则进度条停在半途不动。
 - **错误可见性（D3，2026-09-26）**：`lastError` 在 **error 与 ready 态都显示**（可关闭的错误条）；临界区操作**成功后自动清除**旧错误，`clearError()` 供手动关闭。
 
 ### 4.2 Logger（日志系统）
@@ -180,10 +181,14 @@ interface FirmwareSet {
                   ▾ 快捷操作 —— ＋添加 bin… / ⌫完全擦除 / ↻硬复位（后两个仅 canOperate 可见）
                   底部 side-card：服务在线 · 项目/版本/数据 · ↻（烧录历史已移入区4）
 区3 工作区        SSE 横幅（顶部）+ 标签页 [固件 · <文件名> | 版本时间线]（EditorTabs 注册式）
-                  固件 = 面包屑 + 参数卡(FLASH MODE/FREQ/SIZE/CHIP FAMILY/合计)
-                        + 操作行(⚡烧录/擦除/硬复位/重新载入/添加bin/**⬇导出固件包 N7**)
-                        + 烧录表格 + 进度条
+                  固件 = 面包屑 + 参数条(模式/频率/容量/芯片/合计，一行 kv **2026-10-06 瘦身**)
+                        + 操作行(⚡烧录 ＋添加bin ⋯更多：擦除/硬复位/重新载入/导出)
+                        + 烧录表格 + 进度条 / 烧录回执(✅❌ 段数·字节·耗时)
                   导出固件包 = 当前清单全部段 + flash_args + README.txt → zip（core/zip STORE 零依赖）
+                  控件纪律：可见控件压到一行——次要操作（完全擦除/硬复位/重新载入/⬇导出固件包 N7）
+                  收进 ⋯ 菜单（原生 `<details>`，点外部/点条目自动收起）；参数不再用卡片块
+                  烧录提示音（2026-10-06）：完成=上行三音 / 失败=双低音下行（glue/audioFeedback Web Audio
+                  合成，无音频文件）；AudioContext 首次点击即解锁（自动播放策略），状态栏 🔊/🔇 可静音
                   时间线 = 选中项目后：晋升/回滚/保留数（VersionTimeline 原组件）
 区4 底部面板      高度上缘可拖拽（N3 → --bp-h / fw.bpH，默认 264px）
                   四标签 [问题 | 输出 | 日志监视器 | 烧录历史 N5]
@@ -196,7 +201,7 @@ interface FirmwareSet {
                   **R-1 监视对齐 idf.py monitor（2026-10-02）**：开启监视=自动硬复位一次（抓全启动日志）；
                   面板头「↻ 复位」= 信号复位（RTS 低→5ms→高，esp_idf_monitor 同源时序）——端口不关、
                   日志不断、COM 不掉；监视未开时该按钮走 esptool 临界区兜底（glue/signalReset.ts）
-区5 状态栏 26px    accent 绿色条通栏：● state · 芯片 · ⌀MAC · 品牌 ‖ 右:烧录参数 · ★订阅N · ◉服务在线 x/y · 订阅 · 🔑 · 版本
+区5 状态栏 26px    accent 绿色条通栏：● state · 芯片 · ⌀MAC · 品牌 ‖ 右:烧录参数 · ★订阅N · ◉服务在线 x/y · 订阅 · 🔑 · 🔊提示音 · 版本
 ```
 
 **数据层**：`useFirmwareWorkspace`（单例）共享「烧录表格 rows + 项目库 registry 状态」——侧栏树 / 固件标签 / 时间线标签三处同源；`useServiceStatus`（单例）供 side-card 与状态栏共用 /api/status 快照。依赖注入（getChipName/onParams/onLoaded）。**core 变更仅 N4 监视意图语义**（`streamWanted`，131 测试同步守护）；日志渲染纪律（seq key/批量 flush/500 上限/暂停视图）不动；`?panel=log` 独立窗口与 `fw-log` BroadcastChannel 协议已移除（N2）。

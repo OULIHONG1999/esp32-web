@@ -15,10 +15,11 @@ export interface FlashPart {
 }
 
 export interface Progress {
+  /** 已写入的真实字节（glue 由压缩进度换算；分母 total 同为真实字节） */
   written: number
   total: number
   partIndex: number
-  /** 当前段已写字节 / 段总字节（逐段行进度条用，glue 提供） */
+  /** 当前段已写字节 / 段总字节（esptool 原始口径，压缩后单位一致，逐段行进度条用） */
   partWritten?: number
   partTotal?: number
 }
@@ -391,7 +392,9 @@ export class DeviceManager {
         if (settled) return
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => {
-          const e = new Error(`flash idle for ${this.flashIdleMs}ms without progress`)
+          const e = new Error(
+            `flash idle for ${this.flashIdleMs}ms without progress（卡在第 ${(this.progress?.partIndex ?? 0) + 1} 段）`,
+          )
           e.name = 'TimeoutError'
           settle(() => reject(e))
         }, this.flashIdleMs)
@@ -412,6 +415,16 @@ export class DeviceManager {
   clearError(): void {
     if (!this.lastError) return
     this.lastError = null
+    this.emit()
+  }
+
+  /**
+   * 清空烧录进度：结束后必须调用，否则进度条会停在上次位置不动
+   * （2026-10-06 「卡住到一半」观感来源之一）。
+   */
+  clearProgress(): void {
+    if (!this.progress) return
+    this.progress = null
     this.emit()
   }
 

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /**
- * 固件标签页（b-ide 编辑区复刻：面包屑 + 参数卡 + 操作行 + 烧录表格）。
+ * 固件标签页（b-ide 编辑区复刻：面包屑 + 参数条 + 操作行 + 烧录表格）。
  * 数据与项目库选择在 useFirmwareWorkspace（侧栏树 / 时间线共享）；
  * 本组件只负责展示与烧录确认。扩展：操作行按钮走 emits（flash/erase/hardReset）。
+ * 版面纪律（2026-10-06 用户要求「控件瘦身」）：纵向只保留 参数条 / 操作行 / 表格 / 进度或回执，
+ * 次要操作进 ⋯ 菜单，参数不再用卡片块。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ChipInfo, FlashPart } from '../core/device'
 import type { FirmwareWorkspace } from '../composables/useFirmwareWorkspace'
+import type { FlashResult } from '../composables/useSession'
 import { zipStore } from '../core/zip'
 import { buildFlashArgsText, buildReadmeText, type PackPart } from '../core/firmwarePack'
 import { extractStrings, parseBin, sha256Hex, type BinInfo } from '../core/binInfo'
@@ -22,6 +25,8 @@ const props = defineProps<{
   flashPart: { index: number; written: number; total: number } | null
   /** 失败段索引（标红即停） */
   flashFailedIndex: number | null
+  /** 最近一次烧录回执（✅/❌ 结论行） */
+  flashResult: FlashResult | null
   /** 打开共享的隐藏文件选择器（App 持有 input） */
   pickFiles: () => void
 }>()
@@ -32,6 +37,21 @@ const emit = defineEmits<{
 }>()
 
 const rows = props.ws.state.rows
+
+/**
+ * ⋯ 更多操作（原生 <details>）：次要按钮收进菜单，把可见控件压到一行——
+ * 2026-10-06 用户反馈「烧录清单控件有点大、占地方」。
+ */
+const menuEl = ref<HTMLDetailsElement | null>(null)
+function closeMenu(): void {
+  if (menuEl.value) menuEl.value.open = false
+}
+function onDocClick(e: MouseEvent): void {
+  const el = menuEl.value
+  if (el?.open && !el.contains(e.target as Node)) el.open = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 const crumbs = computed<string>(() => {
   const s = props.ws.state
@@ -81,9 +101,27 @@ function fmtSize(n: number): string {
 }
 
 const chipFamilyCell = computed(() => {
-  if (!props.chipName) return { text: '未连接', cls: 'st__v--muted' }
-  return { text: props.chipName, cls: 'st__v--ok' }
+  if (!props.chipName) return { text: '未连接', ok: false }
+  return { text: props.chipName, ok: true }
 })
+
+/** ⋯ 菜单项：先收起菜单再执行（<details> 原生开合，不用自绘下拉状态） */
+function eraseNow(): void {
+  closeMenu()
+  emit('erase')
+}
+function resetNow(): void {
+  closeMenu()
+  emit('hardReset')
+}
+function reloadNow(): void {
+  closeMenu()
+  void props.ws.reloadSelected()
+}
+function packNow(): void {
+  closeMenu()
+  void exportPack()
+}
 
 async function doFlash(): Promise<void> {
   const parts: FlashPart[] = []
@@ -196,74 +234,64 @@ async function exportPack(): Promise<void> {
   <span v-if="ws.state.loadedMeta.note" class="fw__meta-item fw__meta-note"><i>说明</i>{{ ws.state.loadedMeta.note }}</span>
 </div>
 
-<h2 class="fw__title">烧录清单</h2>
-
-    <!-- 参数卡（b-ide 同款 stat cards） -->
-    <div class="fw__stats">
-      <div class="fw__stat">
-        <div class="fw__stat-k">FLASH MODE</div>
-        <div class="fw__stat-v">{{ ws.state.flashParams?.flashMode ?? '—' }}</div>
-      </div>
-      <div class="fw__stat">
-        <div class="fw__stat-k">FREQ</div>
-        <div class="fw__stat-v">{{ ws.state.flashParams?.flashFreq ?? '—' }}</div>
-      </div>
-      <div class="fw__stat">
-        <div class="fw__stat-k">SIZE</div>
-        <div class="fw__stat-v">{{ ws.state.flashParams?.flashSize ?? '—' }}</div>
-      </div>
-      <div class="fw__stat">
-        <div class="fw__stat-k">CHIP FAMILY</div>
-        <div class="fw__stat-v" :class="chipFamilyCell.cls">{{ chipFamilyCell.text }}</div>
-      </div>
-      <div class="fw__stat">
-        <div class="fw__stat-k">合计</div>
-        <div class="fw__stat-v">{{ rows.length }} 段 · {{ fmtSize(totalBytes) }}</div>
-      </div>
+    <!-- 参数条：一行带过（替代原 5 张参数卡 + 独立标题，纵向省掉一整块） -->
+    <div class="fw__bar">
+      <span class="fw__bar-title">烧录清单</span>
+      <span class="fw__kv"><i>模式</i><code>{{ ws.state.flashParams?.flashMode ?? '—' }}</code></span>
+      <span class="fw__kv"><i>频率</i><code>{{ ws.state.flashParams?.flashFreq ?? '—' }}</code></span>
+      <span class="fw__kv"><i>容量</i><code>{{ ws.state.flashParams?.flashSize ?? '—' }}</code></span>
+      <span class="fw__kv">
+        <i>芯片</i>
+        <code :class="chipFamilyCell.ok ? 'fw__ok' : 'fw__muted'">{{ chipFamilyCell.text }}</code>
+      </span>
+      <span class="fw__kv"><i>合计</i><code>{{ rows.length }} 段 · {{ fmtSize(totalBytes) }}</code></span>
     </div>
 
-    <!-- 操作行 -->
+    <!-- 操作行：主操作留按钮，次要操作收进 ⋯ 菜单（可见控件压到一行） -->
     <div class="fw__actions">
       <button
         class="btn btn--primary"
         type="button"
         :disabled="disabled || rows.length === 0"
-        title="写入前会弹出二次确认（段数/字节/地址清单）"
+        title="写入前会弹出二次确认（段数/字节/地址清单）；写错固件可能无法启动，届时按住 BOOT 重进下载模式"
         @click="doFlash"
       >
         ⚡ 烧录 {{ rows.length }} 段（{{ fmtSize(totalBytes) }}）
       </button>
-      <button
-        class="btn btn--danger"
-        type="button"
-        :disabled="disabled"
-        title="擦除整个 flash（需确认）"
-        @click="emit('erase')"
-      >
-        完全擦除
+      <button class="btn btn--ghost" type="button" title="手动添加 bin 文件段" @click="pickFiles()">
+        ＋ 添加 bin
       </button>
-      <button class="btn" type="button" :disabled="disabled" @click="emit('hardReset')">
-        硬复位
-      </button>
-      <button
-        class="btn btn--sec"
-        type="button"
-        :disabled="ws.state.selectedIdx < 0 || ws.state.registryLoading"
-        title="按当前选中版本重新下载全部段"
-        @click="ws.reloadSelected()"
-      >
-        重新载入版本
-      </button>
-      <button class="btn btn--ghost" type="button" @click="pickFiles()">添加 bin…</button>
-      <button
-        class="btn btn--ghost"
-        type="button"
-        :disabled="rows.length === 0"
-        title="把当前清单所有段 + flash_args + README 打包为 zip 下载（可离线 esptool 烧录）"
-        @click="exportPack"
-      >
-        ⬇ 导出固件包
-      </button>
+      <details ref="menuEl" class="menu">
+        <summary class="btn btn--ghost menu__sum" title="擦除 / 复位 / 重新载入版本 / 导出固件包">
+          ⋯ 更多
+        </summary>
+        <div class="menu__list">
+          <button class="menu__item" type="button" :disabled="disabled" @click="eraseNow">
+            <span class="menu__ico">⌫</span>完全擦除 flash
+          </button>
+          <button class="menu__item" type="button" :disabled="disabled" @click="resetNow">
+            <span class="menu__ico">↻</span>硬复位
+          </button>
+          <button
+            class="menu__item"
+            type="button"
+            :disabled="ws.state.selectedIdx < 0 || ws.state.registryLoading"
+            @click="reloadNow"
+          >
+            <span class="menu__ico">⟲</span>重新载入版本
+          </button>
+          <button
+            class="menu__item"
+            type="button"
+            :disabled="rows.length === 0"
+            title="全部段 + flash_args + README 打 zip（可离线 esptool 烧录）"
+            @click="packNow"
+          >
+            <span class="menu__ico">⬇</span>导出固件包
+          </button>
+        </div>
+      </details>
+      <span class="fw__inline-tip">地址与参数以发布记录（flash_args）为准；未连接也可浏览与载入</span>
     </div>
 
     <div v-if="ws.state.loading" class="fw__loading">
@@ -327,9 +355,22 @@ async function exportPack(): Promise<void> {
       <span class="fw__prog-t">{{ percent }}%</span>
     </div>
 
+    <!-- 烧录回执：成功/失败都留一条明确结论（配提示音，不用去日志里找） -->
+    <div
+      v-else-if="flashResult"
+      class="fw__result"
+      :class="flashResult.ok ? 'fw__result--ok' : 'fw__result--err'"
+    >
+      <b>{{ flashResult.ok ? '✅ 烧录完成' : '❌ 烧录失败' }}</b>
+      <span>
+        {{ flashResult.parts }} 段 · {{ fmtSize(flashResult.bytes) }} ·
+        {{ (flashResult.ms / 1000).toFixed(1) }}s
+      </span>
+      <span v-if="flashResult.error" class="fw__result-err">—— {{ flashResult.error }}</span>
+    </div>
+
     <p class="fw__hint">
       地址与参数以发布记录为准（flash_args 权威）；写错固件可能无法启动，届时按住 BOOT 重进下载模式。
-      未连接也可浏览与载入，仅「烧录 / 擦除 / 复位」需要先连接设备。
     </p>
 
     <!-- A2 固件详情弹层 -->
@@ -391,48 +432,110 @@ async function exportPack(): Promise<void> {
   color: var(--muted);
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
 }
-.fw__title {
-  font-size: 15px;
-  font-weight: 650;
-  margin: 0;
-  color: var(--ink);
-}
-/* 参数卡 */
-.fw__stats {
+/* 参数条：一行内带过（原 5 张参数卡 → 一条 kv 行，纵向省一块） */
+.fw__bar {
   display: flex;
-  gap: 10px;
+  align-items: baseline;
+  gap: 6px 18px;
   flex-wrap: wrap;
-}
-.fw__stat {
+  padding: 6px 10px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px 14px;
-  min-width: 118px;
+  font-size: 12.5px;
 }
-.fw__stat-k {
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
+.fw__bar-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink);
+  padding-right: 10px;
+  border-right: 1px solid var(--border);
+}
+.fw__kv i {
+  font-style: normal;
   color: var(--muted);
-  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  margin-right: 4px;
 }
-.fw__stat-v {
-  font-size: 14px;
+.fw__kv code {
   font-family: ui-monospace, monospace;
   color: var(--ink);
-  margin-top: 2px;
 }
-.fw__stat-v--ok {
-  color: var(--accent);
+.fw__ok {
+  color: var(--accent) !important;
 }
-.fw__stat-v--muted {
-  color: var(--muted);
+.fw__muted {
+  color: var(--muted) !important;
 }
 /* 操作行 */
 .fw__actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.fw__inline-tip {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-left: 2px;
+}
+/* ⋯ 更多操作菜单（原生 details，点外部/点条目自动收起） */
+.menu {
+  position: relative;
+}
+.menu__sum {
+  list-style: none;
+  display: inline-block;
+  cursor: pointer;
+  user-select: none;
+}
+.menu__sum::-webkit-details-marker {
+  display: none;
+}
+.menu[open] .menu__sum {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 190px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.menu__item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.menu__item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.menu__ico {
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
 }
 .btn {
   background: var(--panel);
@@ -456,13 +559,6 @@ async function exportPack(): Promise<void> {
   border-color: var(--accent);
   color: var(--accent-ink);
   font-weight: 700;
-}
-.btn--danger {
-  color: var(--err);
-  border-color: color-mix(in srgb, var(--err) 55%, var(--border));
-}
-.btn--sec {
-  background: transparent;
 }
 .btn--ghost {
   background: transparent;
@@ -601,6 +697,36 @@ async function exportPack(): Promise<void> {
   border-radius: 6px;
   padding: 18px;
   text-align: center;
+}
+/* 烧录回执（成功/失败结论行） */
+.fw__result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.fw__result b {
+  font-weight: 700;
+}
+.fw__result--ok {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.fw__result--err {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--err) 45%, var(--border));
+}
+.fw__result span {
+  color: var(--ink);
+}
+.fw__result-err {
+  color: inherit !important;
+  word-break: break-all;
 }
 /* 进度条 */
 .fw__prog {

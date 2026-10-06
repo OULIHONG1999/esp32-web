@@ -10,6 +10,7 @@ import {
 import type { ClassifiedError } from '../core/errors'
 import { createDeviceOps } from '../glue/deviceOps'
 import { createDeviceLock } from '../glue/deviceLocks'
+import { playFlashErr, playFlashOk, primeAudio, isSoundEnabled, setSoundEnabled } from '../glue/audioFeedback'
 
 const DISPLAY_CAP = 500
 const FLUSH_MS = 120
@@ -23,6 +24,15 @@ export interface FlashHistoryItem {
   parts: number
   bytes: number
   ok: boolean
+  error?: string
+}
+
+/** 最近一次烧录结果（面板显式回执：✅/❌ + 段数/字节/耗时；新载入固件或再次烧录时清空） */
+export interface FlashResult {
+  ok: boolean
+  parts: number
+  bytes: number
+  ms: number
   error?: string
 }
 
@@ -149,8 +159,18 @@ export function useSession() {
   })
   /** 失败段索引（该行标红后停止；载入新固件时复位） */
   const flashFailedIndex = ref<number | null>(null)
+  /** 最近一次烧录回执（成功/失败都留一条可见结论） */
+  const flashResult = ref<FlashResult | null>(null)
+  /** 提示音开关（默认开，localStorage 持久） */
+  const soundOn = ref(isSoundEnabled())
+  function toggleSound(): void {
+    soundOn.value = !soundOn.value
+    setSoundEnabled(soundOn.value)
+    if (soundOn.value) playFlashOk() // 打开立即试听一声，确认能听见
+  }
   function resetFlashMarks(): void {
     flashFailedIndex.value = null
+    flashResult.value = null
   }
 
   async function run(fn: () => Promise<void>): Promise<void> {
@@ -191,7 +211,10 @@ export function useSession() {
     percent,
     flashPart,
     flashFailedIndex,
+    flashResult,
     resetFlashMarks,
+    soundOn,
+    toggleSound,
     connect: () => runWithLock(() => device.connect()),
     switchPort: () => runWithLock(() => device.switchPort()),
     disconnect: () => run(() => device.disconnect()),
@@ -199,6 +222,10 @@ export function useSession() {
       let ok = true
       let errMsg: string | undefined
       flashFailedIndex.value = null
+      flashResult.value = null
+      // 提示音解锁：必须在点击手势内创建/恢复 AudioContext，否则完成音会被自动播放策略静音
+      primeAudio()
+      const startedAt = Date.now()
       try {
         await device.flash(parts)
       } catch (e) {
@@ -206,6 +233,16 @@ export function useSession() {
         errMsg = e instanceof Error ? e.message : String(e)
         // 失败即停（esptool 段间串行）：标红当前段，其余段不会被写入
         flashFailedIndex.value = progress.value?.partIndex ?? 0
+      } finally {
+        // 结束后必须清进度：否则进度条停在上次位置不动（「卡住到一半」观感）
+        device.clearProgress()
+      }
+      flashResult.value = {
+        ok,
+        parts: parts.length,
+        bytes: parts.reduce((n, p) => n + p.data.byteLength, 0),
+        ms: Date.now() - startedAt,
+        error: errMsg,
       }
       pushHistory({
         ts: Date.now(),
@@ -215,6 +252,8 @@ export function useSession() {
         ok,
         error: errMsg,
       })
+      if (ok) playFlashOk()
+      else playFlashErr()
     },
     erase: () => run(() => device.erase()),
     hardReset: () => run(() => device.hardReset()),

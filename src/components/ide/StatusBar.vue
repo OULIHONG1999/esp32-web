@@ -22,11 +22,14 @@ defineProps<{
   flashParams: FlashParams | null
   /** 当前主题（右下角主题切换按钮） */
   theme: string
+  /** 烧录提示音开关（🔊/🔇） */
+  soundOn: boolean
   version?: string
 }>()
 defineEmits<{
   'configure-token': []
   'toggle-theme': []
+  'toggle-sound': []
 }>()
 
 const STATE_LABEL: Record<DeviceState, string> = {
@@ -73,6 +76,15 @@ const STATE_LABEL: Record<DeviceState, string> = {
         @click="$emit('configure-token')"
       >
         🔑 {{ hasToken ? '已设' : '设置' }}
+      </button>
+      <button
+        class="st__btn"
+        :class="{ 'st__btn--off': !soundOn }"
+        type="button"
+        :title="soundOn ? '烧录完成/失败提示音已开启（点击静音）' : '提示音已静音（点击开启，会试听一声）'"
+        @click="$emit('toggle-sound')"
+      >
+        {{ soundOn ? '🔊' : '🔇' }}
       </button>
       <span class="st__item st__ver">{{ version ?? 'v0.2.0' }}</span>
       <button
@@ -166,6 +178,9 @@ const STATE_LABEL: Record<DeviceState, string> = {
 }
 .st__btn--warn {
   color: #ffe08a;
+}
+.st__btn--off {
+  opacity: 0.6;
 }
 .st__ver {
   font-family: ui-monospace, monospace;
