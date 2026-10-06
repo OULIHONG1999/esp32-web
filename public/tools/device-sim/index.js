@@ -2,15 +2,16 @@
 /**
  * 设备模拟器 —— 假装成一台 ESP32，把 OTA 全链路跑一遍：
  *   report 心跳（兼取命令） → 下载 app 固件 → 校验 sha256 → 回执 success/failed
+ *   过程中按阶段上报进度（downloading/verifying/writing/rebooting），页面据此画过程链。
  *
  * 为什么需要它：服务器端与设备端可以由两台电脑/两个 AI 并行开发，
- * 有了它，任何一端都能在没有硬件的情况下把契约验证到底（含失败分支）。
+ * 有了它，任何一端都能在没有硬件的情况下把契约验证到底（含失败分支与过程视图）。
  *
  * 零依赖（只用 Node 内置 fetch / crypto），Node 18+。
  * 参数说明与联调步骤见 docs/DEVICE-OTA.md §8。
  */
 import crypto from 'node:crypto'
-import { HELP, buildDevices, buildReportBody, decideAck, formatMac, parseArgs } from './lib.js'
+import { HELP, buildDevices, buildProgressBody, buildReportBody, decideAck, formatMac, parseArgs } from './lib.js'
 
 let opts
 try {
@@ -91,16 +92,39 @@ async function download(url) {
   }
 }
 
-/** 取到命令后的动作：下载 → 校验 → 回执（模拟真实设备） */
+/** 上报一个过程点（`POST …/progress`）；失败不影响主流程，只记日志 */
+async function sendProgress(dev, cmd, phase, fields) {
+  const tag = formatMac(dev.id)
+  try {
+    const body = buildProgressBody(phase, fields)
+    await req(`/api/devices/${dev.id}/commands/${cmd.id}/progress`, { method: 'POST', body })
+    log(
+      `${tag}      · ${phase}` +
+        (body.percent !== undefined ? ` ${body.percent}%` : '') +
+        (body.message ? ` (${body.message})` : ''),
+    )
+  } catch (err) {
+    log(`${tag}      过程上报失败（${phase}）：${err.message}`)
+  }
+  if (opts.progressMs > 0) await sleep(opts.progressMs)
+}
+
+/** 取到命令后的动作：下载 → 校验 → 回执（模拟真实设备，过程中按阶段打点） */
 async function handleCommand(dev, cmd) {
   const tag = formatMac(dev.id)
   const url = cmd.urlAbsolute || opts.server + cmd.url
   log(`${tag}    ← 命令 ${cmd.id} · release=${cmd.releaseId} · ${cmd.file ?? '?'} · ${cmd.size ?? '?'}B`)
 
+  if (opts.progress) await sendProgress(dev, cmd, 'downloading', { percent: 5, totalBytes: cmd.size ?? undefined })
+
   let shaMatch = null
   let failReason = ''
+  let got = 0
   try {
     const buf = await download(url)
+    got = buf.length
+    if (opts.progress) await sendProgress(dev, cmd, 'downloading', { percent: 100, bytes: got, totalBytes: cmd.size ?? got })
+    if (opts.progress) await sendProgress(dev, cmd, 'verifying', { message: 'sha256' })
     const sha = crypto.createHash('sha256').update(buf).digest('hex')
     shaMatch = !cmd.sha256 || sha === cmd.sha256
     log(`${tag}      下载 ${buf.length} 字节 · sha256 ${shaMatch ? '匹配' : `不匹配（期望 ${String(cmd.sha256).slice(0, 12)}… 实得 ${sha.slice(0, 12)}…）`}`)
@@ -111,6 +135,13 @@ async function handleCommand(dev, cmd) {
   }
 
   const decision = failReason ? { state: 'failed', reason: failReason } : decideAck({ shaMatch, failRate: opts.failRate })
+  if (opts.progress && decision.state === 'success') {
+    // 真机顺序：写 OTA 槽 → 重启 → 回执（重启后补发）
+    await sendProgress(dev, cmd, 'writing', { percent: 50, bytes: got, totalBytes: cmd.size ?? got, message: 'slot ota_0' })
+    await sendProgress(dev, cmd, 'writing', { percent: 100 })
+    await sendProgress(dev, cmd, 'rebooting', { message: 'reboot to new app' })
+  }
+
   try {
     await req(`/api/devices/${dev.id}/commands/${cmd.id}/result`, {
       method: 'POST',

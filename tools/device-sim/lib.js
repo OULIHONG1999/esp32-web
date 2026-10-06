@@ -48,6 +48,27 @@ export function decideAck({ shaMatch, failRate = 0, random = Math.random }) {
 }
 
 /**
+ * 进度上报体（`POST …/commands/{cid}/progress`）——字段裁剪集中在这里，
+ * 免得各处手工拼 body 拼错字段名（页面靠这些字段画过程链）。
+ */
+export function buildProgressBody(phase, { percent, bytes, totalBytes, message } = {}) {
+  const name = String(phase || '').trim()
+  if (!name) throw new Error('phase 不能为空')
+  const body = { phase: name }
+  if (percent !== undefined && percent !== null) {
+    const n = Number(percent)
+    if (Number.isFinite(n)) body.percent = Math.max(0, Math.min(100, Math.round(n)))
+  }
+  for (const [k, v] of Object.entries({ bytes, totalBytes })) {
+    if (v === undefined || v === null) continue
+    const n = Number(v)
+    if (Number.isFinite(n) && n >= 0) body[k] = Math.round(n)
+  }
+  if (message) body.message = String(message).slice(0, 128)
+  return body
+}
+
+/**
  * CLI 参数解析（不认识就抛错，避免静默跑成默认值）。
  * 用法见 docs/DEVICE-OTA.md §8。
  */
@@ -64,6 +85,8 @@ export function parseArgs(argv) {
     once: false,
     dryRun: false,
     timeout: 30,
+    progress: true,
+    progressMs: 400,
     help: false,
   }
   for (let i = 0; i < argv.length; i++) {
@@ -78,12 +101,14 @@ export function parseArgs(argv) {
     else if (a === '--interval') out.interval = num(next(), a, { min: 1, max: 3600 })
     else if (a === '--fail-rate') out.failRate = num(next(), a, { min: 0, max: 1 })
     else if (a === '--timeout') out.timeout = num(next(), a, { min: 1, max: 600 })
+    else if (a === '--progress-ms') out.progressMs = num(next(), a, { min: 0, max: 10000 })
     else if (a === '--chip') out.chip = next()
     else if (a === '--version') out.version = next()
     else if (a === '--sdk-version') out.sdkVersion = next()
     else if (a === '--id') out.ids.push(next())
     else if (a === '--once') out.once = true
     else if (a === '--dry-run') out.dryRun = true
+    else if (a === '--no-progress') out.progress = false
     else if (a === '--help' || a === '-h') out.help = true
     else throw new Error(`未知参数：${a}`)
   }
@@ -124,6 +149,8 @@ export const HELP = `
   --chip <字符串>     芯片名（默认 ESP32-S3）
   --sdk-version <s>   SDK 版本（默认 v6.0.1）
   --fail-rate <0..1>  回执失败概率（默认 0，用于演练 failed 分支）
+  --no-progress       不上报过程进度（用于对比"设备端没实现进度"时的页面表现）
+  --progress-ms <ms>  每个过程点之间的间隔（默认 400，让页面看得见过程；0 = 全速）
   --dry-run           只上报、不取命令、不回执（用于观察 pending→delivered 与重投递）
   --once              每台设备上报一次即退出（冒烟用）
   --timeout <秒>      单次请求超时（默认 30）

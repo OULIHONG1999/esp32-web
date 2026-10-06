@@ -257,6 +257,74 @@ h2, h3 { margin: 0; }
 
 .empty { color: var(--faint); font-size: 12.5px; padding: 18px 0; }
 
+/* ── OTA 过程视图 ─────────────────────────── */
+.dev__prog {
+  margin-top: 7px; font-size: 11px; line-height: 1.6;
+  color: var(--faint); font-family: var(--mono);
+  border-left: 2px solid var(--line); padding-left: 8px;
+}
+.dev__prog--ok { color: var(--accent); border-color: var(--accent-deep); }
+.dev__prog--warn { color: var(--warn); border-color: var(--warn); }
+.dev__prog--err { color: var(--err); border-color: var(--err); }
+
+#procBody .empty { margin: 0; color: var(--faint); font-size: 12.5px; }
+.proc__head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; font-size: 12px; color: var(--muted);
+}
+.proc__head .rid { font-family: var(--mono); color: var(--faint); }
+.proc__rid { font-family: var(--mono); color: var(--faint); }
+.proc__dur { margin-left: auto; font-family: var(--mono); color: var(--faint); }
+
+/* 步骤链：横向铺开，窄屏折行 */
+.steps {
+  list-style: none; margin: 0 0 12px; padding: 0;
+  display: flex; align-items: center; gap: 0; flex-wrap: wrap;
+}
+.step {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--faint); padding: 4px 10px 4px 0;
+}
+.step:not(:last-child)::after {
+  content: '›'; margin: 0 8px 0 2px; color: var(--line); font-family: var(--mono);
+}
+.step__dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--line); border: 1px solid var(--line);
+}
+.step--done { color: var(--muted); }
+.step--done .step__dot { background: var(--accent); border-color: var(--accent); }
+.step--cur { color: var(--ink); font-weight: 600; }
+.step--cur .step__dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 3px rgba(240,180,90,.15); }
+.step--fail { color: var(--err); font-weight: 600; }
+.step--fail .step__dot { background: var(--err); border-color: var(--err); }
+.step--off { color: var(--faint); text-decoration: line-through; }
+
+.verdict {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 9px; font-size: 12.5px; line-height: 1.7;
+  background: var(--bg-soft); border: 1px solid var(--line-soft); color: var(--muted);
+}
+.verdict--ok { color: var(--accent); border-color: rgba(62,207,142,.28); background: rgba(62,207,142,.06); }
+.verdict--warn { color: var(--warn); border-color: rgba(240,180,90,.3); background: rgba(240,180,90,.06); }
+.verdict--err { color: var(--err); border-color: rgba(242,104,110,.28); background: rgba(242,104,110,.06); }
+
+.tl { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 11.5px; }
+.tl__row {
+  display: grid; grid-template-columns: 62px 52px minmax(120px, auto) 1fr;
+  gap: 10px; align-items: baseline; padding: 5px 0;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.tl__row:last-child { border-bottom: none; }
+.tl__at { color: var(--muted); }
+.tl__plus { color: var(--faint); }
+.tl__label { color: var(--ink); }
+.tl__extra { color: var(--faint); overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  .tl__row { grid-template-columns: 58px 1fr; }
+  .tl__label, .tl__extra { grid-column: 2; }
+}
+
 /* ── 页脚 ─────────────────────────────────── */
 .foot {
   max-width: 1100px; margin: 0 auto; padding: 18px 20px 40px;

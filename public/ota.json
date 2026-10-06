@@ -62,6 +62,22 @@
       "implemented": true,
       "note": "Called by the device, not by this page. Live: devices appear in GET /api/devices after their first report."
     },
+    "report_progress": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/commands/{commandId}/progress",
+      "auth": "device-side (no Bearer token by design)",
+      "implemented": true,
+      "body": {
+        "phase": "downloading|verifying|writing|rebooting|applying (custom <=32 chars allowed)",
+        "percent": "number 0-100, optional",
+        "bytes": "number, optional",
+        "totalBytes": "number, optional",
+        "message": "string <=128 chars, optional"
+      },
+      "returns": "{ ok: true, command: Command }",
+      "errors": { "400": "missing/too-long phase or non-numeric percent", "404": "command not found" },
+      "note": "Called by the device. This is what makes the OTA process visible on the page: server keeps the latest progress plus a bounded trail of phase changes (<=20). Posting progress also refreshes lastSeen, so a device blocked inside download/write is not shown as offline. Progress is a side channel — success/failure is still decided only by command_result."
+    },
     "command_result": {
       "method": "POST",
       "path": "/api/devices/{deviceId}/commands/{commandId}/result",
@@ -90,6 +106,10 @@
       "state": "pending | delivered | success | failed | superseded",
       "deliveryCount": "number — how many times the device picked this command up (redelivery guard)",
       "createdAt": "ISO8601 UTC",
+      "deliveredAt": "ISO8601 UTC | null — FIRST pickup (kept across redeliveries so the process view can show when it started)",
+      "lastDeliveredAt": "ISO8601 UTC | null — most recent pickup",
+      "progress": "{ phase, percent?, bytes?, totalBytes?, message?, updatedAt } | null — latest device-reported process point",
+      "trail": "[{ phase, at, percent? }] — bounded (<=20) list of phase changes",
       "finishedAt": "ISO8601 UTC | null",
       "detail": "string | null — device-reported detail, e.g. 'OTA ok, rebooted to <releaseId>'"
     }

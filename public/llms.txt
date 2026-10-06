@@ -53,7 +53,9 @@
 - 机器描述符: GET /ota.json          (tool_id=ota-console；接口清单/数据模型/鉴权说明)
 - 三端契约: GET /docs/ota.md         (设备上报 + 命令下发 + 页面端设计)
 - 用途: 查看在线/离线设备、选固件版本、下发 OTA 命令、跟踪命令状态（pending→delivered→success/failed/superseded）
-- 状态: 服务器端点 ✅ 已实现并实测；页面 ✅ 已实现；设备端固件 ✅ 已跑通真机 OTA 往返（源码在另一台电脑的工程里）
+- **过程视图（2026-10-06 新增）**: 页面有「OTA 过程」面板——步骤链（已下发→设备取走→下载→校验→写入→重启→回执）+ 时间线（各步时刻与耗时）+ 卡住判定。
+  数据分两层：服务器时间点（createdAt/deliveredAt/lastDeliveredAt/finishedAt/deliveryCount，一定有）+ 设备过程点（command.progress/trail，设备上报才有）；设备没上报时面板如实说明、不假装有进度
+- 状态: 服务器端点 ✅ 已实现并实测；页面 ✅ 已实现（含过程视图）；设备端固件 ✅ 已跑通真机 OTA 往返（源码在另一台电脑的工程里），**过程上报待补**
 - 免记口令的设置链接: GET /OTA#token={token} 打开即把 token 写入 localStorage(fw.token) 并从地址栏抹掉；
   片段(#)不发给服务器 → 不进 access log/Referer；旧形态 /?settoken={token} 仍兼容但会上行，不推荐
 - 设备对接的四件事:
@@ -65,6 +67,7 @@
   - POST /api/devices/{deviceId}/report                      (上报+取命令 · 免鉴权)
   - GET  /api/devices                                        (设备列表 · 公开只读)
   - POST /api/devices/{deviceId}/commands                    (下发 OTA · 需 Bearer token)
+  - POST /api/devices/{deviceId}/commands/{commandId}/progress (过程上报 · 免鉴权 · 页面过程视图的数据来源)
   - POST /api/devices/{deviceId}/commands/{commandId}/result (设备回执 · 免鉴权)
   - GET  /api/registry                                       (固件版本/releaseId 来源)
 - 约定: deviceId = base MAC 去冒号小写十六进制（正好 12 位）；在线判定由服务器按 lastSeen 完成（>45s 离线）；

@@ -5,9 +5,12 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   MAX_COMMANDS_PER_DEVICE,
+  MAX_TRAIL,
   ONLINE_TIMEOUT_MS,
+  applyProgress,
   applyResult,
   commandForDevice,
+  commandSummary,
   emptyDeviceStore,
   enqueueCommand,
   listDeviceViews,
@@ -90,6 +93,15 @@ async function dispatch(deviceId, body, opts = {}) {
 
 async function result(deviceId, commandId, body) {
   const res = await fetch(`${base}/api/devices/${deviceId}/commands/${commandId}/result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: res.status, json: await res.json() }
+}
+
+async function progress(deviceId, commandId, body) {
+  const res = await fetch(`${base}/api/devices/${deviceId}/commands/${commandId}/progress`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -359,6 +371,116 @@ describe('POST /api/devices/:id/commands（下发，需 token）', () => {
   })
 })
 
+describe('devices：OTA 过程（进度上报）', () => {
+  /** 一条已投递的命令（设备已取走） */
+  function delivered() {
+    let s = enqueueCommand(emptyDeviceStore(), DEV, makeCommand()).store
+    s = nextCommandForDevice(s, DEV, '2026-10-06T10:00:00Z').store
+    return s
+  }
+  const cid = (s) => s.devices[DEV].commands[0].id
+
+  it('首次进度：存 progress，trail 记阶段与时刻', () => {
+    const s = delivered()
+    const r = applyProgress(
+      s,
+      DEV,
+      cid(s),
+      { phase: 'downloading', percent: 42, bytes: 100, totalBytes: 200 },
+      '2026-10-06T10:00:05Z',
+    )
+    expect(r.command.progress.phase).toBe('downloading')
+    expect(r.command.progress.percent).toBe(42)
+    expect(r.command.progress.bytes).toBe(100)
+    expect(r.command.progress.updatedAt).toBe('2026-10-06T10:00:05Z')
+    expect(r.command.trail).toEqual([{ phase: 'downloading', at: '2026-10-06T10:00:05Z', percent: 42 }])
+  })
+
+  it('同一阶段重复上报只更新 progress；trail 同项的比例抬到最新、时刻仍是阶段起点', () => {
+    const s = delivered()
+    const id = cid(s)
+    let r = applyProgress(s, DEV, id, { phase: 'downloading', percent: 10 }, '2026-10-06T10:00:05Z')
+    r = applyProgress(r.store, DEV, id, { phase: 'downloading', percent: 80 }, '2026-10-06T10:00:09Z')
+    expect(r.command.trail).toHaveLength(1) // 不刷屏
+    expect(r.command.trail[0].at).toBe('2026-10-06T10:00:05Z') // 起点不变
+    expect(r.command.trail[0].percent).toBe(80) // 比例推进到最新
+    expect(r.command.progress.percent).toBe(80)
+    expect(r.command.progress.updatedAt).toBe('2026-10-06T10:00:09Z')
+  })
+
+  it('阶段变化 → 追加 trail；超过上限裁掉最旧的', () => {
+    let s = delivered()
+    const id = cid(s)
+    const phases = ['downloading', 'verifying', 'writing', 'rebooting', 'applying']
+    for (let i = 0; i < 30; i++) {
+      s = applyProgress(s, DEV, id, { phase: phases[i % phases.length] + (i >= phases.length ? '_r' + i : '') }, `2026-10-06T10:00:${String(i).padStart(2, '0')}Z`).store
+    }
+    const trail = s.devices[DEV].commands[0].trail
+    expect(trail.length).toBe(MAX_TRAIL)
+    expect(trail[trail.length - 1].phase).toMatch(/^applying_r29$/)
+  })
+
+  it('percent 越界夹到 0..100；message 截断；未知阶段原样存（设备侧可自行扩展）', () => {
+    const s = delivered()
+    const id = cid(s)
+    const over = applyProgress(s, DEV, id, { phase: 'writing', percent: 250 }, '2026-10-06T10:00:05Z')
+    expect(over.command.progress.percent).toBe(100)
+    const under = applyProgress(s, DEV, id, { phase: 'writing', percent: -5 }, '2026-10-06T10:00:05Z')
+    expect(under.command.progress.percent).toBe(0)
+    const long = applyProgress(
+      s,
+      DEV,
+      id,
+      { phase: 'custom_phase', message: 'x'.repeat(500) },
+      '2026-10-06T10:00:05Z',
+    )
+    expect(long.command.progress.phase).toBe('custom_phase')
+    expect(long.command.progress.message.length).toBe(128)
+  })
+
+  it('命令不存在 → command:null（不改状态）', () => {
+    const s = delivered()
+    const r = applyProgress(s, DEV, 'cmd_deadbeef', { phase: 'writing' }, '2026-10-06T10:00:05Z')
+    expect(r.command).toBeNull()
+    expect(r.store.devices[DEV].commands[0].progress).toBeUndefined()
+  })
+
+  it('进度上报会刷新 lastSeen——OTA 期间设备主循环被阻塞、不再按时 report', () => {
+    const s = delivered()
+    expect(s.devices[DEV].lastSeen).toBeNull() // 只入队过命令、设备还没报过
+    const r = applyProgress(s, DEV, cid(s), { phase: 'writing', percent: 50 }, '2026-10-06T10:00:30Z')
+    expect(r.store.devices[DEV].lastSeen).toBe('2026-10-06T10:00:30Z')
+  })
+
+  it('deliveredAt 保留首次取走时刻，lastDeliveredAt 记最近一次（重投递看得见）', () => {
+    let s = delivered()
+    const again = nextCommandForDevice(s, DEV, '2026-10-06T10:00:20Z')
+    expect(again.command.deliveredAt).toBe('2026-10-06T10:00:00Z')
+    expect(again.command.lastDeliveredAt).toBe('2026-10-06T10:00:20Z')
+    expect(again.command.deliveryCount).toBe(2)
+  })
+
+  it('commandSummary 带出 deliveredAt / progress / trail（页面画过程链要用）', () => {
+    const s = delivered()
+    const withProgress = applyProgress(s, DEV, cid(s), { phase: 'writing', percent: 7 }, '2026-10-06T10:00:05Z').store
+    const sum = commandSummary(withProgress.devices[DEV].commands[0])
+    expect(sum.deliveredAt).toBe('2026-10-06T10:00:00Z')
+    expect(sum.progress.phase).toBe('writing')
+    expect(sum.trail).toHaveLength(1)
+    // 老命令没有这些字段也要给出稳定形状
+    const bare = commandSummary(makeCommand())
+    expect(bare.deliveredAt).toBeNull()
+    expect(bare.progress).toBeNull()
+    expect(bare.trail).toEqual([])
+  })
+
+  it('纯函数：不改入参', () => {
+    const s = delivered()
+    applyProgress(s, DEV, cid(s), { phase: 'writing' }, '2026-10-06T10:00:05Z')
+    expect(s.devices[DEV].commands[0].progress).toBeUndefined()
+  })
+})
+
 describe('POST /api/devices/:id/commands/:cid/result（回执，免鉴权）', () => {
   it('非法 state → 400；不存在命令 → 404', async () => {
     const cur = await report(DEV)
@@ -394,6 +516,51 @@ describe('POST /api/devices/:id/commands/:cid/result（回执，免鉴权）', (
     expect(v.firmwareVersion).toBe(RID)
     expect(v.ip).toBe('192.168.31.100')
     expect(v.lastCommand.state).toBe('success')
+  })
+})
+
+describe('POST /api/devices/:id/commands/:cid/progress（过程上报，免鉴权）', () => {
+  /** 新下发一条并让设备取走（进度只能报在已投递的命令上） */
+  async function freshDelivered() {
+    expect((await dispatch(DEV, { type: 'ota', releaseId: RID, force: true })).status).toBe(200)
+    const cur = await report(DEV)
+    expect(cur.json.command).toBeTruthy()
+    return cur.json.command.id
+  }
+
+  it('缺 phase → 400；percent 非数字 → 400；命令不存在 → 404', async () => {
+    const cid = await freshDelivered()
+    expect((await progress(DEV, cid, {})).status).toBe(400)
+    expect((await progress(DEV, cid, { phase: '' })).status).toBe(400)
+    expect((await progress(DEV, cid, { phase: 'writing', percent: 'half' })).status).toBe(400)
+    expect((await progress(DEV, 'cmd_ffffffff', { phase: 'writing' })).status).toBe(404)
+  })
+
+  it('上报过程 → 设备列表里能看到 progress 与 trail（页面据此画过程链）', async () => {
+    const cid = await freshDelivered()
+    expect((await progress(DEV, cid, { phase: 'downloading', percent: 30, totalBytes: 1624624 })).status).toBe(200)
+    const r = await progress(DEV, cid, { phase: 'writing', percent: 60, message: 'slot ota_0' })
+    expect(r.status).toBe(200)
+    expect(r.json.command.progress.phase).toBe('writing')
+
+    const list = await (await fetch(`${base}/api/devices`)).json()
+    const cmd = list.devices.find((d) => d.deviceId === DEV).lastCommand
+    expect(cmd.deliveredAt).toBeTruthy()
+    expect(cmd.progress).toEqual(expect.objectContaining({ phase: 'writing', percent: 60, message: 'slot ota_0' }))
+    expect(cmd.trail.map((t) => t.phase)).toEqual(['downloading', 'writing'])
+  })
+
+  it('进度上报把设备刷回在线：OTA 阻塞期间 report 停了也不该显示离线', async () => {
+    const cid = await freshDelivered()
+    const stale = readDeviceStore(dataDir)
+    stale.devices[DEV].lastSeen = '2026-10-06T08:00:00Z'
+    writeDeviceStoreAtomic(dataDir, stale)
+    let list = await (await fetch(`${base}/api/devices`)).json()
+    expect(list.devices.find((d) => d.deviceId === DEV).online).toBe(false)
+
+    await progress(DEV, cid, { phase: 'rebooting' })
+    list = await (await fetch(`${base}/api/devices`)).json()
+    expect(list.devices.find((d) => d.deviceId === DEV).online).toBe(true)
   })
 })
 

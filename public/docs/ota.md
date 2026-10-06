@@ -152,7 +152,14 @@
 
 * `online`：服务器按 `last_seen` 实时判定（页面无需自算）。
 
-* `lastCommand`：最近一次命令 + 状态（`pending` / `delivered` / `success` / `failed`），没有历史命令则为 `null`。
+* `lastCommand`：最近一次命令 + 状态（`pending` / `delivered` / `success` / `failed` / `superseded`），没有历史命令则为 `null`。
+  还带三个**过程字段**（页面画过程链要用）：
+
+  | 字段 | 含义 |
+  | --- | --- |
+  | `createdAt` / `deliveredAt` / `lastDeliveredAt` / `finishedAt` | 下发、**首次**被取走、最近一次被取走、回执的时刻。`deliveredAt` 保留首取时间，配合 `deliveryCount > 1` 就能看出"被重复投递了几次" |
+  | `progress` | 设备上报的最新过程点：`{ phase, percent?, bytes?, totalBytes?, message?, updatedAt }`；设备没上报则为 `null` |
+  | `trail` | 过程点的**阶段变化**序列（有界 20 条）：`[{ phase, at, percent? }]`——`at` 是该阶段**起点**，`percent` 是该阶段达到的比例（同阶段继续上报只抬比例、不新增条目） |
 
 ### 4.3 下发 OTA 命令
 
@@ -199,6 +206,29 @@
 
 响应：`{ "ok": true }`
 
+### 4.5 过程上报（进度，2026-10-06 新增）
+
+页面「下发之后看不见过程」的补丁——**由设备端上报**（云端猜不出来），免鉴权，形态与回执一致：
+
+```
+POST /api/devices/{deviceId}/commands/{commandId}/progress     免鉴权
+{ "phase": "writing", "percent": 60, "bytes": 983040, "totalBytes": 1624624, "message": "slot ota_0" }
+```
+
+响应：`{ "ok": true, "command": { … } }`
+
+* `phase` 必填、≤32 字符。**建议**取值（页面有中文标签）：`downloading` / `verifying` / `writing` / `rebooting` / `applying`；自定义值照存、页面原样显示——设备侧新增阶段**不需要改服务器/页面**。
+* `percent` 0–100（越界夹住）；`bytes`/`totalBytes`/`message` 可选（`message` ≤128 字符）。
+* 缺 `phase`、`percent` 非数字 → **400**；命令不存在 → **404**。400/404 都不影响命令状态。
+* 服务器只留最新 `progress` + 阶段变化的 `trail`（≤20），所以设备**秒级上报也不会把存储刷爆**。
+  `trail` 每项是「阶段**起点**时刻 + 该阶段达到的比例」——同一阶段反复上报只把比例抬高、不新增条目。
+* **上报即心跳**：会刷新 `lastSeen`。OTA 期间设备主循环常被下载/写入阻塞、不再按时 `report`，没有这条就会被页面显示成"离线"。
+* **旁路语义**：`progress` 不参与状态机；命令成败**只由 §4.4 的 `result` 决定**。设备不实现这条也完全可用（页面退化显示服务器可见的时间点）。
+
+### 4.6 在线判定与心跳
+
+`online = now - lastSeen <= 45s`，由服务器算（页面不自算）。刷新 `lastSeen` 的有两处：`report`（§4.1）与 `progress`（§4.5）——后者存在的意义之一就是"OTA 阻塞期间别把我显示成离线"。
+
 ## 5. 设备端实现要点
 
 > ⚠️ **设备工程在另一台电脑上维护，且本仓库不假设其现状**。下面只列"要做什么/坑在哪"；
@@ -238,8 +268,8 @@
 | 数据源 | **只有实时接口**（页面内无假数据）：每 5s 拉 `GET /api/devices` + `GET /api/registry`；取数失败时胶囊显示「连接失败」并给出原因 |
 | 鉴权 | 下发是写操作：页面有 **Token 输入框**（存 `localStorage.fw.token`，与主站共用同一键、不上传），请求带 `Authorization: Bearer`；无 token 时前置拦截并提示。**免记口令**：设置链接 `https://<host>/OTA#token=<token>` 打开即写入本机并抹掉地址栏（片段不上行 → 不进日志/Referer），页面可「🔗 复制设置链接」存书签，换浏览器/换电脑打开书签即完成配置；旧的 `?settoken=` 仍兼容但会进日志，不用。**report / 回执免鉴权**，设备侧无需 token |
 | 失败提示 | 按状态码给「下一步做什么」：401→填 token、409→勾「顶替未决命令(force)」重试、404→release 不存在、其他→透传服务端文案 |
-| 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发（含 force 顶替）· 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
-| 未实现 | **无**——§4 四个端点均已实现并实测（见 §6.2）；设备端固件由另一台电脑开发，入口见 `docs/DEVICE-OTA.md` |
+| 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令 + **过程摘要**）· 设备与 release 下拉 · 下发（含 force 顶替）· 命令状态流转 · **「OTA 过程」面板**（步骤链 + 时间线 + 卡住判定）· 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
+| 未实现 | **无**——§4 五个端点均已实现并实测（见 §6.2）；设备端固件由另一台电脑开发，入口见 `docs/DEVICE-OTA.md` |
 
 **页面不再需要 mock 兜底**：服务器四端点已实现（§6.2），页面数据全部来自实时接口；
 设备端联调用 `tools/device-sim/` 模拟器喂数据（见 `docs/DEVICE-OTA.md` §9），不必往页面里塞假数据。
@@ -249,13 +279,14 @@
 | 项 | 值 |
 | --- | --- |
 | 存储 | `server-data/devices.json`（设备 + 每设备命令队列，保留最近 20 条）；`server/devices.js` 纯函数 + 原子写 |
-| 端点 | `report` / `GET /api/devices` / `commands` / `result` 四个（§4.1–§4.4 全部） |
-| 鉴权 | `report` 与 `result` **免鉴权**（MAC 即身份）；`commands` 需 Bearer（主 token 或工作 token） |
-| 离线判定 | 服务端按 `lastSeen` 算，阈值 **45s**（`ONLINE_TIMEOUT_MS`） |
+| 端点 | `report` / `GET /api/devices` / `commands` / `result` / **`progress`**（§4.1–§4.5） |
+| 鉴权 | `report`、`result` 与 `progress` **免鉴权**（MAC 即身份）；`commands` 需 Bearer（主 token 或工作 token） |
+| 离线判定 | 服务端按 `lastSeen` 算，阈值 **45s**（`ONLINE_TIMEOUT_MS`）；`report` 与 `progress` 都会刷新它 |
+| 过程数据 | 每命令存最新 `progress` + 阶段变化的 `trail`（≤20 条）；`commandSummary` 一并带出 `deliveredAt`/`lastDeliveredAt`/`progress`/`trail` |
 | app 段解析 | 下发时在 registry 里按 `releaseId` 定位 release，取 `type==='app'` 的段（退化到最大的 `.bin`），把 `file/url/sha256/size` 填进命令 |
 | 未决命令 | 每设备至多一条；冲突返回 **409** + 现有命令；`{"force":true}` 可顶替（旧命令标 `superseded`）——§7#3 定为「报冲突 + 可选顶替」 |
-| 重复投递 | 命取走后未回执 → 下次上报**再投递同一条**（响应带 `redelivered:true`，命令内 `deliveryCount` 累加），避免设备取走即崩溃造成永久卡死；设备端需幂等 |
-| 测试 | `tests/devices.test.js` 30 用例（存储纯函数 + 四端点链路 + 409/force/重投递/篡改失败） |
+| 重复投递 | 命取走后未回执 → 下次上报**再投递同一条**（响应带 `redelivered:true`，命令内 `deliveryCount` 累加），避免设备取走即崩溃造成永久卡死；设备端需幂等。`deliveredAt` 保留**首取**时刻、`lastDeliveredAt` 记最近一次 |
+| 测试 | `tests/devices.test.js` 40+ 用例（存储纯函数 + 五端点链路 + 409/force/重投递/篡改失败/过程上报与卡住判定数据） |
 
 ### 6.1 模块规划（原设计表，已全部实现）
 
@@ -273,10 +304,11 @@
 | 2 | 证书     | ✅ **dev 走明文 80；生产上正式证书** | 自签下设备端要么内置根证书、要么临时关校验；dev 用明文最省事 |
 | 3 | 未决命令并发 | ✅ **报冲突 409 + 可选 `force` 顶替** | 不静默覆盖；顶替时旧命令标 `superseded` |
 | 4 | 触发方式   | ⏸ 现为**页面手动下发** | 「设备开机自动检查最新版」未做，留作扩展 |
-| 5 | 服务器端归属 | ✅ **已实现于 firmware-server** | `server/devices.js` + `server/app.js`；`tests/devices.test.js` 30 用例 |
-| 6 | 设备上报鉴权 | ✅ **report/回执免鉴权，仅下发需 token** | MAC 即身份；防伪造不在本期范围 |
+| 5 | 服务器端归属 | ✅ **已实现于 firmware-server** | `server/devices.js` + `server/app.js`；`tests/devices.test.js` 40+ 用例 |
+| 6 | 设备上报鉴权 | ✅ **report/回执/过程上报免鉴权，仅下发需 token** | MAC 即身份；防伪造不在本期范围 |
+| 7 | 过程可见性 | ✅ **由设备上报 `progress`（§4.5）** | 云端猜不出进度，只能设备报；设备不实现也能跑（页面退化显示服务器时间点）。配套两条设计：① `progress` **刷新 `lastSeen`**——OTA 阻塞期间设备不再 `report`，否则会被显示成"离线"，那正是"看不见过程"的观感来源；② `trail` 只记**阶段变化**且有界——诊断要的是"何时到了哪一步"，不是每次百分比采样 |
 
-> 本文是**设计契约**。进度：页面端 ✅（`/OTA`）→ 服务器端 ✅（§4 四端点 + §6.2）→ **设备端待开发**。
+> 本文是**设计契约**。进度：页面端 ✅（`/OTA`，含「OTA 过程」面板）→ 服务器端 ✅（§4 五端点 + §6.2）→ 设备端：上报/取命令/回执/幂等**已跑通真机 OTA**，**过程上报待补**（照 §4.5 + DEVICE-OTA §7.8 抄即可）。
 > 设备端开工请以 **[`docs/DEVICE-OTA.md`](./DEVICE-OTA.md)** 为准（含代码骨架、分区表、联调步骤、验收清单）；
 > 本文负责"为什么这么定"，那份负责"具体怎么做"。
 

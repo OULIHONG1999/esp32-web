@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildDevices,
+  buildProgressBody,
   buildReportBody,
   decideAck,
   deviceIdFromSeed,
@@ -65,6 +66,25 @@ describe('device-sim：回执判定', () => {
   })
 })
 
+describe('device-sim：过程上报体', () => {
+  it('只带给定字段；percent 夹到 0..100、字节取整', () => {
+    expect(buildProgressBody('verifying')).toEqual({ phase: 'verifying' })
+    const b = buildProgressBody('downloading', { percent: 130.6, bytes: 10.4, totalBytes: 100 })
+    expect(b).toEqual({ phase: 'downloading', percent: 100, bytes: 10, totalBytes: 100 })
+    expect(buildProgressBody('writing', { percent: -3 }).percent).toBe(0)
+  })
+
+  it('phase 必填；message 截断到 128 字', () => {
+    expect(() => buildProgressBody('')).toThrow()
+    expect(buildProgressBody('writing', { message: 'x'.repeat(200) }).message.length).toBe(128)
+  })
+
+  it('非数字 percent / 字节被忽略而不是写成 NaN（页面会照着渲染）', () => {
+    const b = buildProgressBody('writing', { percent: 'half', bytes: 'many' })
+    expect(b).toEqual({ phase: 'writing' })
+  })
+})
+
 describe('device-sim：参数解析', () => {
   it('默认值：本地 8787、1 台、15s、不 dry-run', () => {
     const o = parseArgs([])
@@ -96,6 +116,15 @@ describe('device-sim：参数解析', () => {
   it('--help 可识别', () => {
     expect(parseArgs(['--help']).help).toBe(true)
     expect(parseArgs(['-h']).help).toBe(true)
+  })
+
+  it('过程上报默认开、可关、间隔可调', () => {
+    const d = parseArgs([])
+    expect(d.progress).toBe(true)
+    expect(d.progressMs).toBe(400)
+    expect(parseArgs(['--no-progress']).progress).toBe(false)
+    expect(parseArgs(['--progress-ms', '0']).progressMs).toBe(0)
+    expect(() => parseArgs(['--progress-ms', '99999'])).toThrow()
   })
 })
 

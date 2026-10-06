@@ -38,6 +38,16 @@ const PATCH_FIELDS = [
 /** 命令状态机取值：pending → delivered → success|failed；另 superseded（被新命令顶替） */
 export const COMMAND_STATES = ['pending', 'delivered', 'success', 'failed', 'superseded']
 
+/**
+ * 进度阶段的建议取值（页面有中文标签）。
+ * 设备端可上报别的短标识——服务器原样存，页面翻译不了就原样显示，
+ * 这样设备侧新增阶段不需要改服务器。
+ */
+export const PROGRESS_PHASES = ['downloading', 'verifying', 'writing', 'rebooting', 'applying']
+
+/** 每命令保留的过程事件上限（只记阶段变化，不记每次百分比） */
+export const MAX_TRAIL = 20
+
 export function devicesPath(dataDir) {
   return path.join(dataDir, 'devices.json')
 }
@@ -112,12 +122,16 @@ export function nextCommandForDevice(store, deviceId, now) {
   if (pending) {
     pending.state = 'delivered'
     pending.deliveredAt = now
+    pending.lastDeliveredAt = now
     pending.deliveryCount = (pending.deliveryCount ?? 0) + 1
     return { store: next, command: pending, redelivered: false }
   }
   const delivered = list.find((c) => c.state === 'delivered')
   if (delivered) {
-    delivered.deliveredAt = now
+    // 重复投递：deliveredAt 保留「第一次被取走」的时刻（过程视图要看首取时间），
+    // 最近一次取走记在 lastDeliveredAt，两者配合 deliveryCount 就能看出重投了几次。
+    delivered.deliveredAt ??= now
+    delivered.lastDeliveredAt = now
     delivered.deliveryCount = (delivered.deliveryCount ?? 0) + 1
     return { store: next, command: delivered, redelivered: true }
   }
@@ -155,6 +169,55 @@ export function enqueueCommand(store, deviceId, command, { force = false } = {})
   return { store: next, command }
 }
 
+/**
+ * 纯函数：设备进度上报（`POST …/commands/{cid}/progress`，免鉴权，同 report/result）。
+ *
+ * 解决「下发后看不见过程」：设备在下载/校验/写入/重启各阶段打一个点，页面据此画过程链。
+ * 规则：
+ * - `progress` 只保留最新值（阶段 + 百分比 + 文案 + 字节）；`trail` 只追加**阶段变化**，
+ *   有界 MAX_TRAIL（要的是"何时到了哪一步"，不是每次百分比采样）。
+ * - **刷新 lastSeen**：OTA 期间设备主循环常被下载/写入阻塞、不再按时 report，
+ *   进度上报是同样的存活信号，否则页面会把正在升级的设备显示成「离线」。
+ * - 设备端不上报也完全可用（向后兼容）：页面退化显示服务器可见的时间点。
+ */
+export function applyProgress(store, deviceId, commandId, report, now) {
+  const next = structuredClone(store)
+  const d = next.devices[deviceId]
+  const cmd = (d?.commands ?? []).find((c) => c.id === commandId)
+  if (!cmd) return { store: next, command: null }
+
+  const phase = String(report.phase).trim().slice(0, 32)
+  const progress = { phase, updatedAt: now }
+  if (typeof report.percent === 'number' && Number.isFinite(report.percent)) {
+    progress.percent = Math.max(0, Math.min(100, Math.round(report.percent)))
+  }
+  for (const k of ['bytes', 'totalBytes']) {
+    if (typeof report[k] === 'number' && Number.isFinite(report[k]) && report[k] >= 0) {
+      progress[k] = report[k]
+    }
+  }
+  if (typeof report.message === 'string' && report.message.trim()) {
+    progress.message = report.message.trim().slice(0, 128)
+  }
+  cmd.progress = progress
+
+  const trail = (cmd.trail ??= [])
+  const last = trail[trail.length - 1]
+  if (!last || last.phase !== phase) {
+    const entry = { phase, at: now }
+    if (progress.percent !== undefined) entry.percent = progress.percent
+    trail.push(entry)
+    if (trail.length > MAX_TRAIL) cmd.trail = trail.slice(-MAX_TRAIL)
+  } else if (progress.percent !== undefined) {
+    // 同阶段继续推进：把该阶段的比例抬到最新值（`at` 仍是阶段**起点**）——
+    // 时间线上于是读得出"下载自 X 开始、最终到 100%"，而不是永远停在首个采样。
+    last.percent = Math.max(last.percent ?? 0, progress.percent)
+  }
+
+  if (d) d.lastSeen = now
+  return { store: next, command: cmd }
+}
+
 /** 纯函数：设备回执（只认 success|failed） */
 export function applyResult(store, deviceId, commandId, state, detail, now) {
   const next = structuredClone(store)
@@ -177,6 +240,10 @@ export function commandSummary(c) {
     state: c.state,
     deliveryCount: c.deliveryCount ?? 0,
     createdAt: c.createdAt,
+    deliveredAt: c.deliveredAt ?? null,
+    lastDeliveredAt: c.lastDeliveredAt ?? null,
+    progress: c.progress ?? null,
+    trail: Array.isArray(c.trail) ? c.trail : [],
     finishedAt: c.finishedAt ?? null,
     detail: c.detail ?? null,
   }

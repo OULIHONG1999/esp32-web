@@ -5,6 +5,8 @@ import {
   COMMAND_ID_RE,
   DEVICE_ID_RE,
   ONLINE_TIMEOUT_MS,
+  PROGRESS_PHASES,
+  applyProgress,
   applyResult,
   commandForDevice,
   commandSummary,
@@ -478,6 +480,37 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           if (!outcome.command) return send(res, 404, { error: 'command not found', commandId })
           writeDeviceStoreAtomic(dataDir, outcome.store)
           return send(res, 200, { ok: true, command: commandSummary(outcome.command) })
+        }
+
+        // 设备进度上报（免鉴权，同 report/result）——让页面能看见「OTA 进行到哪一步」
+        const devProgressM = /^\/api\/devices\/([^/]+)\/commands\/([^/]+)\/progress$/.exec(p)
+        if (req.method === 'POST' && devProgressM) {
+          const deviceId = devProgressM[1]
+          const commandId = devProgressM[2]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          if (!COMMAND_ID_RE.test(commandId)) return send(res, 400, { error: 'bad commandId' })
+          const payload = await readJsonBody(req, 4 * 1024)
+          const phase = typeof payload.phase === 'string' ? payload.phase.trim() : ''
+          if (!phase || phase.length > 32) {
+            return send(res, 400, {
+              error: 'phase required (<=32 chars), e.g. ' + PROGRESS_PHASES.join('|'),
+            })
+          }
+          if (payload.percent !== undefined && (typeof payload.percent !== 'number' || !Number.isFinite(payload.percent))) {
+            return send(res, 400, { error: 'percent must be a finite number 0-100' })
+          }
+          const reported = applyProgress(
+            readDeviceStore(dataDir),
+            deviceId,
+            commandId,
+            payload,
+            new Date().toISOString(),
+          )
+          if (!reported.command) return send(res, 404, { error: 'command not found', commandId })
+          writeDeviceStoreAtomic(dataDir, reported.store)
+          return send(res, 200, { ok: true, command: commandSummary(reported.command) })
         }
 
         if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {

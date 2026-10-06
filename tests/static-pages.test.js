@@ -118,6 +118,27 @@ describe('独立页 /OTA 静态托管', () => {
     expect(j.status).not.toContain('not implemented')
   })
 
+  // 回归守卫：过程视图必须真接线（面板 + 渲染函数 + 阶段标签），否则"看不见 OTA 过程"会复发。
+  it('/OTA 页具备 OTA 过程视图接线（步骤链 + 时间线 + 卡住判定）', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    expect(html).toContain('id="procBody"')
+    expect(html).toContain('id="procHint"')
+    expect(html).toContain('/progress') // 页脚写明过程上报端点（数据来源）
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).toContain('renderProcess')
+    expect(js).toContain('stepChain')
+    expect(js).toContain('verdict')
+    expect(js).toContain('PHASE_ORDER')
+    expect(js).toContain('downloading') // 阶段标签表
+    expect(js).toContain('cmd.progress') // 读设备上报的进度
+    expect(js).toContain('cmd.trail') // 读阶段变化轨迹
+    const j = await (await fetch(base + '/ota.json')).json()
+    expect(j.apis.report_progress.implemented).toBe(true)
+    expect(j.apis.report_progress.path).toContain('/progress')
+    expect(j.data_model.Command.progress).toBeTruthy()
+    expect(j.data_model.Command.deliveredAt).toBeTruthy()
+  })
+
   it('/ota.json 描述符如实声明下发需鉴权且端点已实现', async () => {
     const j = await (await fetch(base + '/ota.json')).json()
     expect(j.auth.dispatch_requires_token).toBe(true)

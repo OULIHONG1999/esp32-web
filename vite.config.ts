@@ -5,13 +5,15 @@ import { fileURLToPath, URL } from 'node:url'
 export default defineConfig({
   base: './',
   plugins: [vue()],
-  // v1.5：自含服务 API 统一转发 8787（registry/publish/status/token；dev IDF 中间件已移除）
+  // v1.5：自含服务 API 统一转发 8787（registry/publish/status/token/devices；dev IDF 中间件已移除）
   server: {
     proxy: {
       '/api/registry': 'http://localhost:8787',
       '/api/publish': 'http://localhost:8787',
       '/api/status': 'http://localhost:8787',
       '/api/token': 'http://localhost:8787',
+      // /OTA 独立页（dev 下也由 vite 提供）要读设备列表，否则本地开 /OTA 会「连接失败」
+      '/api/devices': 'http://localhost:8787',
     },
   },
   resolve: {

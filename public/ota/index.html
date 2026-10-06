@@ -150,6 +150,20 @@
     </p>
   </section>
 
+  <!-- ── OTA 过程 ──────────────────────────────────────────── -->
+  <section class="panel" id="process">
+    <div class="panel__hd">
+      <h2>OTA 过程</h2>
+      <span class="hint">选中设备：<b id="procHint">未选设备</b> · 每 5s 刷新</span>
+    </div>
+    <div id="procBody"></div>
+    <p class="foot-note">
+      过程点来自设备端的进度上报（<code>POST /api/devices/{id}/commands/{cid}/progress</code>，免鉴权）。
+      设备端<b>没实现也照常可用</b>——那时只能看到服务器可见的时间点（下发 / 取走 / 回执）。
+      设备侧接入方法见 <a href="/docs/DEVICE-OTA.md">/docs/DEVICE-OTA.md</a> §4.5（契约）+ §7.8（ESP-IDF 骨架）。
+    </p>
+  </section>
+
 </main>
 
 <footer class="foot">
@@ -176,7 +190,18 @@
   "apis": {
     "list_devices": { "method": "GET", "path": "/api/devices", "auth": "none" },
     "list_releases": { "method": "GET", "path": "/api/registry", "auth": "none" },
-    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "auth": "Bearer token", "body": { "type": "ota", "releaseId": "string", "force": "boolean optional" } }
+    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "auth": "Bearer token", "body": { "type": "ota", "releaseId": "string", "force": "boolean optional" } },
+    "report_progress": { "method": "POST", "path": "/api/devices/{deviceId}/commands/{commandId}/progress", "auth": "none (device-side)", "body": { "phase": "downloading|verifying|writing|rebooting|applying (custom <=32 chars)", "percent": "0-100 optional", "bytes": "optional", "totalBytes": "optional", "message": "optional <=128" } }
+  },
+  "process_view": {
+    "what": "the page draws the OTA process: step chain (已下发 → 设备取走 → 下载 → 校验 → 写入 → 重启 → 回执) + a timeline with timestamps and elapsed times + a stuck/verdict line",
+    "data_sources": [
+      "server timestamps (always available): createdAt / deliveredAt / lastDeliveredAt / finishedAt + deliveryCount",
+      "device process points (only if the device reports them): command.progress + command.trail"
+    ],
+    "degradation": "if the device never reports progress, the panel still shows the server-visible timestamps and says so explicitly (it does not fake progress)",
+    "stuck_rules": "pending > 30s => warn; delivered with no progress report for > 120s => warn (device may be mid-write with no instrumentation, or power-cycled); progress older than 60s while unresolved => warn",
+    "last_seen_note": "reporting progress refreshes lastSeen, so a device blocked inside download/write is not displayed as offline"
   },
   "auth": {
     "dispatch_requires_token": true,

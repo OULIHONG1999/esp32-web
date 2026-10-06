@@ -37,11 +37,11 @@
 | `http://firmware.example.com/` 与 `/index.html` | 80 → 301 | **只有这两个路径跳 https**（明文打开烧录页无意义，Web Serial 需安全上下文）；其余路径（`/api`、`/docs`、`/llms.txt`、`/tools`、`/ota.json`、`/OTA`）**保持 http 可达**——自签 https 会挡住 AI/脚本/设备 | — |
 | `/llms.txt` | 同上 | AI 速查（API/数据结构/认证/文档索引） | 公开 |
 | `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
-| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；数据来自实时 `/api/devices`，5s 轮询） | 公开 |
+| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；数据来自实时 `/api/devices`，5s 轮询；含「OTA 过程」面板：步骤链 + 时间线 + 卡住判定） | 公开 |
 | `/ota.json` | 同上 | OTA 页机器描述符（AI 入口，tool_id=ota-console） | 公开 |
 | `/docs/DEVICE-OTA.md` | 同上 | **设备接入指南**（另一台电脑上的设备端开工入口） | 公开 |
-| `/tools/device-sim/{index,lib}.js` | 同上 | 设备模拟器源码（零依赖 Node，无硬件联调） | 公开 |
-| `/api/devices*` | 同上 | 设备上报/列表/命令/回执；`report` 与 `result` 免鉴权，`commands` 需 Bearer | 见 §4 |
+| `/tools/device-sim/{index,lib}.js` | 同上 | 设备模拟器源码（零依赖 Node，无硬件联调；默认按阶段上报过程进度，`--no-progress` 可关） | 公开 |
+| `/api/devices*` | 同上 | 设备上报/列表/命令/回执/**过程上报**；`report`、`result`、`progress` 免鉴权，`commands` 需 Bearer | 见 §4 |
 | `/tools/publish/*.js` | 同上 | 发布 CLI 源码下载（4 文件，零依赖） | 公开 |
 | `/api/registry*` 等 | 同上 | 读接口公开；写接口需 Bearer | 见 §4 |
 

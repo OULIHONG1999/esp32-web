@@ -208,7 +208,35 @@ POST /api/devices/{deviceId}/commands/{commandId}/result     免鉴权
 * `detail` 建议写清原因，会显示在页面和 `/api/devices` 上，是排查的主要线索。
 * 回执一旦写入，该设备的"未决位"释放，可以下发下一条。
 
-### 4.5 固件下载
+### 4.5 过程上报（进度，可选但强烈建议）
+
+```
+POST /api/devices/{deviceId}/commands/{commandId}/progress     免鉴权
+{ "phase": "writing", "percent": 60, "bytes": 983040, "totalBytes": 1624624, "message": "slot ota_0" }
+```
+
+响应：`{ "ok": true, "command": { … } }`
+
+**为什么值得做**：不报进度时，页面在设备取走命令后**只能显示"已投递"**——设备是在下载、在写入、还是已经断电，人都看不出来；
+而且 OTA 期间设备主循环常被下载/写入阻塞、不再按时 `report`，页面会把它显示成**离线**。
+过程上报解决这两件事，代价是每个阶段一行 HTTP。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `phase` | ✅ | 阶段名，≤32 字符。建议用这套（页面有中文标签）：`downloading` / `verifying` / `writing` / `rebooting` / `applying`；自定义阶段服务器照存，页面原样显示 |
+| `percent` | | 0–100，越界会被夹住。下载/写入这类有百分比的最有用 |
+| `bytes` / `totalBytes` | | 已传/总字节（可选，便于人核对） |
+| `message` | | ≤128 字符的一句话，如 `slot ota_0`、`retry 2/3` |
+
+规则：
+
+* `phase` 缺失或超过 32 字符 → **400**；`percent` 不是数字 → **400**；命令不存在 → **404**。
+* 服务器只保留**最新一条** `progress`，外加一份**阶段变化**的 `trail`（最多 20 条）——所以同一阶段反复上报不会把历史刷爆，**可以放心秒级上报**。
+* **上报会刷新 `lastSeen`**（等价于一次心跳）：这正是"OTA 期间设备不该被显示成离线"的实现方式。
+* 报不报都不影响命令流转：`progress` 只是给人看的旁路，**升级结果仍然只由 `result` 决定**（§4.4）。
+* 阶段推进到写入前再报 `writing` 更贴近真实；重启后补发 `result` 时不必再报进度。
+
+### 4.6 固件下载
 
 就是命令里的 `urlAbsolute`，**公开只读、无需鉴权**：
 
@@ -218,17 +246,17 @@ GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/p
 
 返回 `application/octet-stream`。**下载完必须校验 sha256** 等于命令里的 `sha256`，不匹配就回执 `failed`（别把坏固件写进 OTA 槽）。
 
-### 4.6 错误码对照
+### 4.7 错误码对照
 
 | 码 | 含义 | 典型原因 |
 | --- | --- | --- |
-| 400 | 请求不合法 | `deviceId` 非 12 位小写 hex / body 不是 JSON 对象 / `releaseId` 非法 / `state` 不是 success\|failed |
-| 401 | 未授权 | 下发命令没带或带错 token（**report 与回执不会遇到 401**） |
+| 400 | 请求不合法 | `deviceId` 非 12 位小写 hex / body 不是 JSON 对象 / `releaseId` 非法 / `state` 不是 success\|failed / `phase` 缺失或过长 / `percent` 非数字 |
+| 401 | 未授权 | 下发命令没带或带错 token（**report / 回执 / 过程上报都不会遇到 401**） |
 | 404 | 找不到 | releaseId 在 registry 里不存在 / commandId 不存在 / 下载路径的段名不对 |
 | 409 | 冲突 | 该设备已有未回执命令（用 `force: true` 顶替） |
 | 413 | body 过大 | 上报超过 8KB（正常上报远小于此） |
 
-## 5. 设备端要实现的 6 件事
+## 5. 设备端要实现的 7 件事
 
 | # | 事项 | 要点 |
 | --- | --- | --- |
@@ -237,7 +265,8 @@ GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/p
 | 3 | **上报循环** | 每 15s `POST report`，解析响应里的 `command`；失败要退避重试，**不能因为服务器暂时不可达就停掉循环** |
 | 4 | **命令处理** | 有命令才动：查 `releaseId` 是否已在运行（幂等）→ 下载 → 校验 sha256 → 写 OTA 槽 |
 | 5 | **回执** | 升级成功后**重启，下一次上报前**把 `result` 发出去（推荐：重启后第一件事就是补发上次的结果，见 §7.5） |
-| 6 | **分区表改造** | 加 `otadata/ota_0/ota_1`（§8）。**这一步不做，OTA 根本写不进去** |
+| 6 | **过程上报**（可选，强烈建议） | 下载/校验/写入/重启各报一次 `progress`（§4.5）。不做也能跑通，但页面上看不到过程、还会把你显示成离线 |
+| 7 | **分区表改造** | 加 `otadata/ota_0/ota_1`（§8）。**这一步不做，OTA 根本写不进去** |
 
 ## 6. 时序与状态机
 
@@ -250,16 +279,20 @@ GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/p
  │ ◄──────── { command: {url, sha256,...} }│  标记 delivered
  │                                          │
  │  GET  {urlAbsolute} ──────────────────► │  返回固件字节流
+ │  POST progress {phase:downloading} ───► │  页面看到「下载固件 x%」（可选，§4.5）
  │  校验 sha256 ─┐                          │
  │              │不匹配 → 回执 failed ────► │  命令结束（未决位释放）
  │              │匹配                        │
+ │  POST progress {phase:writing,60%} ───► │  页面看到「写入 OTA 槽 60%」
  │  写空闲 OTA 槽 → 重启                     │
  │                                          │
+ │  POST progress {phase:rebooting} ─────► │  页面看到「重启」
  │  （重启后）补发 result success ────────► │  命令标 success
  │  POST report（带新 firmwareVersion）──► │  页面显示新版本
 ```
 
 命令状态取值（服务器侧）：`pending` → `delivered` → `success` / `failed`；另有 `superseded`（被新命令顶替）。
+过程阶段（`progress.phase`）是**旁路信息**：不参与状态机，也不影响回执判定——报不报都能跑通，报了才看得见过程。
 
 ## 7. ESP-IDF 参考实现
 
@@ -426,6 +459,46 @@ esp_ota_mark_app_valid_cancel_rollback();
 
 ⚠️ 开了回滚之后，"启动即崩溃"的新固件会被自动丢弃，表现为"升级像是没生效"。所以**新固件启动路径要短、要稳**，并在自检通过后立刻调 valid。
 
+### 7.8 过程上报（让页面看得见过程，§4.5）
+
+一句话：**在下载和写入的循环里，每隔一段就报一次百分比**。body 只有几个字段，照抄即可：
+
+```c
+/* 报一次过程点；阶段名用契约里的英文，percent 可省略（校验/重启这类没有百分比） */
+static void report_progress(const char *cmd_id, const char *phase, int percent, const char *message)
+{
+    char url[256], body[256];
+    snprintf(url, sizeof(url), "%s/api/devices/%s/commands/%s/progress",
+             s_base_url, s_device_id, cmd_id);
+    if (percent >= 0) {
+        snprintf(body, sizeof(body), "{\"phase\":\"%s\",\"percent\":%d}", phase, percent);
+    } else if (message) {
+        snprintf(body, sizeof(body), "{\"phase\":\"%s\",\"message\":\"%s\"}", phase, message);
+    } else {
+        snprintf(body, sizeof(body), "{\"phase\":\"%s\"}", phase);
+    }
+    /* 与回执共用一个 HTTP 客户端：POST + Content-Type: application/json。
+       失败只记一行日志、绝不打断升级 —— 它是旁路信息，成败仍由 result 决定。 */
+    http_post_json(url, body);
+}
+
+/* 用法（就放在 §7.4/§7.5 的下载与写入路径里） */
+report_progress(cmd_id, "downloading", 5,   NULL);
+/* ...esp_http_client_read 循环中，每收到约 10% 报一次... */
+report_progress(cmd_id, "downloading", 100, NULL);
+report_progress(cmd_id, "verifying",   -1,  "sha256");
+report_progress(cmd_id, "writing",     50,  "slot ota_0");
+report_progress(cmd_id, "writing",     100, NULL);
+report_progress(cmd_id, "rebooting",   -1,  "reboot to new app");
+```
+
+注意事项：
+
+* **别报太密**：服务器只留最新值 + 阶段变化（trail ≤20 条），几秒一次没问题，但没必要每读 4KB 就发一个请求——按"每 5~10%"或每几秒节流。
+* **报失败不打断升级**：400/404/超时都只记日志继续走。
+* **它顺带当心跳**：服务器收到过程上报会刷新 `lastSeen`——OTA 期间设备不再按时 `report`，页面也不会把你标成离线。
+* 命令 ID 用取到命令时响应里的 `command.id`（`cmd_xxxx`），**不是** `releaseId`。
+
 ## 8. 分区表改造（触发工程规则 R10）
 
 ### 8.1 先自查三件事（不要照抄，先看清自己工程）
@@ -513,6 +586,11 @@ node tools/device-sim/index.js --server http://<SERVER> --id 3485a1b2c3d4 --dry-
 
 # ⑤ 演练失败分支（30% 概率回执 failed）
 node tools/device-sim/index.js --server http://<SERVER> --interval 5 --fail-rate 0.3
+
+# ⑥ 看"过程视图"：模拟器默认按阶段报进度，页面 /OTA 上会看到 下载→校验→写入→重启
+#    想对比"设备端没实现过程上报"的样子：加 --no-progress
+node tools/device-sim/index.js --server http://<SERVER> --id 3485a1b2c3d4 --progress-ms 800
+node tools/device-sim/index.js --server http://<SERVER> --id 3485a1b2c3d4 --no-progress
 ```
 
 ### 9.3 手动走一遍完整 OTA
@@ -548,6 +626,7 @@ curl http://<SERVER>/api/devices     # lastCommand.state 应为 success，firmwa
 * **下载 URL 是否真的能取到字节**，且 sha256 与命令一致
 * 回执链路与状态流转
 * 失败分支（篡改固件 → sha256 不匹配 → failed）
+* **过程上报**（默认按阶段报 下载→校验→写入→重启；`--no-progress` 可对比"设备端没实现"的样子）——页面 `/OTA` 的「OTA 过程」面板会实时画出来
 
 ## 10. 失败模式与排查
 
@@ -559,6 +638,7 @@ curl http://<SERVER>/api/devices     # lastCommand.state 应为 success，firmwa
 | 下发命令 **404** | `releaseId` 在服务器 registry 里不存在 | 先 `GET /api/registry` 抄准 ID |
 | 下发命令 **409** | 该设备已有未回执命令 | 先查 `/api/devices` 的 `lastCommand.state`；确实要顶替就加 `force:true` |
 | 命令一直是 `delivered` 不回结果 | 设备取走后崩溃/丢响应 | 服务器会**重复投递**（`redelivered:true`）；设备端务必做幂等并补发回执（§7.5） |
+| 命令是 `delivered`，但页面看不到过程 | 设备端没实现过程上报（§4.5），或上报打到别的 commandId | 先看 `GET /api/devices` 里 `lastCommand.progress/trail` 是否为空；自定义阶段要报 ≤32 字符 |
 | 下载 **404** | 命令里的 `url` 段名与服务器实际路径不符 | 用 `urlAbsolute` 而不是自己拼；或核对 release 的 parts |
 | 下载 sha256 不匹配 | 传输被截断 / 服务器上文件被换过 | 回执 failed 并带上实际 sha；别写入 OTA 槽 |
 | `esp_https_ota` 报协议/参数错误 | 用了 `http://` 但没开 `CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP` | §7.4 |
@@ -579,6 +659,7 @@ curl http://<SERVER>/api/devices     # lastCommand.state 应为 success，firmwa
 - [ ] 升级后重启，`firmwareVersion` 变成新 `releaseId`，`lastCommand.state = success`
 - [ ] 故意篡改固件（或改 sha）→ 设备回执 `failed` 且带原因，**未写入 OTA 槽**
 - [ ] 设备取走命令后立刻断电（不回执）→ 重新上电后能**重复收到该命令**并最终回执
+- [ ] （可选，强烈建议）下载/写入时页面能看到过程链推进；OTA 期间设备不会被显示成离线
 - [ ] 分区表已是 `otadata + ota_0 + ota_1`，用户数据（storage）在新分区表下能正常挂载
 
 ## 12. 不在本次范围（后续可扩展）

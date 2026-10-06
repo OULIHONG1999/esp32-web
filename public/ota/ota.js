@@ -17,6 +17,19 @@
   // ── 契约常量 ──────────────────────────────────────────────
   var STATE_LABEL = { pending: '待执行', delivered: '已投递', success: '成功', failed: '失败', superseded: '已顶替' }
 
+  /** 过程阶段的标签；设备端上报自定义阶段时原样显示（服务器不拦） */
+  var PHASE_LABEL = {
+    downloading: '下载固件',
+    verifying: '校验 sha256',
+    writing: '写入 OTA 槽',
+    rebooting: '重启',
+    applying: '启动确认'
+  }
+  /** 过程链的固定顺序（设备端按此推进；跳步也能画） */
+  var PHASE_ORDER = ['downloading', 'verifying', 'writing', 'rebooting', 'applying']
+  /** 卡住判定阈值：这些数字就是"看不见过程"时的解释力 */
+  var STUCK = { pendingMs: 30000, silentMs: 120000, staleMs: 60000 }
+
   // ── DOM ──────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id) }
   var el = {
@@ -28,6 +41,7 @@
     dDevice: $('dDevice'), dRelease: $('dRelease'), sendBtn: $('sendBtn'),
     dToken: $('dToken'), dForce: $('dForce'), tokenState: $('tokenState'),
     copyLinkBtn: $('copyLinkBtn'),
+    procBody: $('procBody'), procHint: $('procHint'),
     resolved: $('resolved'), notice: $('notice')
   }
 
@@ -212,6 +226,7 @@
     renderDeviceOptions()
     renderReleaseOptions()
     renderResolved()
+    renderProcess()
   }
 
   function renderPills() {
@@ -226,6 +241,209 @@
   function chip(st) {
     var k = STATE_LABEL[st] ? st : 'none'
     return '<span class="chip chip--' + k + '">' + esc(STATE_LABEL[st] || '无命令') + '</span>'
+  }
+
+  // ══ OTA 过程视图 ════════════════════════════════════════
+  // 目的：下发之后能看见"进行到哪一步 / 卡在哪 / 一共多久"。
+  // 数据来源分两层，谁有就用谁：
+  //   服务器时间点（一定有）：createdAt → deliveredAt → finishedAt + detail
+  //   设备过程点（设备端上报才有）：progress.phase/percent + trail
+  function phaseLabel(p) {
+    return PHASE_LABEL[p] || String(p || '?')
+  }
+
+  function fmtDur(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—'
+    var s = Math.round(ms / 1000)
+    if (s < 60) return s + 's'
+    var m = Math.floor(s / 60)
+    if (m < 60) return m + 'm' + (s % 60 ? (s % 60) + 's' : '')
+    return Math.floor(m / 60) + 'h' + (m % 60 ? (m % 60) + 'm' : '')
+  }
+
+  /** 某时刻距 createdAt 的耗时（- 表示还没发生） */
+  function elapsedFrom(cmd, iso) {
+    if (!iso || !cmd.createdAt) return NaN
+    return new Date(iso).getTime() - new Date(cmd.createdAt).getTime()
+  }
+
+  function sinceMs(iso) {
+    if (!iso) return NaN
+    return Date.now() - new Date(iso).getTime()
+  }
+
+  function clock(iso) {
+    if (!iso) return '—'
+    var d = new Date(iso)
+    return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('zh-CN', { hour12: false })
+  }
+
+  /** 过程链：已下发 → 设备取走 → 5 个阶段 → 回执；返回每一步的状态 */
+  function stepChain(cmd) {
+    var total = PHASE_ORDER.length + 3
+    var labels = ['已下发', '设备取走']
+    PHASE_ORDER.forEach(function (p) { labels.push(PHASE_LABEL[p]) })
+    labels.push('回执')
+
+    // 设备端上报的阶段（progress 优先，退化到 trail 的最后一条）
+    var pi = -1
+    if (cmd.progress && cmd.progress.phase) pi = PHASE_ORDER.indexOf(cmd.progress.phase)
+    if (pi < 0 && cmd.trail && cmd.trail.length) {
+      pi = PHASE_ORDER.indexOf(cmd.trail[cmd.trail.length - 1].phase)
+    }
+
+    // done = 已完成的步数（0 = 连"已下发"都还没有，实际不会出现）
+    var done = 1
+    if (cmd.deliveredAt || cmd.state !== 'pending') done = 2
+    if (pi >= 0) done = 2 + pi
+    if (cmd.state === 'success') done = total
+
+    var failAt = -1
+    if (cmd.state === 'failed') failAt = pi >= 0 ? 2 + pi : Math.min(done, total - 1)
+    var offAt = -1
+    if (cmd.state === 'superseded') offAt = Math.min(done, total - 1)
+
+    var states = []
+    for (var i = 0; i < total; i++) {
+      if (i < done) states.push('done')
+      else if (i > done) states.push('wait')
+      else if (i === failAt) states.push('fail')
+      else if (i === offAt) states.push('off')
+      else states.push(cmd.state === 'pending' || cmd.state === 'delivered' ? 'cur' : 'done')
+    }
+    return { labels: labels, states: states }
+  }
+
+  /** 结论行：过程在动 / 卡住 / 结束，都要说人话 */
+  function verdict(cmd) {
+    var waited = sinceMs(cmd.createdAt)
+    if (cmd.state === 'pending') {
+      var t = '已下发 ' + fmtDur(waited) + '，等设备下次上报时取走（设备每 ~15s 上报一次）。'
+      if (waited > STUCK.pendingMs) {
+        return { kind: 'warn', text: t + '还没被取走——设备离线、或没在跑上报循环。' }
+      }
+      return { kind: 'info', text: t }
+    }
+    if (cmd.state === 'delivered') {
+      var took = '设备于 ' + fmtDur(elapsedFrom(cmd, cmd.deliveredAt)) + '（' + clock(cmd.deliveredAt) + '）取走，至今 ' + fmtDur(sinceMs(cmd.deliveredAt)) + '。'
+      if (cmd.progress) {
+        var stale = sinceMs(cmd.progress.updatedAt)
+        var cur = '当前：' + phaseLabel(cmd.progress.phase) +
+          (cmd.progress.percent !== undefined ? ' ' + cmd.progress.percent + '%' : '') +
+          (cmd.progress.message ? '（' + esc(cmd.progress.message) + '）' : '')
+        if (stale > STUCK.staleMs) {
+          return { kind: 'warn', text: took + cur + '，但已 ' + fmtDur(stale) + ' 没有更新——写入大固件会慢，若超过几分钟多半是断了。' }
+        }
+        return { kind: 'ok', text: took + cur + '（' + fmtDur(stale) + ' 前更新）' }
+      }
+      var note = took + '设备取走后还没有过程上报。'
+      if (cmd.deliveryCount > 1) {
+        note += '注意：这条命令被取走 ' + cmd.deliveryCount + ' 次（服务器会重复投递，设备端需幂等）。'
+      }
+      if (sinceMs(cmd.deliveredAt) > STUCK.silentMs) {
+        note += '已超过 ' + fmtDur(STUCK.silentMs) + ' 没动静：设备端可能没实现过程上报（那就在写入中，看不到细节）、或已断电。'
+        return { kind: 'warn', text: note }
+      }
+      return { kind: 'info', text: note }
+    }
+    if (cmd.state === 'success') {
+      return {
+        kind: 'ok',
+        text: '成功 · 总耗时 ' + fmtDur(elapsedFrom(cmd, cmd.finishedAt)) +
+          (cmd.detail ? ' · ' + esc(cmd.detail) : ''),
+      }
+    }
+    if (cmd.state === 'failed') {
+      return {
+        kind: 'err',
+        text: '失败 · 耗时 ' + fmtDur(elapsedFrom(cmd, cmd.finishedAt)) +
+          (cmd.detail ? ' · ' + esc(cmd.detail) : '（设备没给 detail）'),
+      }
+    }
+    return { kind: 'info', text: '已被新命令顶替（superseded）。' }
+  }
+
+  /** 设备卡上的一行过程摘要（不点开也能看出在动） */
+  function shortProgress(cmd) {
+    if (!cmd) return ''
+    var v = verdict(cmd)
+    return '<div class="dev__prog dev__prog--' + v.kind + '">' + v.text + '</div>'
+  }
+
+  function renderProcess() {
+    if (!el.procBody) return
+    var dev = null
+    for (var i = 0; i < state.devices.length; i++) {
+      if (state.devices[i].deviceId === state.selectedId) dev = state.devices[i]
+    }
+    el.procHint.textContent = dev ? fmtMac(dev.deviceId) : '未选设备'
+    if (!dev) {
+      el.procBody.innerHTML = '<p class="empty">先在上方设备清单里点一台设备（「选择并下发」），这里会显示它最近一条 OTA 命令的过程。</p>'
+      return
+    }
+    var cmd = dev.lastCommand
+    if (!cmd) {
+      el.procBody.innerHTML = '<p class="empty">这台设备还没有命令记录。下发一条后，过程会实时出现在这里。</p>'
+      return
+    }
+
+    var chain = stepChain(cmd)
+    var stepsHtml = '<ol class="steps">' + chain.labels.map(function (label, i) {
+      return '<li class="step step--' + chain.states[i] + '"><span class="step__dot"></span>' + esc(label) + '</li>'
+    }).join('') + '</ol>'
+
+    var v = verdict(cmd)
+    var verdictHtml = '<p class="verdict verdict--' + v.kind + '">' + v.text + '</p>'
+
+    // 时间线：服务器时间点 + 设备过程点，按时间顺序
+    var rows = [{ at: cmd.createdAt, label: '已下发', extra: 'release ' + (cmd.releaseId || '?') }]
+    if (cmd.deliveredAt) {
+      rows.push({
+        at: cmd.deliveredAt,
+        label: '设备取走',
+        extra: cmd.deliveryCount > 1 ? '重复投递 ' + cmd.deliveryCount + ' 次（最近 ' + clock(cmd.lastDeliveredAt) + '）' : ''
+      })
+    }
+    ;(cmd.trail || []).forEach(function (t) {
+      rows.push({ at: t.at, label: '过程：' + phaseLabel(t.phase), extra: t.percent !== undefined ? t.percent + '%' : '' })
+    })
+    if (cmd.progress && cmd.progress.updatedAt) {
+      var lastTrail = cmd.trail && cmd.trail.length ? cmd.trail[cmd.trail.length - 1].at : null
+      if (cmd.progress.updatedAt !== lastTrail) {
+        rows.push({
+          at: cmd.progress.updatedAt,
+          label: '当前：' + phaseLabel(cmd.progress.phase),
+          extra: (cmd.progress.percent !== undefined ? cmd.progress.percent + '%' : '') +
+            (cmd.progress.message ? ' ' + cmd.progress.message : '')
+        })
+      }
+    }
+    if (cmd.finishedAt) {
+      rows.push({
+        at: cmd.finishedAt,
+        label: cmd.state === 'success' ? '回执：成功' : cmd.state === 'failed' ? '回执：失败' : '结束：' + (STATE_LABEL[cmd.state] || cmd.state),
+        extra: cmd.detail || ''
+      })
+    }
+    var tlHtml = '<ol class="tl">' + rows.map(function (r) {
+      return '<li class="tl__row">' +
+        '<span class="tl__at">' + clock(r.at) + '</span>' +
+        '<span class="tl__plus">+' + fmtDur(elapsedFrom(cmd, r.at)) + '</span>' +
+        '<span class="tl__label">' + esc(r.label) + '</span>' +
+        '<span class="tl__extra">' + esc(r.extra || '') + '</span>' +
+        '</li>'
+    }).join('') + '</ol>'
+
+    el.procBody.innerHTML =
+      '<div class="proc__head">' +
+        chip(cmd.state) +
+        '<span class="rid">' + esc(cmd.id) + '</span>' +
+        '<span class="proc__rid">' + esc(cmd.releaseId || '') + '</span>' +
+        '<span class="proc__dur">进度 ' + chain.states.filter(function (s) { return s === 'done' }).length + '/' + chain.states.length + '</span>' +
+      '</div>' +
+      stepsHtml +
+      verdictHtml +
+      tlHtml
   }
 
   function renderDevices() {
@@ -250,6 +468,7 @@
             '<span class="lbl">最近命令</span>' +
             (cmd ? chip(cmd.state) + '<span class="rid">' + esc(cmd.id || '') + '</span>' : '<span class="chip chip--none">无命令</span>') +
           '</div>' +
+          shortProgress(cmd) +
           '<div class="dev__actions">' +
             '<button class="btn btn--sm" data-act="select">选择并下发</button>' +
           '</div>' +
