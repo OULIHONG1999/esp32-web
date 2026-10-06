@@ -152,7 +152,9 @@
 
 * `online`：服务器按 `last_seen` 实时判定（页面无需自算）。
 
-* `lastCommand`：最近一次命令 + 状态（`pending` / `delivered` / `success` / `failed` / `superseded`），没有历史命令则为 `null`。
+* `lastCommand`：最近一次命令 + 状态（`pending` / `delivered` / `success` / `failed` / `superseded` / `cancelled`），没有历史命令则为 `null`。
+* `unresolved`：**未决命令**（`pending`/`delivered`，没有则为 `null`）——它**不一定等于 `lastCommand`**：设备离线时再下发会新增一条更新的 `cancelled` 记录把还在队列里的 `pending` 顶下去。凡是要对"正在跑的那条命令"动手的（页面撤销按钮、CLI `--cancel`）都必须用这个字段，否则会撤错对象或以为没得撤。
+
   还带三个**过程字段**（页面画过程链要用）：
 
   | 字段 | 含义 |
@@ -187,6 +189,41 @@
 ```
 
 > 服务器仅存 `pending` 命令（每个设备至多一条未决命令；再次下发可用新命令覆盖或直接报冲突，二选一，见 §7）。
+
+**离线不下发（2026-10-07 生效，产品规则）**：入队前先判在线（服务端口径 45s），不在线则**不进队**，返回 **HTTP 412**：
+
+```json
+{ "error": "device offline", "deviceId": "3485a1b2c3d4",
+  "lastSeen": "2026-10-06T15:00:00Z", "onlineTimeoutMs": 45000,
+  "cancelled": { "id": "cmd_ab12cd", "state": "cancelled", "cancelReason": "device_offline" } }
+```
+
+* **不排队、不等它上线**——只留一条 `cancelled` 记录（页面显示"什么时候想推什么、为什么没推成"）；这条记录**不占未决位**，设备上线后重推不会被 409 挡。
+* 用 **412** 而非 409 是刻意的：409 已经表示"已有未决命令"，两种情况不能共用一个码。
+* **判定权在服务器**：调用方先查清单再下发之间存在 TOCTOU（期间设备可能掉线/上线），只有入队那一刻的判定是权威的。因此页面下发与 CLI 下发行为完全一致。
+* 残留窗口如实说明：在线判定本身有最长 45s 滞后，窗口内掉线的命令会正常入队停在 `pending`（是"已入队"，不是"排队等上线"），若设备不再回来则 `--wait` 超时（exit 5）。
+* 设备端**无需任何改动**：这是服务器侧准入规则。
+
+### 4.3.1 撤销未决命令（2026-10-07 新增）
+
+`POST /api/devices/{deviceId}/commands/{commandId}/cancel`（**需 Bearer**，运维侧动作；与 report/result/progress 的设备侧动作相对）
+
+请求：`{ "reason": "推错了版本，先停" }`（可选，默认 `cancelled_by_operator`）→ 响应 `{ "ok": true, "wasDelivered": false, "command": {...} }`
+
+| 撤销时的状态 | 拦得住吗 | 服务器行为 | HTTP |
+|---|---|---|---|
+| `pending` | ✅ 拦住了（设备下次上报不会再拿到它） | 标 `cancelled`，释放未决位 | 200 `wasDelivered:false` |
+| `delivered` | ⚠️ 拦不住正在写的设备，但**停掉了重复投递** | 标 `cancelled`；设备若仍回执 → **不覆盖** cancelled，记进 `lateResult` | 200 `wasDelivered:true` |
+| 已结束（success/failed/superseded/cancelled） | — | 不改历史 | 409 |
+| 命令不存在 | — | — | 404 |
+
+为什么"已取走也允许撤"：这是唯一能停掉"重复投递死循环"的手段（设备取走后崩了、永远不回执，服务器就会每次上报都再投一次）。
+
+### 4.3.2 按 id 读单条命令（2026-10-07 新增）
+
+`GET /api/devices/{deviceId}/commands/{commandId}`（公开只读）→ `{ command: Command }`，404 表示没有这条。
+
+设备视图只给 `lastCommand`/`unresolved` 两条，**要盯住某一条命令到结束**（CLI 等待时每 2s 一次）就得能按 id 读——否则一旦有更新的记录盖上来，连它是成功还是被顶替都无从得知。
 
 ### 4.4 设备回执
 
@@ -285,8 +322,10 @@ POST /api/devices/{deviceId}/commands/{commandId}/progress     免鉴权
 | 过程数据 | 每命令存最新 `progress` + 阶段变化的 `trail`（≤20 条）；`commandSummary` 一并带出 `deliveredAt`/`lastDeliveredAt`/`progress`/`trail` |
 | app 段解析 | 下发时在 registry 里按 `releaseId` 定位 release，取 `type==='app'` 的段（退化到最大的 `.bin`），把 `file/url/sha256/size` 填进命令 |
 | 未决命令 | 每设备至多一条；冲突返回 **409** + 现有命令；`{"force":true}` 可顶替（旧命令标 `superseded`）——§7#3 定为「报冲突 + 可选顶替」 |
+| 离线不下发 | 入队前判在线 → 离线返 **412** + 一条 `cancelled`(device_offline) 记录（不占未决位、不排队）；页面与 CLI 行为一致（§4.3、§7#8） |
+| 撤销 | `POST …/commands/{cid}/cancel`（Bearer）标 `cancelled`；撤 `pending` 真拦住、撤 `delivered` 停掉重复投递但拦不住设备；迟到回执不覆盖终态（§4.3.1、§7#9） |
 | 重复投递 | 命取走后未回执 → 下次上报**再投递同一条**（响应带 `redelivered:true`，命令内 `deliveryCount` 累加），避免设备取走即崩溃造成永久卡死；设备端需幂等。`deliveredAt` 保留**首取**时刻、`lastDeliveredAt` 记最近一次 |
-| 测试 | `tests/devices.test.js` 40+ 用例（存储纯函数 + 五端点链路 + 409/force/重投递/篡改失败/过程上报与卡住判定数据） |
+| 测试 | `tests/devices.test.js` 40+ 用例（存储纯函数 + 五端点链路 + 409/force/重投递/篡改失败/过程上报与卡住判定数据 + 离线 412/cancelled/撤销/迟到回执/unresolved 与按 id 读单条） |
 
 ### 6.1 模块规划（原设计表，已全部实现）
 
@@ -307,8 +346,11 @@ POST /api/devices/{deviceId}/commands/{commandId}/progress     免鉴权
 | 5 | 服务器端归属 | ✅ **已实现于 firmware-server** | `server/devices.js` + `server/app.js`；`tests/devices.test.js` 40+ 用例 |
 | 6 | 设备上报鉴权 | ✅ **report/回执/过程上报免鉴权，仅下发需 token** | MAC 即身份；防伪造不在本期范围 |
 | 7 | 过程可见性 | ✅ **由设备上报 `progress`（§4.5）** | 云端猜不出进度，只能设备报；设备不实现也能跑（页面退化显示服务器时间点）。配套两条设计：① `progress` **刷新 `lastSeen`**——OTA 阻塞期间设备不再 `report`，否则会被显示成"离线"，那正是"看不见过程"的观感来源；② `trail` 只记**阶段变化**且有界——诊断要的是"何时到了哪一步"，不是每次百分比采样 |
+| 8 | 离线设备的命令 | ✅ **不下发、不排队、直接取消（412）** | 用户规则：「离线设备直接返回不在线，不排队，不等上线，固件下发直接取消，只保留记录和提醒」。排队会把"推了但没动静"变成新的困惑源。**刻意不提供排队开关**（`--allow-offline` 之类）；判定权在服务端（TOCTOU） |
+| 9 | 推错了能不能停 | ✅ **能撤未决命令（§4.3.1）** | 撤 `pending` 真拦住；撤 `delivered` 拦不住正在写的设备，但能停掉**重复投递死循环**——所以允许撤并如实警告。迟到回执记 `lateResult`、不覆盖 `cancelled` |
+| 10 | 脚本化入口 | ✅ **`push` 子命令（CLI）** | 见 [`PUSH-TO-DEVICE.md`](./PUSH-TO-DEVICE.md)：发布(可选)+下发+等结果+打过程+退出码分流。页面与 CLI 走同一端点，规则一致 |
 
-> 本文是**设计契约**。进度：页面端 ✅（`/OTA`，含「OTA 过程」面板）→ 服务器端 ✅（§4 五端点 + §6.2）→ 设备端：上报/取命令/回执/幂等**已跑通真机 OTA**，**过程上报待补**（照 §4.5 + DEVICE-OTA §7.8 抄即可）。
+> 本文是**设计契约**。进度：页面端 ✅（`/OTA`，含「OTA 过程」面板 + 离线置灰 + 撤销按钮）→ 服务器端 ✅（§4 端点 + §6.2，含 412/cancel）→ CLI ✅（`push`，见 PUSH-TO-DEVICE.md）→ 设备端：上报/取命令/回执/幂等**已跑通真机 OTA**，**过程上报待补**（照 §4.5 + DEVICE-OTA §7.8 抄即可；设备端**不需要**为离线规则或撤销做任何改动）。
 > 设备端开工请以 **[`docs/DEVICE-OTA.md`](./DEVICE-OTA.md)** 为准（含代码骨架、分区表、联调步骤、验收清单）；
 > 本文负责"为什么这么定"，那份负责"具体怎么做"。
 

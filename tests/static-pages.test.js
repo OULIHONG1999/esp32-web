@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -157,5 +158,75 @@ describe('独立页 /OTA 静态托管', () => {
     expect((await res.json()).error).toBe('not built')
     s.close()
     fs.rmSync(empty, { recursive: true, force: true })
+  })
+})
+
+// ── 回归守卫：离线即取消 + 撤销（docs/PUSH-TO-DEVICE.md §3.1/§3.4） ──
+describe('独立页 /OTA · 离线取消与撤销的接线', () => {
+  it('页面把"离线不下发"写在明面上（按钮置灰 + 文案 + 412 提示）', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    expect(html).toContain('离线不下发') // 命名与约定里的规则行
+    expect(html).toContain('id="cCancelled"') // 概览胶囊有"已取消"
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).toContain('cancelled') // 状态标签
+    expect(js).toContain('device_offline') // 取消原因翻译
+    expect(js).toContain('err.status === 412') // 412 → 可操作提示，而不是"服务器未实现"
+    expect(js).toContain('下发会被取消、不会排队')
+  })
+
+  it('页面能撤销未决命令（写操作、带 cmd id、与 CLI 同一端点）', async () => {
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).toContain('cancelPending')
+    expect(js).toContain('data-act="cancel"')
+    expect(js).toContain('data-cmd=') // 撤的必须是那条未决命令，不能靠"最近记录"猜
+    expect(js).toContain('/cancel')
+    expect(js).toContain('wasDelivered') // delivered 撤销要如实警告
+    expect(js).toContain('d.unresolved') // 未决命令可能被更新的 cancelled 记录顶下去
+  })
+
+  it('ota.json 如实声明 cancelled 状态、412 与 cancel 端点', async () => {
+    const j = await (await fetch(base + '/ota.json')).json()
+    expect(j.offline_dispatch_rule.rule).toMatch(/412/)
+    expect(j.apis.dispatch_command.errors['412']).toBeTruthy()
+    expect(j.apis.cancel_command.implemented).toBe(true)
+    expect(j.apis.cancel_command.path).toContain('/cancel')
+    expect(j.data_model.Command.state).toContain('cancelled')
+    expect(j.data_model.Device.unresolved).toBeTruthy()
+    expect(j.cancel_semantics.delivered).toBeTruthy()
+  })
+
+  it('#ai-data 与 llms.txt 也带上 412 / cancelled（AI 从页面与索引都能读到）', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    const m = /<script type="application\/json" id="ai-data">([\s\S]*?)<\/script>/.exec(html)
+    const ai = JSON.parse(m[1])
+    expect(ai.command_states).toContain('cancelled')
+    expect(ai.dispatch_failure_codes['412']).toBeTruthy()
+    expect(ai.offline_dispatch_rule).toBeTruthy()
+    expect(ai.apis.cancel_command).toBeTruthy()
+
+    const llms = await (await fetch(base + '/llms.txt')).text()
+    expect(llms).toContain('cancelled')
+    expect(llms).toContain('412')
+  })
+})
+
+// ── 回归守卫：CLI 源码镜像（设备机不 clone 也能下载即跑，§6.1） ──
+describe('CLI 源码托管 /tools/publish/', () => {
+  const FILES = ['index.js', 'lib.js', 'once.js', 'watch.js', 'push.js', 'pushlib.js']
+
+  it('public/tools/publish/ 是 tools/publish/ 的字节级镜像（改一处必须同步另一处）', () => {
+    for (const f of FILES) {
+      const src = fs.readFileSync(path.join(repo, 'tools', 'publish', f))
+      const mirror = fs.readFileSync(path.join(repo, 'public', 'tools', 'publish', f))
+      expect(mirror.equals(src), `${f} 与源头不一致`).toBe(true)
+    }
+  })
+
+  it('镜像下来的 CLI 能直接跑（依赖都在同目录，Node 18+）', () => {
+    const out = execFileSync(process.execPath, [path.join(repo, 'public', 'tools', 'publish', 'index.js'), 'push', '--help'], {
+      encoding: 'utf8',
+    })
+    expect(out).toContain('push --to <mac> --build')
+    expect(out).toContain('不下发、不排队、直接取消')
   })
 })

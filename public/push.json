@@ -1,0 +1,114 @@
+{
+  "tool_id": "push-cli",
+  "name": "Push firmware to a device",
+  "name_zh": "把固件推给指定设备",
+  "version": "0.1.0",
+  "status": "implemented",
+  "description": "One command that publishes a build (optional), pushes it to ONE named device, waits for the device's result and prints the process. Zero dependencies, runs on the device-development machine with Node 18+, reuses the existing publish token and endpoints. The device firmware needs no changes.",
+  "description_zh": "一条命令 = 发布（可选）+ 下发给一台指定设备 + 等结果 + 打印过程。零依赖、Node 18+ 直接跑，复用现有发布 token 与端点，设备端无需任何改动。",
+  "entrypoints": {
+    "source": "/tools/publish/push.js",
+    "companion": "/tools/publish/pushlib.js",
+    "runner": "/tools/publish/index.js",
+    "doc": "/docs/PUSH-TO-DEVICE.md",
+    "agent_index": "/llms.txt",
+    "contract_doc": "/docs/ota.md",
+    "device_doc": "/docs/DEVICE-OTA.md",
+    "ota_descriptor": "/ota.json",
+    "home": "/"
+  },
+  "read_order_for_ai": [
+    "/push.json",
+    "/docs/PUSH-TO-DEVICE.md",
+    "/tools/publish/push.js"
+  ],
+  "requires": {
+    "node": ">=18",
+    "token": "Bearer — the publish token (master or a wk_ work token); needed for push and --cancel, not for --list/--status",
+    "config": "publish.config.json (server + token + project.id + optional buildDir/assets), or --config <path>; --server overrides the server URL",
+    "network": "plain HTTP works (self-signed HTTPS would need NODE_EXTRA_CA_CERTS=<crt>)"
+  },
+  "usage": {
+    "publish_and_push": "node tools/publish/index.js push --to <mac> --build [dir]",
+    "push_existing": "node tools/publish/index.js push --to <mac> --release <releaseId>",
+    "push_latest": "node tools/publish/index.js push --to <mac> --latest [--project <id>]",
+    "list_devices": "node tools/publish/index.js push --list",
+    "status_readonly": "node tools/publish/index.js push --status --to <mac>",
+    "cancel": "node tools/publish/index.js push --cancel --to <mac> [--reason \"<note>\"]",
+    "dry_run": "node tools/publish/index.js push --to <mac> --build --dry-run",
+    "help": "node tools/publish/index.js push --help"
+  },
+  "params": {
+    "to": { "required": true, "note": "exactly one device; accepts 34:85:a1:b2:c3:d4 / '34 85 A1 B2 C3 D4' / 3485a1b2c3d4, normalised to 12 lowercase hex" },
+    "build": { "note": "--build [dir] — publish first (dir optional, defaults to config buildDir); snapshot by default" },
+    "release": { "note": "--release <id> — push a version already on the server (snapshot or release)" },
+    "latest": { "note": "--latest — the latest release for the device's chip family; needs --project when several projects share that variant" },
+    "project": { "note": "limit --latest (and the chip-family lookup) to one project id" },
+    "wait": { "default": true, "note": "--no-wait dispatches and returns immediately" },
+    "waitTimeoutS": 300,
+    "pollS": 2,
+    "force": { "note": "supersede an unresolved command for a DIFFERENT release (same release = re-entry, handled automatically)" },
+    "forceChip": { "note": "allow a chip-family mismatch (default: refuse; pushing the wrong chip can brick a device)" },
+    "allowUnknown": { "note": "skip the local 'device must exist in GET /api/devices' gate and let the server decide (a device that never reported cannot be online, so expect exit 9)" },
+    "skipIfSame": { "default": true, "note": "--no-skip-if-same forces a re-flash when the device is already on the target release" },
+    "promote": { "note": "--build produces a snapshot; --promote turns it into an official release and moves latest" },
+    "status": { "note": "read-only recheck: prints the state and the full process chain, zero side effects; exit code matches what --wait would have concluded (5 = still unresolved)" },
+    "cancel": { "note": "cancel the device's unresolved command (the server's `unresolved` field decides which one, not `lastCommand`)" },
+    "reason": { "note": "with --cancel only; stored as cancelReason" },
+    "list": { "note": "print the device list and exit; add --to to show one device" },
+    "json": { "note": "machine-readable output on stdout (human lines move to stderr); contract in /docs/PUSH-TO-DEVICE.md §2.4" },
+    "dryRun": { "note": "print what WOULD happen, make zero requests (gates are therefore not evaluated and it says so)" },
+    "noOfflineOverride": "a device that is offline at dispatch time is cancelled server-side; there is deliberately no flag to queue it"
+  },
+  "exit_codes": {
+    "0": "success (also --dry-run)",
+    "1": "device reported failed (the device's own detail is printed)",
+    "2": "usage/parameter error",
+    "3": "auth failed (401/403)",
+    "4": "target unknown: device never reported, or release/candidate missing",
+    "5": "timeout waiting for a result (or: --status found the command still unresolved)",
+    "6": "network/server error",
+    "7": "safety gate refused: chip-family mismatch (use --force-chip)",
+    "8": "skipped (not a failure): device already on the target release",
+    "9": "the command was NOT delivered: device offline at dispatch time (412 + cancelled record). The same code is used when a command is cancelled while waiting — the message says which",
+    "10": "the device has an unresolved command for a DIFFERENT release (use --force to supersede); also reported when the waited command ends up superseded",
+    "11": "cancelled a DELIVERED command: too late to stop the device, but redelivery stopped",
+    "12": "nothing to cancel (no unresolved command, or it had already finished)",
+    "130": "interrupted (Ctrl+C) while waiting: the command keeps running on the server; use --status to recheck"
+  },
+  "gates": [
+    "the target device must exist in GET /api/devices (else exit 4) — the server auto-creates entries for unknown deviceIds, so a typo used to queue silently",
+    "release.chipFamily must equal device.chip (else exit 7; 'cannot verify' counts as a mismatch)",
+    "skip when device.firmwareVersion == releaseId (exit 8) unless --no-skip-if-same",
+    "the device must be online at the instant of dispatch — enforced by the SERVER, which answers 412 and keeps a cancelled record (exit 9); the CLI checks the same gate up front to fail fast",
+    "an unresolved command for the SAME releaseId = re-entry: adopt that command and keep waiting (not an error, no re-dispatch)",
+    "an unresolved command for a DIFFERENT releaseId = 409 -> exit 10 unless --force"
+  ],
+  "apis": {
+    "publish": "POST /api/publish (multipart; Bearer) — only with --build",
+    "list_devices": "GET /api/devices (public) — target lookup, chip/firmware/online, and the unresolved command",
+    "get_command": "GET /api/devices/{deviceId}/commands/{commandId} (public) — exact by-id polling while waiting",
+    "dispatch": "POST /api/devices/{deviceId}/commands (Bearer) — 412 when the device is offline, 409 when a command is already unresolved",
+    "cancel": "POST /api/devices/{deviceId}/commands/{commandId}/cancel (Bearer) — marks pending/delivered as cancelled",
+    "promote": "POST /api/registry/projects/{pid}/variants/{vid}/releases/{rid}/promote (Bearer) — only with --promote",
+    "progress_source": "command.progress / command.trail (device-reported, optional)"
+  },
+  "command_states": ["pending", "delivered", "success", "failed", "superseded", "cancelled"],
+  "process_visibility": {
+    "what_is_printed": "each new stage as it happens (device pickup, per-phase progress with percent, receipt) plus a final verdict line with the total time",
+    "on_failure_or_timeout": "the FULL chain is printed, including a relative time per step, where exactly it stopped (pending / delivered) and how long it has been stuck, plus the hint for --status",
+    "no_fake_progress": "if the device never reports progress the CLI says so explicitly instead of inventing a percentage",
+    "stuck_rules": "pending > 30s => warn; delivered with no progress report > 120s => warn; progress older than 60s while unresolved => warn"
+  },
+  "json_output": "see /docs/PUSH-TO-DEVICE.md §2.4 — { ok, skipped, published, device, command, elapsedMs, exitCode, error }",
+  "related_tools": {
+    "ota_console": "/ota.json — the same operation by hand in a browser (page dispatch is refused identically when the device is offline)",
+    "device_sim": "/tools/device-sim/index.js — fake ESP32 for testing the whole loop without hardware"
+  },
+  "not_implemented": [
+    "batch / fleet / broadcast push",
+    "watch-style auto-push (the existing `publish --watch` only publishes; it does not push)",
+    "offline queueing (see exit code 9)",
+    "device-initiated auto-update-on-boot (separate requirement, see /docs/DEVICE-OTA.md §12)"
+  ]
+}

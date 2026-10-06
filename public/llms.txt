@@ -52,7 +52,7 @@
 - 页面入口: GET /OTA                 (等价 /ota、/ota/；独立页，非主 SPA)
 - 机器描述符: GET /ota.json          (tool_id=ota-console；接口清单/数据模型/鉴权说明)
 - 三端契约: GET /docs/ota.md         (设备上报 + 命令下发 + 页面端设计)
-- 用途: 查看在线/离线设备、选固件版本、下发 OTA 命令、跟踪命令状态（pending→delivered→success/failed/superseded）
+- 用途: 查看在线/离线设备、选固件版本、下发 OTA 命令、跟踪命令状态（pending→delivered→success/failed/superseded/cancelled）、撤销未决命令
 - **过程视图（2026-10-06 新增）**: 页面有「OTA 过程」面板——步骤链（已下发→设备取走→下载→校验→写入→重启→回执）+ 时间线（各步时刻与耗时）+ 卡住判定。
   数据分两层：服务器时间点（createdAt/deliveredAt/lastDeliveredAt/finishedAt/deliveryCount，一定有）+ 设备过程点（command.progress/trail，设备上报才有）；设备没上报时面板如实说明、不假装有进度
 - 状态: 服务器端点 ✅ 已实现并实测；页面 ✅ 已实现（含过程视图）；设备端固件 ✅ 已跑通真机 OTA 往返（源码在另一台电脑的工程里），**过程上报待补**
@@ -65,16 +65,37 @@
   4. POST result 回执 success/failed（含重启后补发）
 - 接口:
   - POST /api/devices/{deviceId}/report                      (上报+取命令 · 免鉴权)
-  - GET  /api/devices                                        (设备列表 · 公开只读)
-  - POST /api/devices/{deviceId}/commands                    (下发 OTA · 需 Bearer token)
+  - GET  /api/devices                                        (设备列表 · 公开只读；含 lastCommand 与 unresolved)
+  - POST /api/devices/{deviceId}/commands                    (下发 OTA · 需 Bearer token；**设备离线 → 412**)
+  - POST /api/devices/{deviceId}/commands/{commandId}/cancel (撤销未决命令 · 需 Bearer token)
+  - GET  /api/devices/{deviceId}/commands/{commandId}        (按 id 读单条命令 · 公开只读)
   - POST /api/devices/{deviceId}/commands/{commandId}/progress (过程上报 · 免鉴权 · 页面过程视图的数据来源)
   - POST /api/devices/{deviceId}/commands/{commandId}/result (设备回执 · 免鉴权)
   - GET  /api/registry                                       (固件版本/releaseId 来源)
 - 约定: deviceId = base MAC 去冒号小写十六进制（正好 12 位）；在线判定由服务器按 lastSeen 完成（>45s 离线）；
   HTTP 轮询 pull 不是推送；每设备至多一条未决命令（冲突 409，可 force 顶替）；未回执命令会重复投递（设备需幂等）
+- **离线不下发（2026-10-07 生效）**: 设备不在线时下发返回 **412**——**不排队、不等它上线**，只留一条 `cancelled`(原因 device_offline)
+  记录并让页面给出提醒；这条记录**不占未决位**，设备上线后重跑即可。页面 `/OTA` 上离线设备的「下发」按钮会置灰。
+- **撤销未决命令**: `POST …/commands/{id}/cancel`（Bearer）把 `pending`/`delivered` 标 `cancelled`——
+  撤 `pending` 真拦住；撤 `delivered` 拦不住正在写入的设备，但**能停掉重复投递**；设备若仍回执，记进 `lateResult`，**不覆盖** cancelled 状态。
 - 设备模拟器(零依赖 Node，可在无硬件时验证全链路):
   - GET /tools/device-sim/index.js · /tools/device-sim/lib.js
   - 用法: node index.js --server http://HOST --devices 3 --interval 5（--help 看全部参数）
+
+## 推送固件到指定设备（设备开发机 CLI，零依赖）
+- 一句话: 一条命令 = 发布（可选）+ 下发给**一台**指定设备 + 等结果 + 打印过程（退出码可分流）
+- 机器描述: GET /push.json            (tool_id=push-cli；参数/退出码/闸门/JSON 输出)
+- 操作与设计: GET /docs/PUSH-TO-DEVICE.md
+- 源码: GET /tools/publish/push.js · /tools/publish/pushlib.js   (同目录还有 index/once/lib/watch)
+- 一条命令: `node tools/publish/index.js push --to <mac> --build build`
+- 需要: 发布 token（Bearer）；设备端无需改动；复用现有端点（POST /api/publish、GET /api/devices、POST …/commands）
+- 闸门: 目标设备必须已在 GET /api/devices（否则拒绝，exit 4；要放行加 --allow-unknown）；
+  芯片族必须与 release.chipFamily 一致（否则 exit 7；--force-chip 放行）；设备已是目标版本默认跳过（exit 8）；
+  **设备不在线 → 不下发/不排队，直接取消（412 + cancelled 记录），页面会提醒（exit 9）**；
+  同一版本已是未决命令 = 重入，接着等；他版本未决 → exit 10（--force 顶替）
+- 只读复查: `push --status --to <mac>`（打印状态与完整过程链，零副作用，退出码与 --wait 结论一致）
+- 撤销: `push --cancel --to <mac> [--reason "<说明>"]`（接住"推错了版本"）
+- 刻意不做: 批量/灰度/广播、watch 自动推送、离线排队
 
 ## 详细文档（均可直接 GET 读取，Markdown 纯文本）
 - 使用手册(烧录/监视语义/取证操作卡): /docs/USER-GUIDE.md
@@ -85,8 +106,9 @@
 - 设计与数据模型: /docs/FIRMWARE-REGISTRY.md
 - **设备接入指南(单片机侧接入 OTA 服务器)**: /docs/DEVICE-OTA.md
 - OTA 三端设计契约(设备/云端/页面): /docs/ota.md
+- **推送固件到指定设备(设计+操作+AI 面)**: /docs/PUSH-TO-DEVICE.md
 - 验收清单(F-01..F-24): /docs/REQUIREMENTS.md
-- CLI 源码: /tools/publish/index.js (及 once/lib/watch 同目录)
+- CLI 源码: /tools/publish/index.js (及 once/lib/watch/push/pushlib 同目录)
 
 ## 示例
 - curl http://firmware.example.com/llms.txt               # 本说明文件
@@ -97,4 +119,6 @@
 - curl http://firmware.example.com/tools/device-sim/index.js  # 设备模拟器源码
 - curl http://firmware.example.com/ota.json                # OTA 页机器描述符
 - curl http://firmware.example.com/docs/ota.md             # OTA 设计契约
+- curl http://firmware.example.com/push.json               # 推送 CLI 机器描述符(参数/退出码/闸门)
+- curl http://firmware.example.com/docs/PUSH-TO-DEVICE.md  # 推送固件到指定设备(设计与操作)
 - curl https://firmware.example.com/api/registry           # HTTPS 也可(自签证书)

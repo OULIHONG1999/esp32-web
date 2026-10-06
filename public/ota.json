@@ -4,8 +4,8 @@
   "name_zh": "OTA 设备下发台",
   "version": "0.1.0",
   "status": "server endpoints + page implemented and live; device side (developed on another machine) already completed a real OTA round-trip against this server",
-  "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). All data comes from the live API — no mock data. Dispatch is a write operation and requires a Bearer token.",
-  "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed）。数据全部来自服务器实时接口，页面内无假数据；下发是写操作，需要 Bearer token。",
+  "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). All data comes from the live API — no mock data. Dispatch is a write operation and requires a Bearer token. A device that is offline at dispatch time is refused (412): nothing is queued and nothing is delivered later — only a cancelled record is kept. Unresolved commands can be cancelled by the operator.",
+  "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed），并能撤销未决命令。数据全部来自服务器实时接口，页面内无假数据；下发是写操作，需要 Bearer token。**设备不在线时下发被拒（412）**——不排队、不等上线，只留一条 cancelled 记录与页面提醒。",
   "canonical_path": "/OTA",
   "canonical_path_aliases": ["/ota", "/ota/", "/OTA/"],
   "canonical_url_hint": "Share the full base URL including the path /OTA (host is the shared firmware-server)",
@@ -14,7 +14,13 @@
     "descriptor_json": "/ota.json",
     "contract_doc": "/docs/ota.md",
     "agent_index": "/llms.txt",
-    "home": "/"
+    "home": "/",
+    "push_cli": {
+      "descriptor": "/push.json",
+      "doc": "/docs/PUSH-TO-DEVICE.md",
+      "source": "/tools/publish/push.js",
+      "what": "CLI (zero dependencies, runs on the device-development machine) that publishes a build and pushes it to ONE named device, waits for the result and prints the process — the scriptable form of what this page does by hand."
+    }
   },
   "read_order_for_ai": [
     "/ota.json",
@@ -52,8 +58,32 @@
         "401": "missing or invalid Bearer token",
         "404": "releaseId not found in registry",
         "409": "device already has an unresolved command; resend with force=true to supersede it",
+        "412": "device offline at dispatch time (now - lastSeen > 45s): nothing was queued and nothing will be delivered later; the server kept one cancelled record with reason=device_offline and returned it in the body. Re-dispatch once the device is back online.",
         "400": "bad deviceId / bad releaseId / unsupported type"
-      }
+      },
+      "note": "The online check happens server-side, at the moment of enqueue (a caller that checks first would race with the device going offline/online)."
+    },
+    "cancel_command": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/commands/{commandId}/cancel",
+      "auth": "Bearer token (operator-side write)",
+      "body": { "reason": "string, optional (<=128) — default cancelled_by_operator" },
+      "returns": "{ ok: true, wasDelivered: boolean, command: Command }",
+      "implemented": true,
+      "errors": {
+        "401": "missing or invalid Bearer token",
+        "404": "command not found",
+        "409": "command already finished (success|failed|superseded|cancelled) — nothing to cancel"
+      },
+      "note": "Cancelling a pending command really stops it (the device will not receive it on its next report). Cancelling a delivered command cannot stop the device (it is already writing) but DOES stop redelivery of the same command. A late result is stored in lateResult and never overwrites the cancelled state."
+    },
+    "get_command": {
+      "method": "GET",
+      "path": "/api/devices/{deviceId}/commands/{commandId}",
+      "auth": "none (read)",
+      "returns": "{ command: Command }",
+      "implemented": true,
+      "note": "Read one command by id. Device views only expose lastCommand + unresolved, so a caller that wants to follow ONE command to its end (the push CLI does, every 2s) reads it here."
     },
     "device_report": {
       "method": "POST",
@@ -97,13 +127,14 @@
       "online": "boolean, computed by server (now - lastSeen > 45s => offline)",
       "lastSeen": "ISO8601 UTC",
       "createdAt": "ISO8601 UTC",
-      "lastCommand": "Command | null"
+      "lastCommand": "Command | null — the most recent record (may be a cancelled one)",
+      "unresolved": "Command | null — the pending/delivered command, if any. NOT always the same as lastCommand: an offline refusal a moment ago adds a newer cancelled record that shadows a still-queued pending command. Use this field for anything that acts on the in-flight command (the page's cancel button, the push CLI's --cancel)."
     },
     "Command": {
       "id": "string, e.g. cmd_2f3c9a",
       "type": "ota",
       "releaseId": "string",
-      "state": "pending | delivered | success | failed | superseded",
+      "state": "pending | delivered | success | failed | superseded | cancelled",
       "deliveryCount": "number — how many times the device picked this command up (redelivery guard)",
       "createdAt": "ISO8601 UTC",
       "deliveredAt": "ISO8601 UTC | null — FIRST pickup (kept across redeliveries so the process view can show when it started)",
@@ -111,7 +142,11 @@
       "progress": "{ phase, percent?, bytes?, totalBytes?, message?, updatedAt } | null — latest device-reported process point",
       "trail": "[{ phase, at, percent? }] — bounded (<=20) list of phase changes",
       "finishedAt": "ISO8601 UTC | null",
-      "detail": "string | null — device-reported detail, e.g. 'OTA ok, rebooted to <releaseId>'"
+      "detail": "string | null — device-reported detail, e.g. 'OTA ok, rebooted to <releaseId>'",
+      "cancelledAt": "ISO8601 UTC | null — set when the command was cancelled",
+      "cancelReason": "string | null — device_offline | cancelled_by_operator | custom operator note",
+      "wasDelivered": "boolean | null — true when the command had already been picked up before it was cancelled (a warning, not an error)",
+      "lateResult": "{ state, at, detail? } | null — the device reported a result AFTER the cancellation; kept for honesty, never overwrites the cancelled state"
     }
   },
   "invariants": [
@@ -119,7 +154,8 @@
     "deviceId is the base MAC in lowercase hex without separators",
     "online/offline is decided by the server via lastSeen, never recomputed in the page",
     "At most one unresolved command per device",
-    "Firmware download reuses the existing registry parts endpoint"
+    "Firmware download reuses the existing registry parts endpoint",
+    "A device that is offline at dispatch time is never queued: the command is refused (412) and only a cancelled record remains"
   ],
   "data_source": {
     "mode": "live only",
@@ -138,10 +174,26 @@
       "legacy_format": "https://<host>/?settoken=<token> — still parsed for compatibility, but it is sent to the server, so prefer the fragment form",
       "human_use": "the page has a copy-settings-link button — bookmark it once, then any browser/computer can be configured by opening the bookmark"
     },
-    "report_and_result_are_unauthenticated": true
+    "report_and_result_are_unauthenticated": true,
+    "cancel_requires_token": true
+  },
+  "offline_dispatch_rule": {
+    "rule": "a device that is not online at dispatch time is refused (HTTP 412) instead of queued: no pending command is created, nothing is delivered when the device comes back, and no wait-for-it-to-happen is implied.",
+    "what_is_kept": "one command record with state=cancelled and cancelReason=device_offline (bounded, rolls with the usual 20-record limit), plus a page notice. It does NOT occupy the single unresolved slot, so re-dispatching after the device returns is not blocked by 409.",
+    "why_server_side": "the caller would have to read the device list and then dispatch — between those two steps the device can drop or come back (TOCTOU). Only the server, at the instant of enqueue, can decide authoritatively.",
+    "why_not_409": "409 already means 'a command is already unresolved'. Different situations must not share a code, or scripts cannot tell them apart.",
+    "residual_window": "the online decision itself lags by up to 45s. A device that drops inside that window gets its command queued as pending (it is queued, NOT waiting-for-online) and will be picked up on its next report; if it never returns, a waiting caller times out. That is the accuracy of the rule, not queueing-by-another-name.",
+    "no_override": "there is deliberately no --allow-offline / queue-if-offline flag: re-running the command when the device is back costs one command and avoids 'I thought I had pushed it'."
+  },
+  "cancel_semantics": {
+    "pending": "really stops it — the device will not receive the command on its next report",
+    "delivered": "too late to stop the device (it already took the command and is writing), but redelivery stops; if the device still reports a result it lands in lateResult and the state stays cancelled (the page labels it '撤销来晚了')",
+    "finished": "cannot be cancelled (409)"
   },
   "not_implemented": [
-    "Nothing on the server/page side. Device-side firmware lives in another repository (see /docs/DEVICE-OTA.md) and has already performed a real OTA against this server."
+    "Nothing on the server/page side. Device-side firmware lives in another repository (see /docs/DEVICE-OTA.md) and has already performed a real OTA against this server.",
+    "Batch / fleet / broadcast dispatch ('push to every online device') — a remote flash must name one device explicitly.",
+    "watch-style auto-push, and device-initiated 'check for a newer version' (see /docs/DEVICE-OTA.md §12)."
   ],
   "open_questions_ref": "/docs/ota.md §7"
 }

@@ -35,8 +35,17 @@ const PATCH_FIELDS = [
   'psramFree',
 ]
 
-/** 命令状态机取值：pending → delivered → success|failed；另 superseded（被新命令顶替） */
-export const COMMAND_STATES = ['pending', 'delivered', 'success', 'failed', 'superseded']
+/**
+ * 命令状态机取值：pending → delivered → success|failed；
+ * 另 superseded（被新命令顶替）/ cancelled（被运维撤销或离线未下发）。
+ */
+export const COMMAND_STATES = ['pending', 'delivered', 'success', 'failed', 'superseded', 'cancelled']
+
+/** 已终结、不可能再执行的状态（迟到回执要落在这里，不能覆盖历史） */
+export const TERMINAL_STATES = ['success', 'failed', 'superseded', 'cancelled']
+
+/** 不可再撤销的状态（已经结束） */
+export const UNRESOLVED_STATES = ['pending', 'delivered']
 
 /**
  * 进度阶段的建议取值（页面有中文标签）。
@@ -105,6 +114,17 @@ export function upsertReport(store, deviceId, patch, now) {
 export function unresolvedCommand(device) {
   const list = device?.commands ?? []
   return list.find((c) => c.state === 'pending' || c.state === 'delivered') ?? null
+}
+
+/**
+ * 在线判定（服务端唯一口径）：`now - lastSeen <= timeout`。
+ * 下发准入、页面展示都走这里，避免两处算法漂移。
+ */
+export function isDeviceOnline(device, now, timeoutMs = ONLINE_TIMEOUT_MS) {
+  const seen = device?.lastSeen ? Date.parse(device.lastSeen) : NaN
+  const nowMs = Date.parse(now)
+  if (!Number.isFinite(seen) || !Number.isFinite(nowMs)) return false
+  return nowMs - seen <= timeoutMs
 }
 
 /**
@@ -218,12 +238,80 @@ export function applyProgress(store, deviceId, commandId, report, now) {
   return { store: next, command: cmd }
 }
 
-/** 纯函数：设备回执（只认 success|failed） */
+/**
+ * 纯函数：往设备上记一条**已取消**的命令（离线未下发 / 运维撤销）。
+ *
+ * 用户规则：「离线设备不排队、不等上线，固件下发直接取消，只保留记录和提醒」。
+ * 所以离线时不进 pending（`nextCommandForDevice` 只取 pending/delivered，永远不会投递它），
+ * 但**留一条记录**：页面能显示"什么时候想推什么、为什么被取消"。
+ * 不占"未决位"（`unresolvedCommand` 只看 pending/delivered）——设备上线后重推不会被 409 挡。
+ */
+export function recordCancelled(store, deviceId, command, reason, now) {
+  const next = structuredClone(store)
+  const d = (next.devices[deviceId] ??= {
+    deviceId,
+    createdAt: now,
+    lastSeen: null,
+    commands: [],
+  })
+  if (!Array.isArray(d.commands)) d.commands = []
+  const record = {
+    ...command,
+    state: 'cancelled',
+    deliveryCount: 0,
+    createdAt: now,
+    finishedAt: now,
+    cancelledAt: now,
+    cancelReason: reason,
+  }
+  d.commands.unshift(record)
+  d.commands.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+  d.commands = d.commands.slice(0, MAX_COMMANDS_PER_DEVICE)
+  return { store: next, command: record }
+}
+
+/**
+ * 纯函数：运维撤销一条未决命令（`POST …/commands/{cid}/cancel`，Bearer）。
+ *
+ * 两种情形能力不同，必须如实区分（返回 `wasDelivered`）：
+ * - 撤销 `pending`：**真拦住了**——设备下次上报不会再拿到它；
+ * - 撤销 `delivered`：**拦不住正在写的设备**，但能**停掉重复投递**（取走未回执时服务器本来会一直再投同一条）。
+ *
+ * 已终结的命令不可撤（返回 `notCancellable`）；撤销后设备若仍发来回执，由 applyResult 记进 `lateResult`。
+ */
+export function cancelCommand(store, deviceId, commandId, reason, now) {
+  const next = structuredClone(store)
+  const d = next.devices[deviceId]
+  const cmd = (d?.commands ?? []).find((c) => c.id === commandId)
+  if (!cmd) return { store: next, command: null, wasDelivered: false, notCancellable: false }
+  if (!UNRESOLVED_STATES.includes(cmd.state)) {
+    return { store: next, command: cmd, wasDelivered: false, notCancellable: true }
+  }
+  const wasDelivered = cmd.state === 'delivered'
+  cmd.state = 'cancelled'
+  cmd.cancelledAt = now
+  cmd.finishedAt = now
+  cmd.cancelReason = reason
+  cmd.wasDelivered = wasDelivered
+  return { store: next, command: cmd, wasDelivered, notCancellable: false }
+}
+
+/**
+ * 纯函数：设备回执（只认 success|failed）。
+ *
+ * ⚠️ 迟到回执：命令若已被撤销（cancelled）或被顶替（superseded），**不覆盖终态**——
+ * 设备可能在运维撤销前就已经取走并写完了。真回执记进 `lateResult`，页面据此标注"设备已完成（撤销来晚了）"。
+ */
 export function applyResult(store, deviceId, commandId, state, detail, now) {
   const next = structuredClone(store)
   const d = next.devices[deviceId]
   const cmd = (d?.commands ?? []).find((c) => c.id === commandId)
   if (!cmd) return { store: next, command: null }
+  if (cmd.state === 'cancelled' || cmd.state === 'superseded') {
+    cmd.lateResult = { state, at: now }
+    if (typeof detail === 'string' && detail) cmd.lateResult.detail = detail.slice(0, 256)
+    return { store: next, command: cmd }
+  }
   cmd.state = state
   cmd.finishedAt = now
   if (typeof detail === 'string' && detail) cmd.detail = detail.slice(0, 256)
@@ -246,6 +334,10 @@ export function commandSummary(c) {
     trail: Array.isArray(c.trail) ? c.trail : [],
     finishedAt: c.finishedAt ?? null,
     detail: c.detail ?? null,
+    cancelledAt: c.cancelledAt ?? null,
+    cancelReason: c.cancelReason ?? null,
+    wasDelivered: c.wasDelivered ?? null,
+    lateResult: c.lateResult ?? null,
   }
 }
 
@@ -284,6 +376,10 @@ export function listDeviceViews(store, now) {
         lastSeen: d.lastSeen ?? null,
         createdAt: d.createdAt ?? null,
         lastCommand: commandSummary(commands[0] ?? null),
+        // 未决命令单独给出：它可能**不是** commands[0]——例如设备离线时又下发了一次，
+        // 会新增一条更新的 cancelled 记录把还在队列里的 pending 顶下去（PUSH-TO-DEVICE §3.4）。
+        // 撤销按钮 / CLI --cancel 必须看这个字段，否则会撤错对象或找不到可撤的命令。
+        unresolved: commandSummary(unresolvedCommand(d)),
       }
     })
     .sort((a, b) => ((a.lastSeen ?? '') < (b.lastSeen ?? '') ? 1 : -1))

@@ -54,7 +54,7 @@ src/components/  Vue UI（ide/=五区骨架组件：活动栏/侧栏树/标签/�
 public/       静态资源（build 拷入 dist）：ota/=OTA 独立页 · docs/=公网文档 · llms.txt · ota.json
 server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发布/静态托管（serveStatic 含 /OTA 归一）
               devices.js = OTA 设备与命令存储（纯函数 + 原子写 devices.json）；四个端点接在 app.js
-tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch 等）
+tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch/promote/push；push = 发布+推给指定设备）
 tools/device-sim/  设备模拟器（假装 ESP32 跑完 OTA 全链路；镜像到 public/tools/device-sim/ 供下载）
 docs/          现行文档（USER-GUIDE/DESIGN/REQUIREMENTS/DEPLOY/SERVER/PUBLISH/TROUBLESHOOTING/FIRMWARE-REGISTRY/ota/DEVICE-OTA）
 docs/archive/  开发过程历史产出（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV 等）

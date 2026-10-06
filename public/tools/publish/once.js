@@ -58,7 +58,8 @@ export async function runOnce(args, opts = {}) {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(`POST /api/publish → ${res.status} ${json.error ?? ''}`)
       console.log(`[publish] ✓ 已发布 ${json.project}/${json.variant}/${json.release}`)
-      return json
+      // 附带本次实际上传的段数（push --json 要用；对既有调用方是新增字段，行为不变）
+      return { ...json, uploaded: missing.length }
     } catch (err) {
       // 保留 cause（fetch failed 的真因在 err.cause：ECONNRESET/CERT 等）
       const cause = err instanceof Error ? err.cause : null

@@ -15,7 +15,20 @@
   var TOKEN_KEY = 'fw.token'
 
   // ── 契约常量 ──────────────────────────────────────────────
-  var STATE_LABEL = { pending: '待执行', delivered: '已投递', success: '成功', failed: '失败', superseded: '已顶替' }
+  var STATE_LABEL = {
+    pending: '待执行', delivered: '已投递', success: '成功', failed: '失败',
+    superseded: '已顶替', cancelled: '已取消'
+  }
+
+  /** 取消原因 → 人话（服务器写的是机器原因，页面必须解释清楚"到底发生了什么"） */
+  var CANCEL_REASON = {
+    device_offline: '下发时设备不在线',
+    cancelled_by_operator: '运维撤销'
+  }
+  function cancelReasonText(cmd) {
+    var r = cmd.cancelReason || ''
+    return CANCEL_REASON[r] || r || '未给出原因'
+  }
 
   /** 过程阶段的标签；设备端上报自定义阶段时原样显示（服务器不拦） */
   var PHASE_LABEL = {
@@ -36,7 +49,7 @@
     refreshBtn: $('refreshBtn'),
     deviceGrid: $('deviceGrid'), deviceEmpty: $('deviceEmpty'),
     cOnline: $('cOnline'), cOffline: $('cOffline'), cPending: $('cPending'),
-    cSuccess: $('cSuccess'), cFailed: $('cFailed'), connState: $('connState'),
+    cSuccess: $('cSuccess'), cFailed: $('cFailed'), cCancelled: $('cCancelled'), connState: $('connState'),
     pollLabel: $('pollLabel'), lastRefresh: $('lastRefresh'),
     dDevice: $('dDevice'), dRelease: $('dRelease'), sendBtn: $('sendBtn'),
     dToken: $('dToken'), dForce: $('dForce'), tokenState: $('tokenState'),
@@ -141,6 +154,13 @@
       return '该设备已有未回执命令（409）' + (c ? '：' + c.state + ' · ' + c.id : '') +
         '。勾选「顶替未决命令」后重试，或等设备回执。'
     }
+    if (err.status === 412) {
+      var dev = err.body || {}
+      return '设备不在线，已取消（412）：' +
+        (dev.lastSeen ? '最后心跳 ' + fmtAgo(dev.lastSeen) + '，' : '从未上报过，') +
+        '这次下发没有下发、也没有排队——服务器只留了一条取消记录。' +
+        '设备上线后再点一次「下发 OTA」即可。'
+    }
     if (err.status === 404) {
       return '服务器上没有这个 release（404）：' + err.message + '。可能是版本已被回滚/清理，刷新页面重选。'
     }
@@ -236,6 +256,9 @@
     el.cPending.textContent = d.filter(function (x) { return x.lastCommand && (x.lastCommand.state === 'pending' || x.lastCommand.state === 'delivered') }).length
     el.cSuccess.textContent = d.filter(function (x) { return x.lastCommand && x.lastCommand.state === 'success' }).length
     el.cFailed.textContent = d.filter(function (x) { return x.lastCommand && x.lastCommand.state === 'failed' }).length
+    if (el.cCancelled) {
+      el.cCancelled.textContent = d.filter(function (x) { return x.lastCommand && x.lastCommand.state === 'cancelled' }).length
+    }
   }
 
   function chip(st) {
@@ -293,8 +316,10 @@
     }
 
     // done = 已完成的步数（0 = 连"已下发"都还没有，实际不会出现）
+    // 只认 deliveredAt 作"设备取走"的证据：被取消/顶替的命令可能根本没被取走，
+    // 早期写法用 `state !== 'pending'` 会把它错画成"已取走"。
     var done = 1
-    if (cmd.deliveredAt || cmd.state !== 'pending') done = 2
+    if (cmd.deliveredAt) done = 2
     if (pi >= 0) done = 2 + pi
     if (cmd.state === 'success') done = total
 
@@ -302,6 +327,8 @@
     if (cmd.state === 'failed') failAt = pi >= 0 ? 2 + pi : Math.min(done, total - 1)
     var offAt = -1
     if (cmd.state === 'superseded') offAt = Math.min(done, total - 1)
+    var cancelAt = -1
+    if (cmd.state === 'cancelled') cancelAt = Math.min(done, total - 1)
 
     var states = []
     for (var i = 0; i < total; i++) {
@@ -309,6 +336,7 @@
       else if (i > done) states.push('wait')
       else if (i === failAt) states.push('fail')
       else if (i === offAt) states.push('off')
+      else if (i === cancelAt) states.push('cancel')
       else states.push(cmd.state === 'pending' || cmd.state === 'delivered' ? 'cur' : 'done')
     }
     return { labels: labels, states: states }
@@ -359,6 +387,23 @@
         text: '失败 · 耗时 ' + fmtDur(elapsedFrom(cmd, cmd.finishedAt)) +
           (cmd.detail ? ' · ' + esc(cmd.detail) : '（设备没给 detail）'),
       }
+    }
+    if (cmd.state === 'cancelled') {
+      var why = cancelReasonText(cmd)
+      var text
+      if (cmd.cancelReason === 'device_offline') {
+        text = '已取消（' + why + '）：这条命令从未下发、也不会排队——设备下次上报取不到它。设备上线后重新下发即可。'
+      } else if (cmd.wasDelivered) {
+        text = '已取消（' + why + '）：撤销时设备已取走——拦不住正在写入的设备，但已停掉重复投递。'
+      } else {
+        text = '已取消（' + why + '）：设备还没取走，已经拦住（设备下次上报取不到它）。'
+      }
+      if (cmd.lateResult) {
+        text += ' ⚠️ 设备随后仍回执了' + (cmd.lateResult.state === 'success' ? '成功' : '失败') +
+          '（撤销来晚了）：设备本地照旧写完了。' +
+          (cmd.lateResult.detail ? '原文：' + esc(cmd.lateResult.detail) : '')
+      }
+      return { kind: 'cancel', text: text }
     }
     return { kind: 'info', text: '已被新命令顶替（superseded）。' }
   }
@@ -418,11 +463,25 @@
         })
       }
     }
-    if (cmd.finishedAt) {
+    if (cmd.finishedAt && cmd.state !== 'cancelled') {
       rows.push({
         at: cmd.finishedAt,
         label: cmd.state === 'success' ? '回执：成功' : cmd.state === 'failed' ? '回执：失败' : '结束：' + (STATE_LABEL[cmd.state] || cmd.state),
         extra: cmd.detail || ''
+      })
+    }
+    if (cmd.state === 'cancelled' && cmd.cancelledAt) {
+      rows.push({
+        at: cmd.cancelledAt,
+        label: '取消：' + cancelReasonText(cmd),
+        extra: cmd.wasDelivered ? '撤销时设备已取走（重复投递已停）' : '未下发'
+      })
+    }
+    if (cmd.lateResult && cmd.lateResult.at) {
+      rows.push({
+        at: cmd.lateResult.at,
+        label: '迟到回执：' + (cmd.lateResult.state === 'success' ? '成功' : '失败') + '（撤销来晚了）',
+        extra: cmd.lateResult.detail || ''
       })
     }
     var tlHtml = '<ol class="tl">' + rows.map(function (r) {
@@ -446,10 +505,21 @@
       tlHtml
   }
 
+  /** 该设备当前"该关心的命令"：有未决命令就是它，否则是最新记录 */
+  function focusCommand(d) {
+    return d.unresolved || d.lastCommand || null
+  }
+
   function renderDevices() {
     el.deviceEmpty.hidden = state.devices.length > 0
     el.deviceGrid.innerHTML = state.devices.map(function (d) {
       var cmd = d.lastCommand
+      var pend = d.unresolved || null
+      // 未决命令可能不是"最近记录"：设备离线时再下发会新增一条 cancelled 记录把它顶下去
+      var extra = pend && (!cmd || pend.id !== cmd.id)
+        ? '<div class="dev__cmd"><span class="lbl">未决命令</span>' + chip(pend.state) +
+            '<span class="rid">' + esc(pend.id || '') + '</span></div>'
+        : ''
       return '' +
         '<article class="dev' + (d.deviceId === state.selectedId ? ' is-selected' : '') + (d.online ? '' : ' is-offline') + '" data-id="' + esc(d.deviceId) + '">' +
           '<div class="dev__hd">' +
@@ -468,9 +538,17 @@
             '<span class="lbl">最近命令</span>' +
             (cmd ? chip(cmd.state) + '<span class="rid">' + esc(cmd.id || '') + '</span>' : '<span class="chip chip--none">无命令</span>') +
           '</div>' +
-          shortProgress(cmd) +
+          extra +
+          shortProgress(focusCommand(d)) +
+          (d.online ? '' :
+            '<div class="dev__prog dev__prog--warn">设备不在线（最后心跳 ' + esc(fmtAgo(d.lastSeen)) +
+            '）：此刻下发会被取消、不会排队——等它上线再下发。</div>') +
           '<div class="dev__actions">' +
-            '<button class="btn btn--sm" data-act="select">选择并下发</button>' +
+            '<button class="btn btn--sm" data-act="select">' + (d.online ? '选择并下发' : '选择查看') + '</button>' +
+            (pend
+              ? '<button class="btn btn--sm btn--danger" data-act="cancel" data-cmd="' + esc(pend.id) +
+                '" title="撤销这条未决命令，设备下次上报不会再拿到它">✋ 撤销未决命令</button>'
+              : '') +
           '</div>' +
         '</article>'
     }).join('')
@@ -505,19 +583,32 @@
     return null
   }
 
+  function findDevice(id) {
+    for (var i = 0; i < state.devices.length; i++) if (state.devices[i].deviceId === id) return state.devices[i]
+    return null
+  }
+
   function renderResolved() {
-    var dev = el.dDevice.value
+    var devId = el.dDevice.value
+    var dev = findDevice(devId)
     var rel = findRelease(el.dRelease.value)
-    el.sendBtn.disabled = !(dev && rel)
+    // 离线不下发是服务器规则（412），页面提前把按钮置灰——不让人走到"点了却什么都没发生"那一步
+    var offline = !!(dev && !dev.online)
+    el.sendBtn.disabled = !(devId && rel) || offline
+    el.sendBtn.title = offline ? '设备不在线：当前下发会被取消（412）、不会排队' : ''
     renderTokenState()
-    if (!dev) { el.resolved.hidden = true; return }
+    if (!devId) { el.resolved.hidden = true; return }
     el.resolved.hidden = false
     var needToken = !state.token
     el.resolved.innerHTML =
-      '将下发：<b>' + esc(fmtMac(dev)) + '</b> → ' +
+      '将下发：<b>' + esc(fmtMac(devId)) + '</b> → ' +
       (rel
         ? '<code>' + esc(rel.projectId + ' / ' + rel.variant + ' / ' + rel.id) + '</code>'
         : '<span style="color:var(--warn)">尚未选择 release</span>') +
+      (offline
+        ? ' <span style="color:var(--err)">· 设备不在线（最后心跳 ' + esc(fmtAgo(dev && dev.lastSeen)) +
+          '）：下发会被取消、不会排队，等它上线再下发</span>'
+        : '') +
       (needToken ? ' <span style="color:var(--warn)">· 还缺 Token（下方填写）</span>' : '')
   }
 
@@ -541,16 +632,70 @@
 
   // ══ 交互 ════════════════════════════════════════════════
   el.deviceGrid.addEventListener('click', function (e) {
+    // 撤销未决命令（写操作，需 token；与 CLI 的 --cancel 同一端点）
+    var cancelBtn = e.target.closest('[data-act="cancel"]')
+    if (cancelBtn) {
+      var hostId = cancelBtn.closest('.dev').getAttribute('data-id')
+      var cid = cancelBtn.getAttribute('data-cmd') // 明确撤哪一条：未决命令未必是"最近记录"
+      var dev = findDevice(hostId)
+      if (dev && cid) cancelPending(dev, cid)
+      return
+    }
     var btn = e.target.closest('[data-act="select"]')
     if (!btn) return
     var card = btn.closest('.dev')
     state.selectedId = card.getAttribute('data-id')
     el.dDevice.value = state.selectedId
-    renderDevices(); renderResolved()
+    // 过程面板也要跟着换设备——否则点完要等 5s 轮询才变，正好毁掉"看得见过程"
+    renderDevices(); renderResolved(); renderProcess()
     el.dDevice.scrollIntoView({ behavior: 'smooth', block: 'center' })
   })
 
-  el.dDevice.addEventListener('change', function () { state.selectedId = el.dDevice.value; renderDevices(); renderResolved() })
+  /** 撤销未决命令：pending 拦得住；delivered 拦不住设备，但能停掉重复投递（如实说明） */
+  function cancelPending(dev, commandId) {
+    var pend = dev.unresolved || null
+    var cmd = pend && pend.id === commandId ? pend : dev.lastCommand
+    if (!cmd || cmd.id !== commandId) {
+      notice('err', '这条命令已不在设备上了（可能已被撤销或被顶替）——刷新页面再看。')
+      return
+    }
+    if (!state.token) {
+      notice('err', '撤销需要 Token——它是写操作，服务器要求 Bearer 鉴权（与下发用的同一个）。')
+      if (el.dToken) el.dToken.focus()
+      return
+    }
+    var ask = cmd.state === 'delivered'
+      ? '设备已经取走了 ' + cmd.id + '：撤销拦不住它正在进行的写入，只能停掉重复投递。仍要撤销吗？'
+      : '撤销 ' + cmd.id + '？设备还没取走，撤销后它不会再收到这条命令。'
+    if (!window.confirm(ask)) return
+    notice('info', '正在撤销 ' + cmd.id + '…')
+    fetchJson('/api/devices/' + encodeURIComponent(dev.deviceId) + '/commands/' + encodeURIComponent(cmd.id) + '/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
+      body: JSON.stringify({ reason: 'cancelled_by_operator' })
+    }).then(function (res) {
+      if (res.wasDelivered) {
+        notice('warn', '已撤销 ' + cmd.id + '——但设备已经取走它了：无法中断正在进行的写入，只能保证不再重复投递。' +
+          '设备若仍发来回执，会记为「迟到回执」，不覆盖取消状态。')
+      } else {
+        notice('ok', '已撤销 ' + cmd.id + '：设备下次上报不会再拿到它。')
+      }
+      return load()
+    }).catch(function (err) {
+      if (err.status === 409) {
+        notice('err', '撤销失败（409）：这条命令已经结束（成功/失败/已顶替），不能撤销。')
+      } else if (err.status === 404) {
+        notice('err', '撤销失败（404）：服务器上没有这条命令——刷新页面再看看。')
+      } else {
+        notice('err', '撤销失败：' + dispatchHint(err))
+      }
+    })
+  }
+
+  el.dDevice.addEventListener('change', function () {
+    state.selectedId = el.dDevice.value
+    renderDevices(); renderResolved(); renderProcess()
+  })
   el.dRelease.addEventListener('change', renderResolved)
 
   // Token：输入即存本机（不上传），与主站共用 fw.token

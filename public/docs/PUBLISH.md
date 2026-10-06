@@ -54,6 +54,7 @@ node tools\publish\index.js once --config publish.config.json
 | 命令 | 用途 |
 |---|---|
 | `publish once` | 单次发布（查缺增量：服务器已有同 SHA 文件不重传） |
+| `publish push --to <mac> [--build \| --release <id> \| --latest]` | **发布（可选）+ 推给指定设备 + 等结果 + 打印过程**（见 §2.2） |
 | `publish --watch` | 盯 build 目录自动发布（防抖 5s、失败退避重试 3 次）⚠️ 当前后台网络问题见 PROGRESS 问题 20，暂用手动 once |
 | `publish promote <release-id> --note "说明"` | 把 snapshot 晋升为发布版（note 必填，永不自动删） |
 | `--config <path>` | 指定配置文件（默认 ./publish.config.json） |
@@ -63,7 +64,30 @@ node tools\publish\index.js once --config publish.config.json
 
 通用参数：`--help`
 
-**没有 CLI 也能发布**：CLI 源码可在本站下载（见 §7），或直接用裸 HTTP 发布（见 §2.1）。
+**没有 CLI 也能发布**：CLI 源码可在本站下载（见 §6），或直接用裸 HTTP 发布（见 §2.1）。
+
+### 2.2 推送固件到指定设备（`push`）
+
+刚编译完，一条命令把固件推到**某一台**设备并看到结果：
+
+```bash
+node tools/publish/index.js push --to 34:85:a1:b2:c3:d4 --build build     # 发布 + 推送（主力用法）
+node tools/publish/index.js push --to 34:85:a1:b2:c3:d4 --release <id>    # 推已有版本，不重新发布
+node tools/publish/index.js push --list                                   # 先看有哪些设备
+node tools/publish/index.js push --status --to 34:85:a1:b2:c3:d4          # 只读复查（超时/中断后用）
+node tools/publish/index.js push --cancel --to 34:85:a1:b2:c3:d4          # 推错了，握停
+```
+
+几条**必须先知道**的规则：
+
+* **设备不在线 → 不下发、不排队，直接取消**（服务器返 412 并留一条 `cancelled` 记录）——设备上线后**重跑一次**即可；
+* 目标设备必须**已在设备清单里**（MAC 打错直接拒绝，不会静默排队——服务端对陌生 deviceId 会自动建条目，这正是要防的）；
+* **芯片族必须一致**（`ESP32-S3` 的固件推给 `ESP32` 默认拒绝，这是变砖级故障）；
+* 设备**已是目标版本**默认跳过（省一次擦写）；`--build` 默认只造 **snapshot**，要正式版加 `--promote`；
+* **推重了不算错**：同版本的未决命令会被识别为重入，接着等，不会重复刷机。
+
+退出码可分流（`0` 成功 / `1` 设备失败 / `4` 目标不存在 / `5` 超时 / `7` 芯片不匹配 / `8` 已同版本跳过 / `9` 离线已取消 / `10` 他版本未决…）。
+**完整文档**（参数表、退出码、闸门、`--json` 契约、失败排查）：[`PUSH-TO-DEVICE.md`](./PUSH-TO-DEVICE.md)；机器描述符 `/push.json`。
 
 ### 2.1 裸 HTTP 发布（curl / 任意语言，无 CLI 依赖）
 
@@ -141,25 +165,31 @@ Release {
 
 ## 6. CLI 源码下载（跨网设备免仓库克隆）
 
-CLI 零依赖（仅 Node 内置模块），4 个文件放下即用：
+CLI 零依赖（仅 Node 内置模块），6 个文件放下即用（`push`/`pushlib` 是"推送到设备"，见 §2.2）：
 
 ```
 http://firmware.example.com/tools/publish/index.js
 http://firmware.example.com/tools/publish/once.js
 http://firmware.example.com/tools/publish/lib.js
 http://firmware.example.com/tools/publish/watch.js
+http://firmware.example.com/tools/publish/push.js
+http://firmware.example.com/tools/publish/pushlib.js
 ```
 
 ```bash
 mkdir -p tools/publish && cd tools/publish
-for f in index once lib watch; do curl -O http://firmware.example.com/tools/publish/$f.js; done
+for f in index once lib watch push pushlib; do curl -O http://firmware.example.com/tools/publish/$f.js; done
 cd ../.. && node tools/publish/index.js once --config publish.config.json
 ```
+
+> 站点上的这 6 个文件与仓库里的 `tools/publish/` 是**字节级一致**的（`tests/static-pages.test.js` 守着），下载即跑，不需要 clone。
 
 ## 7. 相关文档（本站点均可直接读取）
 
 - 本文件：`/docs/PUBLISH.md`
+- **推送固件到指定设备**：`/docs/PUSH-TO-DEVICE.md`（+ 机器描述符 `/push.json`）
 - API 速查（AI 友好）：`/llms.txt`
+- OTA 三端契约：`/docs/ota.md` · 设备端接入：`/docs/DEVICE-OTA.md`
 - 部署运维：`/docs/DEPLOY.md`
 - 设计与数据模型：`/docs/FIRMWARE-REGISTRY.md`
 - 验收清单：`/docs/REQUIREMENTS.md`

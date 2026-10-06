@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-10-06（**OTA 三端推进**：独立页 `/OTA` + 服务器四端点 + 设备接入文档/模拟器均已上线；页面 mock 假数据已移除，只读实时接口）
+> 最后更新：2026-10-07（**推送固件到指定设备**已实现并上线：服务器离线准入 412 + 撤销端点 + `push` CLI + `/OTA` 页面撤销/置灰 + 描述符）
 
 ## 一句话
 
@@ -22,7 +22,7 @@
 7. `docs/TROUBLESHOOTING.md` — 故障排查
 8. `docs/FIRMWARE-REGISTRY.md` — v1.5 固件库设计
 9. **`docs/ota.md` — OTA 三端设计契约（设备/云端/页面）；页面端已落地为独立页 `/OTA`（§6.0）**
-   - `docs/PUSH-TO-DEVICE.md` — **推送固件给指定设备（设计定稿 · 未实现）**：一条命令 = 发布+下发+等结果+打过程；含 AI 入口设计（`/push.json` / `llms.txt` 段 / `--json`）
+   - `docs/PUSH-TO-DEVICE.md` — **推送固件给指定设备（已实现并上线）**：一条命令 = 发布+下发+等结果+打过程；含 AI 入口（`/push.json` / `llms.txt` 段 / `--json` 契约）与验收结果（§8 全通过）
 10. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
 11. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
 12. 本文 — 进度与下一步
@@ -49,6 +49,8 @@
 | **S4 版本管理** | ✅ 门5 已过 | server promote/回滚/retention（Bearer 鉴权）+CLI `promote --note`+前端时间线（晋升/回滚/保留数确认/F-13 芯片比对）+SSE promote/latest 刷新+parts 分区类型 type/subType；115 测试+build 全绿；**用户实测：流程基本跑通、日志可用（2026-09-29）** |
 
 | **OTA 三端（页面+服务器）** | ✅ 页面与服务器就绪 | 页面 `/OTA`（`public/ota/`）+ 描述符 `/ota.json` + 契约 `docs/ota.md` + 静态托管 8 用例；**服务器四端点已实现**（`server/devices.js` 存储 + `app.js` 接线，`tests/devices.test.js` 30 用例）；设备模拟器 `tools/device-sim/`（12 用例）+ **端到端 24/24 实测**（上报→派发→投递→下载→sha256 校验→回执→版本回写，含重投递/409+force/篡改失败）。**未实现：设备端固件（在另一台电脑上开发）**，其入口文档为 `docs/DEVICE-OTA.md`。注：全量套件 1 红在 `tests/progress.test.ts`（烧录进度在途改动，非本次引入） |
+
+| **推送固件到指定设备（push）** | ✅ 已实现并上线 | 规则：**离线不下发（412 + cancelled 记录，不排队）**、可撤销未决命令（pending 真拦住 / delivered 停掉重复投递）、迟到回执不覆盖终态；入口：CLI `push`（`--build`/`--release`/`--latest`/`--status`/`--cancel`/`--json`，退出码 0–12 + 130）+ 页面离线置灰与「撤销」按钮 + 按 id 复查端点；**341 测试全绿**（`push-cli.test.js` 纯逻辑 36 + 端到端 30，含三条故障注入），页面 DOM 桩 28/28；文档 `docs/PUSH-TO-DEVICE.md`（§8 验收全通过）+ `/push.json` + `llms.txt` 推送段 |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
@@ -185,6 +187,16 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
   ④ **提示音**：`glue/audioFeedback.ts`（Web Audio 合成，零音频文件）——完成=上行三音 C5→E5→G5，失败=双低音下行 G4→E4。**关键修复**：完成音发生在点击后数分钟，手势早已过期，直接 new AudioContext 会被自动播放策略挂起=没声音；改为首次 `pointerdown/keydown` 即 `primeAudio()` 解锁。状态栏右侧 🔊/🔇 静音开关（localStorage `fw.sound`）。面板新增**烧录回执行**（✅完成/❌失败 · 段数 · 字节 · 耗时）。
   ⑤ **清单控件瘦身**：原 5 张参数卡 + 6 个平铺按钮 + 2 行提示 → **一行参数条**（模式/频率/容量/芯片/合计）+ **⚡烧录 + ＋添加bin + ⋯更多菜单**（原生 `<details>`，收 完全擦除/硬复位/重新载入/导出固件包，点外部自动收起）+ 1 行短提示；删掉冗余 `<h2>烧录清单</h2>` 与死样式。**158 测试 + build 全绿**。
   未做：实机复测（待用户插板验证心跳行/提示音）、UI 视觉核验（本机无 Playwright 浏览器，未截图）。
+
+- **2026-10-07（推送固件到指定设备：开工 → 实现 → 上线，一次做完八步）**：用户说「开始吧，补下剩余的问题，然后开发上线」。按 `docs/PUSH-TO-DEVICE.md` §9 八步全部落地，**341 测试 + build 全绿**，验收清单 §8 逐条通过（每条都指向自动化断言）。
+  ① **服务器**（`devices.js`/`app.js`）：`cancelled` 状态 + `recordCancelled()`（离线未下发留记录、**不占未决位**）+ `cancelCommand()`（撤销未决、`wasDelivered` 如实区分能力）+ `lateResult`（迟到回执**不覆盖**终态）+ `isDeviceOnline()`（服务端唯一在线口径）；`POST /commands` 入队前判在线 → **412**；新增 `POST …/commands/{cid}/cancel`。
+  ② **页面**（`public/ota/*`）：`cancelled` 标签与原因翻译、离线设备下发按钮**置灰**并写明"会被取消、不会排队"、412 走可操作提示、设备卡「✋ 撤销未决命令」、过程面板画取消落点（空心红点，与 failed 的实心红点区分）与"迟到回执（撤销来晚了）"行。顺手修掉一个真缺陷：**点卡片/切下拉后过程面板要等 5s 轮询才刷新**——正好毁掉"看得见过程"，两处 render 补 `renderProcess()`。
+  ③ **CLI**：`pushlib.js`（纯逻辑：MAC 归一、参数互斥、芯片闸门、同版本、过程渲染、停滞判断、退出码）+ `push.js`（编排：闸门→发布→下发→轮询→打印）+ `index.js` 子命令；`--build/--release/--latest/--list/--status/--cancel/--promote/--force/--force-chip/--allow-unknown/--dry-run/--json/--no-wait` 全接线；发布这一步给 1 次重试（原来传 `retries: 0`）。
+  ④ **两处"设计之外但必须补"的发现**（都写进 §4 与 `ota.json`）：**(a)** 设备视图要暴露 `unresolved`——设备离线时再下发会新增一条更新的 `cancelled` 记录把还在队列里的 `pending` 顶下去，只看 `lastCommand` 会**撤错对象或以为没得撤**（页面与 CLI 都中招）；**(b)** 新增 `GET /api/devices/{id}/commands/{cid}`（公开只读）——等待时按 id 精确轮询，否则一旦有更新的记录盖上来，连"我推的那条"是成功还是被顶替都无从得知。**这不是功能膨胀，是原设计在真实场景下会静默出错的两处**。
+  ⑤ **验证方式**：`tests/push-cli.test.js` 纯逻辑 36 + **端到端 30**（起真服务器 + 模拟设备 + 跑真 CLI：成功链/失败回执/超时/重入幂等/409+force/离线 412/each 退出码/`--json` 契约/`--build`+`--promote` 快照不晋升/发布成推送败只需 `--release` 重推）；**故障注入三条**：① 设备取走后断电不回执 → exit 5 + "停在 delivered" + 回来后被重复投递 ② 轮询期不可达（转发代理注入 502）→ 2 次不误判、连续 3 次才 exit 6 且明说"命令不受影响" ③ 等待期 token 被撤销 → 等待照常完成（轮询是公开只读），同 token 不能再下发；页面侧用 DOM 桩 **28/28**（含"离线被选中时按钮仍置灰"、撤销打到正确端点与载荷、被遮住的未决命令也可撤）；`devices.test.js` 补 11 例、`static-pages.test.js` 补 6 例（含 **CLI 镜像字节级一致且能直接跑**）。
+  ⑥ **描述符与文档同批**：`public/push.json`（tool_id=push-cli，`status: implemented`）、`llms.txt` 推送段 + 412/cancelled/撤销/`unresolved` 说明、`ota.json`（`cancelled` 状态、412、`cancel_command`/`get_command`、`offline_dispatch_rule`、`cancel_semantics` 都标 `implemented: true`）、`#ai-data` 同步；`docs/{PUSH-TO-DEVICE,ota,DEVICE-OTA,PUBLISH}.md` 更新并镜像到 `public/docs/`；`public/tools/publish/` 六个文件与源头字节级一致。
+  ⑦ **踩过并记住的坑**：`ctx` 里漏传 `to` 导致下发打到 `/api/devices/undefined/commands`（诊断脚本一眼看出，测试却只报"退出码不对"——**先看真实请求再改代码**）；测试里造"离线"用了**未来时间戳**（`2026-10-07T08:00Z` 而系统现在是 `2026-10-06T16:10Z`）→ 服务器判成在线，改用 `2020-01-01` 这类绝对过去时间；`--json` 时参数解析失败也要保证 stdout 只有 JSON（预扫 `--json`，人话转 stderr）；`--dry-run` 声称零请求就必须**连设备清单都不拉**（否则 `--release` 分支会先拉 registry 自相矛盾）。
+  ⑧ **诚实标注**：真机 `b81f3fc8768c` 的那一次实推仍需在设备机上跑（真机与设备工程在另一台电脑）；CLI 侧行为已被端到端全覆盖。**已知残留**：在线判定固有 45s 滞后，窗口内掉线的命令会正常入队停在 `pending`（文档 §3.1 已写明这是口径误差，不是"排队等上线"）。
 
 - **2026-10-06（推送方案评估 + 两项拍板：`--cancel` 与 `--promote`）**：用户要求「评估方案是否完善、前进退后、降级方案，目的是发布推送端能稳定推送、还看得见过程」。**评估结论：主干完善**（目标边界/闸门/退出码/记录提醒/AI 面/文件职责/实施顺序都齐），但对两个目标有**6 处缺口**——按"稳定推送"缺：① 重入不幂等（脚本重试撞上自己留下的命令 → 409，而提示的 `--force` 会**顶替正在执行的那条**，白刷 flash）② 轮询无容错（等待期服务器重启即误判失败，而命令其实在服务器上照跑）③ 发布这一步无重试（`once` 分支传 `retries: 0`）④ 通道现状（明文 http 下 token 与固件过公网）；按"看得见过程"缺：⑤ 失败/超时时不打过程链（**失败场景最需要过程**，原来只给一行错误）⑥ 中断后无只读复查入口。**处置**：④ 属现状继承（发布链路本来如此）→ 文档写明 `NODE_EXTRA_CA_CERTS` 走 https 与"用可撤销工作 token"；其余 5 处**已折进设计**（§3.2 重入幂等 + 轮询容错 + 中断提示、§3.3 任何退出码都必须打完整过程链与停滞判断、§7 两步可分离与快照处置、§9 发布给 1 次重试、新增 `--status` 只读复查 + 退出码 10）。**用户拍板两项**：① **要 `--cancel`**（补"推错了能握停"）——设计时发现一个必须写清的语义：**撤销 `pending` 能真拦住，撤销 `delivered` 拦不住正在写的设备，但能停掉服务器的重复投递循环**（那正是设备取走后崩溃导致的死循环），因此允许撤但需明确警告，并且**迟到回执不覆盖 cancelled**，记进 `lateResult` 字段由页面标注"设备已完成（撤销来晚了）"（新增退出码 11/12 区分"拦住了"与"已取走"）；② **`--build` 默认不晋升**，要正式版加 `--promote`（台架试验不污染 latest 线）。**降级矩阵**也已成文：服务器不可达/页面不可用/设备端未实现过程上报/离线/自签证书/ token 撤销/无 Node 环境/**裸 HTTP 两条命令永远可用**（CLI 只是糖）——每条都写明"降级后仍能做到什么"与恢复动作。**产出**：`docs/PUSH-TO-DEVICE.md` 扩到 300 行（新增 §3.2/§3.3/§3.4 与相应契约、描述符、验收项）+ `public/docs/` 镜像。**已发布**：23:45:47 部署，`/docs/PUSH-TO-DEVICE.md` 外网 200。**仍不开工**：代码未动，线上无本功能声明（复验 `llms.txt` 计数 0）。
 

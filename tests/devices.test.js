@@ -9,15 +9,19 @@ import {
   ONLINE_TIMEOUT_MS,
   applyProgress,
   applyResult,
+  cancelCommand,
   commandForDevice,
   commandSummary,
   emptyDeviceStore,
   enqueueCommand,
+  isDeviceOnline,
   listDeviceViews,
   nextCommandForDevice,
   pickAppPart,
   readDeviceStore,
+  recordCancelled,
   resolveRelease,
+  unresolvedCommand,
   upsertReport,
   writeDeviceStoreAtomic,
 } from '../server/devices.js'
@@ -107,6 +111,24 @@ async function progress(deviceId, commandId, body) {
     body: JSON.stringify(body),
   })
   return { status: res.status, json: await res.json() }
+}
+
+async function cancel(deviceId, commandId, body, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (opts.token !== null) headers.Authorization = `Bearer ${opts.token ?? TOKEN}`
+  const res = await fetch(`${base}/api/devices/${deviceId}/commands/${commandId}/cancel`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body ?? {}),
+  })
+  return { status: res.status, json: await res.json() }
+}
+
+/** 把设备的 lastSeen 改成"很久以前"，用于构造离线场景 */
+function makeStale(deviceId, at = '2026-10-06T08:00:00Z') {
+  const store = readDeviceStore(dataDir)
+  store.devices[deviceId].lastSeen = at
+  writeDeviceStoreAtomic(dataDir, store)
 }
 
 beforeAll(async () => {
@@ -564,6 +586,190 @@ describe('POST /api/devices/:id/commands/:cid/progress（过程上报，免鉴�
   })
 })
 
+describe('devices：在线判定（下发准入的权威口径）', () => {
+  it('45s 内算在线、超过算离线；从未上报 = 离线', () => {
+    const dev = { lastSeen: '2026-10-06T10:00:00Z' }
+    expect(isDeviceOnline(dev, '2026-10-06T10:00:45Z')).toBe(true)
+    expect(isDeviceOnline(dev, '2026-10-06T10:00:46Z')).toBe(false)
+    expect(isDeviceOnline({ lastSeen: null }, '2026-10-06T10:00:00Z')).toBe(false)
+    expect(isDeviceOnline(undefined, '2026-10-06T10:00:00Z')).toBe(false)
+    expect(isDeviceOnline(dev, 'not-a-date')).toBe(false)
+  })
+})
+
+describe('devices：离线取消记录与撤销（纯函数）', () => {
+  it('recordCancelled：记 cancelled + 原因，不占未决位，进命令列表', () => {
+    const r = recordCancelled(emptyDeviceStore(), DEV, makeCommand(), 'device_offline', '2026-10-06T10:00:00Z')
+    expect(r.command.state).toBe('cancelled')
+    expect(r.command.cancelReason).toBe('device_offline')
+    expect(r.command.deliveredAt).toBeUndefined()
+    expect(unresolvedCommand(r.store.devices[DEV])).toBeNull() // 设备上线后重推不会被 409 挡
+    expect(r.store.devices[DEV].commands).toHaveLength(1)
+  })
+
+  it('recordCancelled：同一设备反复失败不会无限增长（沿用 20 条上限）', () => {
+    let store = emptyDeviceStore()
+    for (let i = 0; i < MAX_COMMANDS_PER_DEVICE + 5; i++) {
+      store = recordCancelled(store, DEV, makeCommand(), 'device_offline', new Date(2026, 0, 1, 0, i).toISOString()).store
+    }
+    expect(store.devices[DEV].commands.length).toBe(MAX_COMMANDS_PER_DEVICE)
+  })
+
+  it('cancelCommand：撤销 pending → 真拦住（wasDelivered=false）', () => {
+    const cmd = makeCommand()
+    const s = enqueueCommand(emptyDeviceStore(), DEV, cmd).store
+    const r = cancelCommand(s, DEV, cmd.id, 'cancelled_by_operator', '2026-10-06T10:00:05Z')
+    expect(r.wasDelivered).toBe(false)
+    expect(r.command.state).toBe('cancelled')
+    expect(r.command.cancelReason).toBe('cancelled_by_operator')
+    expect(r.command.cancelledAt).toBe('2026-10-06T10:00:05Z')
+    // 设备下次上报拿不到它
+    expect(nextCommandForDevice(r.store, DEV, '2026-10-06T10:00:10Z').command).toBeNull()
+  })
+
+  it('cancelCommand：撤销 delivered → wasDelivered=true，并停掉重复投递', () => {
+    const cmd = makeCommand()
+    let s = enqueueCommand(emptyDeviceStore(), DEV, cmd).store
+    s = nextCommandForDevice(s, DEV, '2026-10-06T10:00:00Z').store // 设备已取走
+    const r = cancelCommand(s, DEV, cmd.id, 'operator stop', '2026-10-06T10:00:05Z')
+    expect(r.wasDelivered).toBe(true)
+    expect(r.command.state).toBe('cancelled')
+    // 原本会重复投递同一条，撤销后不再投
+    expect(nextCommandForDevice(r.store, DEV, '2026-10-06T10:00:20Z').command).toBeNull()
+  })
+
+  it('cancelCommand：已结束不可撤销；不存在的命令返回 null', () => {
+    const cmd = makeCommand()
+    let s = enqueueCommand(emptyDeviceStore(), DEV, cmd).store
+    s = applyResult(s, DEV, cmd.id, 'success', 'ok', '2026-10-06T10:00:05Z').store
+    const done = cancelCommand(s, DEV, cmd.id, 'x', '2026-10-06T10:00:09Z')
+    expect(done.notCancellable).toBe(true)
+    expect(done.command.state).toBe('success')
+    expect(cancelCommand(s, DEV, 'cmd_deadbeef', 'x', '2026-10-06T10:00:09Z').command).toBeNull()
+  })
+
+  it('迟到回执：撤销后设备仍报 success → 不覆盖 cancelled，记进 lateResult', () => {
+    const cmd = makeCommand()
+    let s = enqueueCommand(emptyDeviceStore(), DEV, cmd).store
+    s = nextCommandForDevice(s, DEV, '2026-10-06T10:00:00Z').store
+    s = cancelCommand(s, DEV, cmd.id, 'operator stop', '2026-10-06T10:00:05Z').store
+    const late = applyResult(s, DEV, cmd.id, 'success', 'OTA ok（来晚了）', '2026-10-06T10:00:30Z')
+    expect(late.command.state).toBe('cancelled')
+    expect(late.command.lateResult.state).toBe('success')
+    expect(late.command.lateResult.detail).toBe('OTA ok（来晚了）')
+  })
+
+  it('迟到回执：被顶替（superseded）的命令同理，不覆盖终态', () => {
+    const first = makeCommand()
+    let s = enqueueCommand(emptyDeviceStore(), DEV, first).store
+    s = enqueueCommand(s, DEV, makeCommand(), { force: true }).store
+    const late = applyResult(s, DEV, first.id, 'failed', 'late', '2026-10-06T10:00:30Z')
+    expect(late.command.state).toBe('superseded')
+    expect(late.command.lateResult.state).toBe('failed')
+  })
+
+  it('commandSummary 带出撤销与迟到回执字段（页面/CLI 要用）', () => {
+    const cmd = makeCommand()
+    const s = enqueueCommand(emptyDeviceStore(), DEV, cmd).store
+    const r = cancelCommand(s, DEV, cmd.id, 'device_offline', '2026-10-06T10:00:05Z')
+    const sum = commandSummary(r.store.devices[DEV].commands[0])
+    expect(sum.state).toBe('cancelled')
+    expect(sum.cancelReason).toBe('device_offline')
+    expect(sum.cancelledAt).toBe('2026-10-06T10:00:05Z')
+    expect(sum.wasDelivered).toBe(false)
+    expect(sum.lateResult).toBeNull()
+  })
+})
+
+describe('POST /api/devices/:id/commands（离线不下发：412 + 记录）', () => {
+  it('设备离线 → 412，不排队，只留 cancelled 记录；设备上线后可正常下发', async () => {
+    await report(DEV2, { chip: 'ESP32-S3' })
+    makeStale(DEV2)
+    const blocked = await dispatch(DEV2, { type: 'ota', releaseId: RID })
+    expect(blocked.status).toBe(412)
+    expect(blocked.json.error).toBe('device offline')
+    expect(blocked.json.onlineTimeoutMs).toBe(ONLINE_TIMEOUT_MS)
+    expect(blocked.json.lastSeen).toBe('2026-10-06T08:00:00Z')
+    expect(blocked.json.cancelled.state).toBe('cancelled')
+    expect(blocked.json.cancelled.cancelReason).toBe('device_offline')
+
+    const store = readDeviceStore(dataDir)
+    const cmds = store.devices[DEV2].commands
+    expect(cmds[0].state).toBe('cancelled') // 有记录
+    expect(cmds.some((c) => c.state === 'pending')).toBe(false) // 但没排队
+
+    // 设备上线后重推：不因 409 被挡（取消记录不占未决位）
+    await report(DEV2, { chip: 'ESP32-S3' })
+    const ok = await dispatch(DEV2, { type: 'ota', releaseId: RID })
+    expect(ok.status).toBe(200)
+    expect(ok.json.command.state).toBe('pending')
+    await cancel(DEV2, ok.json.command.id, { reason: 'test cleanup' }) // 清掉未决位，别影响后续
+  })
+
+  it('从未上报过的设备 → 同样 412（它不在线），且不会建出"幽灵 pending"', async () => {
+    const ghost = 'aabbccddeeff'
+    const r = await dispatch(ghost, { type: 'ota', releaseId: RID })
+    expect(r.status).toBe(412)
+    expect(r.json.lastSeen).toBeNull()
+    const store = readDeviceStore(dataDir)
+    expect(store.devices[ghost].commands.some((c) => c.state === 'pending')).toBe(false)
+  })
+
+  it('releaseId 不存在 → 404（客户端错先于离线判定报出）', async () => {
+    makeStale(DEV2)
+    const r = await dispatch(DEV2, { type: 'ota', releaseId: 'nope-0000' })
+    expect(r.status).toBe(404)
+    await report(DEV2, { chip: 'ESP32-S3' })
+  })
+})
+
+describe('POST /api/devices/:id/commands/:cid/cancel（撤销未决命令，需 token）', () => {
+  it('无 token → 401；命令不存在 → 404；已结束 → 409', async () => {
+    const cmd = await report(DEV).then(() => null).catch(() => null) // 保持 DEV 在线
+    void cmd
+    expect((await cancel(DEV, 'cmd_ffffffff', {}, { token: null })).status).toBe(401)
+    expect((await cancel(DEV, 'cmd_ffffffff', {})).status).toBe(404)
+
+    await dispatch(DEV, { type: 'ota', releaseId: RID, force: true })
+    const cur = await report(DEV)
+    const cid = cur.json.command.id
+    await result(DEV, cid, { state: 'success', detail: 'done' })
+    expect((await cancel(DEV, cid, {})).status).toBe(409)
+  })
+
+  it('撤销 pending → 200（wasDelivered=false）；设备下次上报拿不到它', async () => {
+    await dispatch(DEV, { type: 'ota', releaseId: RID, force: true })
+    const list = await (await fetch(`${base}/api/devices`)).json()
+    const cid = list.devices.find((d) => d.deviceId === DEV).lastCommand.id
+    const r = await cancel(DEV, cid, { reason: '推错了' })
+    expect(r.status).toBe(200)
+    expect(r.json.wasDelivered).toBe(false)
+    expect(r.json.command.state).toBe('cancelled')
+    expect(r.json.command.cancelReason).toBe('推错了')
+    const next = await report(DEV)
+    expect(next.json.command).toBeNull() // 真拦住了
+  })
+
+  it('撤销 delivered → 200（wasDelivered=true）；设备迟到回执不覆盖 cancelled', async () => {
+    await dispatch(DEV, { type: 'ota', releaseId: RID, force: true })
+    const taken = await report(DEV) // 设备取走 → delivered
+    const cid = taken.json.command.id
+    const r = await cancel(DEV, cid, {})
+    expect(r.status).toBe(200)
+    expect(r.json.wasDelivered).toBe(true)
+    expect(r.json.command.cancelReason).toBe('cancelled_by_operator') // 默认原因
+
+    const late = await result(DEV, cid, { state: 'success', detail: 'OTA ok（撤销来晚了）' })
+    expect(late.status).toBe(200)
+    expect(late.json.command.state).toBe('cancelled') // 不覆盖
+    expect(late.json.command.lateResult.state).toBe('success')
+
+    // 重复投递也被停掉：设备再上报不会拿到同一条
+    const again = await report(DEV)
+    expect(again.json.command).toBeNull()
+  })
+})
+
 describe('GET /api/devices（列表，公开只读）', () => {
   it('返回 _meta 与 devices；离线设备按 lastSeen 判定', async () => {
     // 直接构造一个陈旧 lastSeen 的设备
@@ -588,6 +794,57 @@ describe('GET /api/devices（列表，公开只读）', () => {
   it('陌生路径 /api/devices/xxx → 404 unknown api', async () => {
     const res = await fetch(`${base}/api/devices/${DEV}/nonsense`)
     expect(res.status).toBe(404)
+  })
+
+  it('unresolved 字段：即使更新的 cancelled 记录顶在列表首位，未决命令仍可被找到', async () => {
+    // 构造"pending 被更新的 cancelled 记录遮住"的真实场景：
+    // 设备在线下发 A(pending) → 设备掉线 → 又下发 B → 412 + 一条更新的 cancelled 记录
+    const deviceId = 'a1b2c3d4e5f6'
+    const store = readDeviceStore(dataDir)
+    store.devices[deviceId] = {
+      deviceId,
+      chip: 'ESP32-S3',
+      createdAt: '2026-10-06T08:00:00Z',
+      lastSeen: '2026-10-06T08:00:00Z',
+      commands: [
+        { id: 'cmd_bbbbbbbb', type: 'ota', releaseId: RID, state: 'cancelled', createdAt: '2026-10-06T09:00:00Z', cancelReason: 'device_offline' },
+        { id: 'cmd_aaaaaaaa', type: 'ota', releaseId: RID, state: 'pending', createdAt: '2026-10-06T08:30:00Z' },
+      ],
+    }
+    writeDeviceStoreAtomic(dataDir, store)
+
+    const list = await (await fetch(`${base}/api/devices`)).json()
+    const view = list.devices.find((d) => d.deviceId === deviceId)
+    expect(view.lastCommand.id).toBe('cmd_bbbbbbbb') // 最近记录是取消记录（提醒用）
+    expect(view.lastCommand.state).toBe('cancelled')
+    expect(view.unresolved.id).toBe('cmd_aaaaaaaa') // 但未决命令仍能拿到（撤销用）
+    expect(view.unresolved.state).toBe('pending')
+
+    // 没有未决命令时 unresolved 为 null（页面据此决定要不要显示撤销按钮）
+    expect(list.devices.find((d) => d.deviceId === DEV).unresolved ?? null).toBeNull()
+  })
+})
+
+describe('GET /api/devices/:id/commands/:cid（按 id 读单条，公开只读）', () => {
+  it('拿到指定命令的完整摘要（含撤销/迟到回执字段）；未知 id → 404；坏 id → 400', async () => {
+    await report(DEV, { chip: 'ESP32-S3' })
+    await dispatch(DEV, { type: 'ota', releaseId: RID, force: true })
+    const taken = await report(DEV)
+    const cid = taken.json.command.id
+
+    const res = await fetch(`${base}/api/devices/${DEV}/commands/${cid}`)
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.command.id).toBe(cid)
+    expect(json.command.state).toBe('delivered')
+    expect(json.command).toHaveProperty('cancelReason', null)
+    expect(json.command).toHaveProperty('lateResult', null)
+
+    // 免鉴权（与列表同级）——它只是读
+    expect((await fetch(`${base}/api/devices/${DEV}/commands/cmd_ffffffff`)).status).toBe(404)
+    expect((await fetch(`${base}/api/devices/${DEV}/commands/not-an-id`)).status).toBe(400)
+    // 结局：清掉未决位，别影响别的用例
+    await result(DEV, cid, { state: 'success', detail: 'cleanup' })
   })
 })
 

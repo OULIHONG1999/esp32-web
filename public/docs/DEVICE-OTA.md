@@ -22,6 +22,7 @@
 > * **本文不假设你的工程长什么样**：所有需要"看你工程现状"的地方，都给了自查命令与判据（§5、§8），不由本文替你断言。
 >
 > * **不在本次范围**：批量下发、自动推版本、MQTT/长连接、云端主动探测设备。
+> * **推送固件到指定设备（CLI）**：见 [`PUSH-TO-DEVICE.md`](./PUSH-TO-DEVICE.md)——设备开发机上一条命令完成"发布 + 下发 + 等结果 + 打印过程"。**设备端无需为它做任何改动**。
 
 ***
 
@@ -196,6 +197,11 @@ POST /api/devices/{deviceId}/commands      需 Authorization: Bearer <token>
 * `releaseId` 必须真实存在（服务器去 registry 查），否则 **404**。
 * 服务器会替你解析出该 release 的 **app 分段**，把 `file/url/sha256/size` 填进命令（设备拿到就是可下载的）。
 * 每个设备**至多一条未决命令**：已有未回执命令时再下发 → **409**（带出现有命令）。要顶替，请求体加 `"force": true`，旧命令会被标 `superseded`。
+* **设备不在线 → 412（2026-10-07 生效）**：服务器在入队那一刻判在线（`now - lastSeen > 45s` 即离线），离线则**不进队**，只留一条 `state:"cancelled"` + `cancelReason:"device_offline"` 的记录，并把这条记录放在 412 的响应体里。
+  * 设备端**什么都不用做**——它仍然只在自己上报时取命令；离线期间不会积压任何命令，因此**不存在"上线后突然收到一条很久以前的刷机命令"**这种情况。
+  * 你若是那个下发的操作者（页面或 CLI）：等设备上线后**重跑一次**即可（取消记录不占未决位，不会被 409 挡）。
+  * 相关：推错了可以 `POST /api/devices/{deviceId}/commands/{commandId}/cancel`（Bearer）撤销未决命令；撤销 `pending` 真能拦住，撤销已取走的只能停掉重复投递。
+  * 完整规则见 **[`PUSH-TO-DEVICE.md`](./PUSH-TO-DEVICE.md)**（推送到指定设备的唯一入口文档；含 CLI 与闸门）。
 
 ### 4.4 回执
 
@@ -254,6 +260,7 @@ GET /api/registry/projects/{projectId}/variants/{variant}/releases/{releaseId}/p
 | 401 | 未授权 | 下发命令没带或带错 token（**report / 回执 / 过程上报都不会遇到 401**） |
 | 404 | 找不到 | releaseId 在 registry 里不存在 / commandId 不存在 / 下载路径的段名不对 |
 | 409 | 冲突 | 该设备已有未回执命令（用 `force: true` 顶替） |
+| **412** | 设备不在线，下发被取消 | 下发的那一刻设备离线（`now - lastSeen > 45s`）：**不进队**，只留一条 `cancelled` 记录。设备上线后由操作者重跑一次（§4.3） |
 | 413 | body 过大 | 上报超过 8KB（正常上报远小于此） |
 
 ## 5. 设备端要实现的 7 件事

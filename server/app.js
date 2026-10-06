@@ -8,14 +8,17 @@ import {
   PROGRESS_PHASES,
   applyProgress,
   applyResult,
+  cancelCommand,
   commandForDevice,
   commandSummary,
   enqueueCommand,
+  isDeviceOnline,
   listDeviceViews,
   newCommandId,
   nextCommandForDevice,
   pickAppPart,
   readDeviceStore,
+  recordCancelled,
   resolveRelease,
   upsertReport,
   writeDeviceStoreAtomic,
@@ -443,7 +446,22 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
             deliveryCount: 0,
             createdAt: now,
           }
-          const queued = enqueueCommand(readDeviceStore(dataDir), deviceId, command, {
+          const storeBefore = readDeviceStore(dataDir)
+          const target = storeBefore.devices[deviceId] ?? null
+          // 离线（含"从未上报过"）→ 不下发、不排队、不等上线，只留一条 cancelled 记录（docs/PUSH-TO-DEVICE.md §3.1）
+          // 判定放在服务端而非调用方：调用方先查再下发之间存在 TOCTOU，只有入队这一刻的判定才是权威的。
+          if (!isDeviceOnline(target, now)) {
+            const recorded = recordCancelled(storeBefore, deviceId, command, 'device_offline', now)
+            writeDeviceStoreAtomic(dataDir, recorded.store)
+            return send(res, 412, {
+              error: 'device offline',
+              deviceId,
+              lastSeen: target?.lastSeen ?? null,
+              onlineTimeoutMs: ONLINE_TIMEOUT_MS,
+              cancelled: commandSummary(recorded.command),
+            })
+          }
+          const queued = enqueueCommand(storeBefore, deviceId, command, {
             force: wanted.force === true,
           })
           if (queued.conflict) {
@@ -511,6 +529,59 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           if (!reported.command) return send(res, 404, { error: 'command not found', commandId })
           writeDeviceStoreAtomic(dataDir, reported.store)
           return send(res, 200, { ok: true, command: commandSummary(reported.command) })
+        }
+
+        // 按 id 读单条命令（公开只读，与 /api/devices 同级）：
+        // 等待期间按 id 精确轮询，避免"命令被更新的记录顶出列表"就再也看不到它的结局（PUSH-TO-DEVICE §4）。
+        const devCmdGetM = /^\/api\/devices\/([^/]+)\/commands\/([^/]+)$/.exec(p)
+        if (req.method === 'GET' && devCmdGetM) {
+          const deviceId = devCmdGetM[1]
+          const commandId = devCmdGetM[2]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          if (!COMMAND_ID_RE.test(commandId)) return send(res, 400, { error: 'bad commandId' })
+          const dev = readDeviceStore(dataDir).devices?.[deviceId]
+          const cmd = (dev?.commands ?? []).find((c) => c.id === commandId)
+          if (!cmd) return send(res, 404, { error: 'command not found', commandId })
+          return send(res, 200, { command: commandSummary(cmd) })
+        }
+
+        // 运维撤销未决命令（写操作 → Bearer）：推错了能握停；delivered 也允许撤（可停掉重复投递）
+        const devCancelM = /^\/api\/devices\/([^/]+)\/commands\/([^/]+)\/cancel$/.exec(p)
+        if (req.method === 'POST' && devCancelM) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const deviceId = devCancelM[1]
+          const commandId = devCancelM[2]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          if (!COMMAND_ID_RE.test(commandId)) return send(res, 400, { error: 'bad commandId' })
+          const payload = await readJsonBody(req, 2 * 1024)
+          const reason =
+            typeof payload.reason === 'string' && payload.reason.trim()
+              ? payload.reason.trim().slice(0, 128)
+              : 'cancelled_by_operator'
+          const outcome = cancelCommand(
+            readDeviceStore(dataDir),
+            deviceId,
+            commandId,
+            reason,
+            new Date().toISOString(),
+          )
+          if (!outcome.command) return send(res, 404, { error: 'command not found', commandId })
+          if (outcome.notCancellable) {
+            return send(res, 409, {
+              error: 'command already finished',
+              command: commandSummary(outcome.command),
+            })
+          }
+          writeDeviceStoreAtomic(dataDir, outcome.store)
+          return send(res, 200, {
+            ok: true,
+            wasDelivered: outcome.wasDelivered,
+            command: commandSummary(outcome.command),
+          })
         }
 
         if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {

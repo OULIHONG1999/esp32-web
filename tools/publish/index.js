@@ -8,11 +8,14 @@
  *   环境变量 FIRMWARE_PUBLISH_TOKEN 供 config 的 token 引用
  */
 import { runOnce } from './once.js'
+import { runPush } from './push.js'
+import { pushUsage } from './pushlib.js'
 import { runWatch } from './watch.js'
 
 function parseArgs(argv) {
   const out = {
-    cmd: ['--watch', 'once', 'promote'].includes(argv[0]) ? argv[0] : (argv[0] ?? 'once'),
+    cmd: ['--watch', 'once', 'promote', 'push'].includes(argv[0]) ? argv[0] : (argv[0] ?? 'once'),
+    rest: argv.slice(1), // push 的子参数交给 pushlib 解析
     config: 'publish.config.json',
     buildDir: null,
     server: null,
@@ -23,6 +26,7 @@ function parseArgs(argv) {
   }
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]
+    if (out.cmd === 'push') break // push 的参数有自己的解析器（含 -- 互斥校验）
     if (a === '--config') out.config = argv[++i]
     else if (a === '--build-dir') out.buildDir = argv[++i]
     else if (a === '--server') out.server = argv[++i]
@@ -43,7 +47,10 @@ function usage() {
       '  node tools/publish once [--config <path>] [--build-dir <path>] [--server <url>] [--release-id <id>]\n' +
       '  node tools/publish --watch [--config <path>] [--interval <ms>] [--debounce <ms>]\n' +
       '  node tools/publish promote <release-id> --note "发布说明" [--config <path>]\n' +
-      '  环境变量 FIRMWARE_PUBLISH_TOKEN 供 config 引用',
+      '  node tools/publish push    --to <mac> [--build [dir] | --release <id> | --latest]   # 发布+推给指定设备\n' +
+      '  环境变量 FIRMWARE_PUBLISH_TOKEN 供 config 引用\n' +
+      '\n' +
+      pushUsage(),
   )
 }
 
@@ -109,7 +116,12 @@ async function main() {
     await runPromote(args)
     return
   }
-  if (args.cmd !== 'once') throw new Error(`unknown command: ${args.cmd}（支持 once / promote / --watch）`)
+  if (args.cmd === 'push') {
+    // push 自带退出码（见 pushlib.js）：成功/跳过/离线/超时…都要能被脚本分流
+    process.exitCode = await runPush(args.rest)
+    return
+  }
+  if (args.cmd !== 'once') throw new Error(`unknown command: ${args.cmd}（支持 once / promote / push / --watch）`)
   await runOnce(args, { retries: 0 })
 }
 

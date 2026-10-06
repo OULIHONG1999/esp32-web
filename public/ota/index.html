@@ -55,7 +55,8 @@
         <ul class="ai-api">
           <li><code>GET  /api/devices</code><span>设备列表，公开只读</span></li>
           <li><code>GET  /api/registry</code><span>固件版本列表，公开只读</span></li>
-          <li><code>POST /api/devices/{deviceId}/commands</code><span>下发 OTA · <b>需 Bearer token</b></span></li>
+          <li><code>POST /api/devices/{deviceId}/commands</code><span>下发 OTA · <b>需 Bearer token</b> · <b>设备离线 → 412</b></span></li>
+          <li><code>POST /api/devices/{deviceId}/commands/{commandId}/cancel</code><span>撤销未决命令 · <b>需 Bearer token</b></span></li>
           <li class="dim"><code>POST /api/devices/{deviceId}/report</code><span>设备上报 · 免鉴权（设备端职责）</span></li>
           <li class="dim"><code>POST /api/devices/{deviceId}/commands/{id}/result</code><span>设备回执 · 免鉴权（设备端职责）</span></li>
         </ul>
@@ -64,8 +65,9 @@
         <h3>命名与约定</h3>
         <dl class="ai-kv">
           <div><dt>deviceId</dt><dd>base MAC，去冒号小写十六进制，如 <code>3485a1b2c3d4</code></dd></div>
-          <div><dt>命令状态</dt><dd><span class="chip chip--pending">pending</span> → <span class="chip chip--delivered">delivered</span> → <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span></dd></div>
+          <div><dt>命令状态</dt><dd><span class="chip chip--pending">pending</span> → <span class="chip chip--delivered">delivered</span> → <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span> ｜ <span class="chip chip--superseded">superseded</span> <span class="chip chip--cancelled">cancelled</span></dd></div>
           <div><dt>在线判定</dt><dd>服务器按 <code>now - lastSeen &gt; 45s</code> 判离线，页面不自行计算</dd></div>
+          <div><dt>离线不下发</dt><dd>设备离线时下发返回 <b>412</b>：不下发、不排队，只留一条 <span class="chip chip--cancelled">cancelled</span> 记录</dd></div>
           <div><dt>版本依据</dt><dd>app 段 <code>sha256</code>（复用 registry）</dd></div>
           <div><dt>通信模型</dt><dd>HTTP 轮询 pull，非推送</dd></div>
         </dl>
@@ -84,6 +86,7 @@
     <div class="pill"><span class="dot dot--warn"></span><span class="m">待执行</span><b id="cPending">0</b></div>
     <div class="pill"><span class="dot dot--on"></span><span class="m">成功</span><b id="cSuccess">0</b></div>
     <div class="pill"><span class="dot dot--err"></span><span class="m">失败</span><b id="cFailed">0</b></div>
+    <div class="pill"><span class="dot dot--cancel"></span><span class="m">已取消</span><b id="cCancelled">0</b></div>
     <div class="pill pill--src"><span class="m">数据源</span><b id="connState" class="conn--ok">连接中…</b></div>
   </section>
 
@@ -147,6 +150,9 @@
       <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span> 回执。
       每个设备至多一条未决命令：已有未回执命令时再下发返回 <b>409</b>，勾选上方「顶替未决命令」可强制顶替。
       设备取走后若没回执（如中途断电），下次上报服务器会<b>重复投递同一条</b>。
+      <br />
+      <b>设备离线时不下发</b>：下发返回 <b>412</b>——不排队、不等它上线，只留一条 <span class="chip chip--cancelled">cancelled</span> 记录（页面可见）；
+      设备上线后重新下发即可。推错了版本可以点设备卡上的「✋ 撤销未决命令」握停（已取走的命令拦不住设备，但能停掉重复投递）。
     </p>
   </section>
 
@@ -190,7 +196,8 @@
   "apis": {
     "list_devices": { "method": "GET", "path": "/api/devices", "auth": "none" },
     "list_releases": { "method": "GET", "path": "/api/registry", "auth": "none" },
-    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "auth": "Bearer token", "body": { "type": "ota", "releaseId": "string", "force": "boolean optional" } },
+    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "auth": "Bearer token", "body": { "type": "ota", "releaseId": "string", "force": "boolean optional" }, "412": "device offline -> not dispatched, not queued; a cancelled record is kept and returned in the body" },
+    "cancel_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands/{commandId}/cancel", "auth": "Bearer token", "body": { "reason": "string optional, default cancelled_by_operator" }, "note": "marks a pending/delivered command as cancelled; cancelling a delivered command cannot stop the device (it is already writing) but does stop redelivery; a late result is kept in lateResult and never overwrites the cancelled state" },
     "report_progress": { "method": "POST", "path": "/api/devices/{deviceId}/commands/{commandId}/progress", "auth": "none (device-side)", "body": { "phase": "downloading|verifying|writing|rebooting|applying (custom <=32 chars)", "percent": "0-100 optional", "bytes": "optional", "totalBytes": "optional", "message": "optional <=128" } }
   },
   "process_view": {
@@ -213,10 +220,16 @@
   "dispatch_failure_codes": {
     "401": "missing/invalid Bearer token",
     "404": "releaseId not found in registry",
-    "409": "device already has an unresolved command; resend with force=true to supersede"
+    "409": "device already has an unresolved command; resend with force=true to supersede",
+    "412": "device offline at dispatch time (now - lastSeen > 45s): nothing was queued and nothing will be delivered later; the server kept one cancelled record with reason=device_offline, so the page can show what was attempted and why it did not happen. Just re-dispatch once the device is back online."
+  },
+  "offline_dispatch_rule": "a device that is not online at dispatch time is refused (412) rather than queued: no pending command is created, no wait-for-it-to-come-back, only a cancelled record + a page notice. The cancelled record does not occupy the single unresolved-command slot, so re-dispatching after the device returns is not blocked by 409.",
+  "cancel_semantics": {
+    "pending": "真的拦住了 — the device will not receive it on its next report",
+    "delivered": "too late to stop the device (it already took the command) but redelivery is stopped; if the device still reports a result it is stored as lateResult and the state stays cancelled (the page labels it 撤销来晚了)"
   },
   "device_id": "base MAC lower-hex without colons, e.g. 3485a1b2c3d4",
-  "command_states": ["pending", "delivered", "success", "failed", "superseded"],
+  "command_states": ["pending", "delivered", "success", "failed", "superseded", "cancelled"],
   "online_rule": "now - lastSeen > 45s => offline (server-side)",
   "transport": "HTTP polling (pull)",
   "data_source": "live only — GET /api/devices + GET /api/registry, polled every 5s (no mock data in the page)",
