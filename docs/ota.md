@@ -201,21 +201,27 @@
 
 ## 5. 设备端实现要点
 
-* 新增 `components/ota/`（纯逻辑 + 网络，不引用 LVGL，参照 `components/net` 的分层）：负责上报、轮询、下载、OTA、回执。
+> ⚠️ **设备工程在另一台电脑上维护，且本仓库不假设其现状**。下面只列"要做什么/坑在哪"；
+> **可直接照做的完整实现指引（含 ESP-IDF 代码骨架、分区表 CSV、联调步骤、验收清单）在
+> [`docs/DEVICE-OTA.md`](./DEVICE-OTA.md)** —— 设备端开工先读那一份，本文只作契约来源。
 
-* 网络复用 `components/net` 的 WiFi + `http_get`（PSRAM 流式）；下载固件建议走 `esp_https_ota`（前面加一个 Range/流式下载或直接给它 URL）。
+* 建议新增 `components/ota/`（只依赖 `esp_http_client` / `cJSON` / `esp_https_ota` / `mbedtls`，不与 UI 代码耦合）：负责上报、取命令、下载、写 OTA、回执。
 
-* 版本号 `firmwareVersion` 取自 `esp_app_get_description()->version`（即 `PROJECT_VER`，git describe）。
+* 联网：需要 `esp_netif_init` + event loop + `esp_wifi` STA。**若工程尚无网络层，这层要自己加**（凭据先放 Kconfig，后续可移 NVS 配网）。
 
-* `appSha256` 来自 `esp_app_get_description()->app_elf_sha256` 或启动时自算 app 段（与发布闸门口径一致）。
+* 下载固件走 `esp_https_ota`（直接给 URL 最省事）；⚠️ **走明文 http 必须开 `CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y`**，否则直接被拒；要自己校验再落盘就用 `esp_http_client` + `esp_ota_write`。
 
-* 分区表改造：`factory 4M` → `otadata(0x2000) + ota_0 2M + ota_1 2M`，`storage` 相应缩小。⚠️ **触发 R10**，需重烧分区表，storage 数据失效，发布/烧录两侧段表同步更新。
+* 版本号 `firmwareVersion` 取自 `esp_app_get_description()->version`（即 `PROJECT_VER`；注意 `CONFIG_APP_PROJECT_VER_FROM_CONFIG` 若开启则改由 Kconfig 指定）。
 
-* 证书：服务器自签 HTTPS，设备端需内置根证书 PEM 或先跳校验（dev 阶段）。
+* ⚠️ **`app_elf_sha256` 不等于固件 `.bin` 的 sha256**（前者是 ELF 摘要），**不能**拿去和 registry 里的段 sha256 比对。自我识别用 `firmwareVersion`，下载校验用命令里的 `sha256`。详见 DEVICE-OTA §7.3。
 
-* 回滚：首次成功启动后调 `esp_ota_mark_app_valid_cancel_rollback()`。
+* 分区表：**多数 demo 工程默认单 `factory` 槽，必须改成 `otadata(0x2000) + ota_0 + ota_1`**（两槽等大、`otadata` 在 app 之前）。⚠️ **触发 R10**——需整片重烧，nvs/storage 数据失效，发布/烧录两侧段表同步更新。具体 CSV 见 DEVICE-OTA §8。
 
-* WiFi 凭据已在 NVS 持久化（`components/net`），OTA 前提是已联网。
+* 证书：服务器现为自签 HTTPS。三选一——dev 走明文 80（最省事）/ 内置根证书 PEM / 临时关校验（仅 debug）。生产建议服务器上正式证书。
+
+* 回滚：开 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`（**默认不开**），首次自检通过后调 `esp_ota_mark_app_valid_cancel_rollback()`。
+
+* OTA 前提是已联网；设备端应把"待回执结果"落 NVS，重启联网后补发（避免升级成功但回执丢失）。
 
 ## 6. 页面端（前端）修改要点（先测）
 
@@ -231,9 +237,22 @@
 | 契约文档 | `/docs/ota.md`（本文件，公网可读） |
 | 数据源 | 顶栏开关 **mock / real**：mock 用内置假设备（默认，无需后端）；real 打真实 `/api/devices` + `/api/registry`，选择持久化于 `localStorage.ota.mode` |
 | 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发 · 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
-| 未实现 | 服务器端 `/api/devices*`（§4.1/§4.3/§4.4）——real 模式会明确提示而非静默失败 |
+| 未实现 | **无**——§4 四个端点均已实现并实测（见 §4.5） |
 
 **服务器端接入前**：页面在 mock 下即可完成 UI 与交互验收；接入后把 `/api/devices` 与 `/api/devices/{id}/commands` 实现出来（§4），real 模式即通。
+
+### 6.2 服务器端已实现（2026-10-06）
+
+| 项 | 值 |
+| --- | --- |
+| 存储 | `server-data/devices.json`（设备 + 每设备命令队列，保留最近 20 条）；`server/devices.js` 纯函数 + 原子写 |
+| 端点 | `report` / `GET /api/devices` / `commands` / `result` 四个（§4.1–§4.4 全部） |
+| 鉴权 | `report` 与 `result` **免鉴权**（MAC 即身份）；`commands` 需 Bearer（主 token 或工作 token） |
+| 离线判定 | 服务端按 `lastSeen` 算，阈值 **45s**（`ONLINE_TIMEOUT_MS`） |
+| app 段解析 | 下发时在 registry 里按 `releaseId` 定位 release，取 `type==='app'` 的段（退化到最大的 `.bin`），把 `file/url/sha256/size` 填进命令 |
+| 未决命令 | 每设备至多一条；冲突返回 **409** + 现有命令；`{"force":true}` 可顶替（旧命令标 `superseded`）——§7#3 定为「报冲突 + 可选顶替」 |
+| 重复投递 | 命取走后未回执 → 下次上报**再投递同一条**（响应带 `redelivered:true`，命令内 `deliveryCount` 累加），避免设备取走即崩溃造成永久卡死；设备端需幂等 |
+| 测试 | `tests/devices.test.js` 30 用例（存储纯函数 + 四端点链路 + 409/force/重投递/篡改失败） |
 
 ### 6.1 模块规划（原设计表）
 
@@ -250,15 +269,18 @@
 3. mock 一个 `GET /api/devices` 轮询，让某设备的 `lastCommand.state` 从 `pending` 迁到 `success`，验证状态刷新。
 4. 后端联调时，用真实设备 `report` 喂数据，确认在线判定阈值（45 s）与页面刷新节奏匹配。
 
-## 7. 关键决策点 / 待确认
+## 7. 关键决策点（含已定）
 
-| # | 事项     | 现状 / 建议                | 待定                        |
+| # | 事项     | 结论 / 现状                | 备注                        |
 | - | ------ | ---------------------- | ------------------------- |
-| 1 | 分区槽位   | 双槽 `ota_0+ota_1`（标准回滚） | 是否接受 `storage` 相应缩到 \~7 M |
-| 2 | 证书     | 自签 HTTPS               | 内置根证书 还是 dev 期先跳校验        |
-| 3 | 未决命令并发 | 每设备至多一条 `pending`      | 再次下发时「覆盖」还是「报冲突」          |
-| 4 | 触发方式   | 页面手动下发                 | 后续是否加「设备开机自动检查最新版」        |
-| 5 | 服务器端归属 | 扩展现有 firmware-server   | 确认服务器代码位置 / 由谁实现 §4 端点    |
+| 1 | 分区槽位   | ✅ **双槽 `ota_0 + ota_1`** | 原担心的"storage 缩到 ~7M"不成立——16MB 盘切 4M+4M 后 storage 仍可留 7M+（详见 DEVICE-OTA §8.2） |
+| 2 | 证书     | ✅ **dev 走明文 80；生产上正式证书** | 自签下设备端要么内置根证书、要么临时关校验；dev 用明文最省事 |
+| 3 | 未决命令并发 | ✅ **报冲突 409 + 可选 `force` 顶替** | 不静默覆盖；顶替时旧命令标 `superseded` |
+| 4 | 触发方式   | ⏸ 现为**页面手动下发** | 「设备开机自动检查最新版」未做，留作扩展 |
+| 5 | 服务器端归属 | ✅ **已实现于 firmware-server** | `server/devices.js` + `server/app.js`；`tests/devices.test.js` 30 用例 |
+| 6 | 设备上报鉴权 | ✅ **report/回执免鉴权，仅下发需 token** | MAC 即身份；防伪造不在本期范围 |
 
-> 本文是**设计契约**。进度：**页面端已落地**（`/OTA`，§6.0，mock 可跑）→ 下一步确认 §7 决策 → 服务器端实现 §4 的 `/api/devices*` 端点（real 模式即通）→ 最后设备端 `components/ota` 落地联调。
+> 本文是**设计契约**。进度：页面端 ✅（`/OTA`）→ 服务器端 ✅（§4 四端点 + §6.2）→ **设备端待开发**。
+> 设备端开工请以 **[`docs/DEVICE-OTA.md`](./DEVICE-OTA.md)** 为准（含代码骨架、分区表、联调步骤、验收清单）；
+> 本文负责"为什么这么定"，那份负责"具体怎么做"。
 

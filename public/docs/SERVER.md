@@ -38,6 +38,9 @@
 | `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
 | `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；mock/real 双模式） | 公开 |
 | `/ota.json` | 同上 | OTA 页机器描述符（AI 入口，tool_id=ota-console） | 公开 |
+| `/docs/DEVICE-OTA.md` | 同上 | **设备接入指南**（另一台电脑上的设备端开工入口） | 公开 |
+| `/tools/device-sim/{index,lib}.js` | 同上 | 设备模拟器源码（零依赖 Node，无硬件联调） | 公开 |
+| `/api/devices*` | 同上 | 设备上报/列表/命令/回执；`report` 与 `result` 免鉴权，`commands` 需 Bearer | 见 §4 |
 | `/tools/publish/*.js` | 同上 | 发布 CLI 源码下载（4 文件，零依赖） | 公开 |
 | `/api/registry*` 等 | 同上 | 读接口公开；写接口需 Bearer | 见 §4 |
 
@@ -117,5 +120,6 @@ node server/rebuild.js
 - 发布操作：`/docs/PUBLISH.md`（CLI/裸 HTTP/config/token）
 - AI 速查：`/llms.txt`
 - 设计：`/docs/FIRMWARE-REGISTRY.md` · 验收：`/docs/REQUIREMENTS.md`
-- OTA 独立页：`/OTA`（=`/ota`、`/ota/`）· 描述符 `/ota.json` · 契约 `/docs/ota.md`（设备端与服务器端 `/api/devices*` 未实现）
+- OTA 独立页：`/OTA`（=`/ota`、`/ota/`）· 描述符 `/ota.json` · 契约 `/docs/ota.md`
+- **设备端接入（在另一台电脑开发）**：`/docs/DEVICE-OTA.md`（指南）· `/tools/device-sim/`（模拟器）· `/api/devices*`（四端点已实现）
 - 本地进度与问题清单：仓库 `PROGRESS.md`（不挂公网）

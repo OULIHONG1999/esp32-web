@@ -1,6 +1,23 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { LIMITS } from './config.js'
+import {
+  COMMAND_ID_RE,
+  DEVICE_ID_RE,
+  ONLINE_TIMEOUT_MS,
+  applyResult,
+  commandForDevice,
+  commandSummary,
+  enqueueCommand,
+  listDeviceViews,
+  newCommandId,
+  nextCommandForDevice,
+  pickAppPart,
+  readDeviceStore,
+  resolveRelease,
+  upsertReport,
+  writeDeviceStoreAtomic,
+} from './devices.js'
 import { handlePublish } from './publish.js'
 import { applyRetention, previewRetention, promoteRelease, setLatest, setRetention } from './releases.js'
 import { readRegistry, registryPath, upsertSubscribed, writeRegistryAtomic } from './registry.js'
@@ -146,6 +163,40 @@ function servePart(dataDir, urlPath, res) {
 /** 独立页路径归一：/OTA、/OTA/… → /ota（Linux 大小写敏感，显式归一保证 /OTA 可访问） */
 function normalizePagePath(urlPath) {
   return /^\/ota(\/|$)/i.test(urlPath) ? '/ota' + urlPath.slice(4) : urlPath
+}
+
+/** 客户端 IP：优先 nginx 转发的 X-Forwarded-For，退化到 socket（去掉 IPv6 映射前缀） */
+function clientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()
+  const raw = fwd || req.socket?.remoteAddress || ''
+  return raw.replace(/^::ffff:/, '').slice(0, 64)
+}
+
+/** 请求可达的自身基地址（绝对 URL 用；设备拿到即可直接下载固件） */
+function baseUrlOf(req) {
+  const host = req.headers.host
+  if (!host) return ''
+  const proto =
+    String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim() ||
+    (req.socket?.encrypted ? 'https' : 'http')
+  return `${proto}://${host}`
+}
+
+/** 解析 JSON body；空体视为 {}；非法结构抛 400（外层 catch 统一回 400） */
+async function readJsonBody(req, maxBytes) {
+  const body = await collectBody(req, maxBytes)
+  const text = body.toString('utf8').trim()
+  if (!text) return {}
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw Object.assign(new Error('bad json body'), { status: 400 })
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw Object.assign(new Error('body must be a json object'), { status: 400 })
+  }
+  return parsed
 }
 
 function serveStatic(distDir, urlPath, res) {
@@ -323,6 +374,112 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           })
           return send(res, status, json)
         }
+        // ---- OTA 设备与命令（docs/ota.md §4；设备上报/回执免鉴权，下发命令需 token）----
+        if (req.method === 'GET' && p === '/api/devices') {
+          return send(res, 200, {
+            _meta: {
+              service: 'firmware-server',
+              docs: '/docs/DEVICE-OTA.md',
+              onlineTimeoutMs: ONLINE_TIMEOUT_MS,
+            },
+            devices: listDeviceViews(readDeviceStore(dataDir), new Date().toISOString()),
+          })
+        }
+
+        // 设备上报（兼心跳 + 取命令）；免鉴权：deviceId 即身份
+        const devReportM = /^\/api\/devices\/([^/]+)\/report$/.exec(p)
+        if (req.method === 'POST' && devReportM) {
+          const deviceId = devReportM[1]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          const patch = await readJsonBody(req, 8 * 1024)
+          if (!patch.ip) patch.ip = clientIp(req)
+          const now = new Date().toISOString()
+          let store = upsertReport(readDeviceStore(dataDir), deviceId, patch, now)
+          const taken = nextCommandForDevice(store, deviceId, now)
+          store = taken.store
+          writeDeviceStoreAtomic(dataDir, store)
+          return send(res, 200, {
+            now,
+            command: commandForDevice(taken.command, baseUrlOf(req)),
+            ...(taken.redelivered ? { redelivered: true } : {}),
+          })
+        }
+
+        // 下发 OTA 命令（写操作 → Bearer 鉴权）
+        const devCmdM = /^\/api\/devices\/([^/]+)\/commands$/.exec(p)
+        if (req.method === 'POST' && devCmdM) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const deviceId = devCmdM[1]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          const wanted = await readJsonBody(req, 8 * 1024)
+          const type = wanted.type ?? 'ota'
+          if (type !== 'ota') return send(res, 400, { error: 'unsupported command type' })
+          const releaseId = wanted.releaseId
+          if (typeof releaseId !== 'string' || !LIMITS.safeName.test(releaseId)) {
+            return send(res, 400, { error: 'bad releaseId' })
+          }
+          const found = resolveRelease(readRegistry(dataDir), releaseId)
+          if (!found) return send(res, 404, { error: 'release not found', releaseId })
+          const part = pickAppPart(found.release)
+          if (!part) return send(res, 400, { error: 'release has no app part to OTA', releaseId })
+          const now = new Date().toISOString()
+          const command = {
+            id: newCommandId(),
+            type: 'ota',
+            releaseId,
+            projectId: found.projectId,
+            variant: found.variant,
+            file: part.file,
+            url: `/api/registry/projects/${found.projectId}/variants/${found.variant}/releases/${releaseId}/parts/${part.file}`,
+            sha256: part.sha256 ?? null,
+            size: part.size ?? null,
+            state: 'pending',
+            deliveryCount: 0,
+            createdAt: now,
+          }
+          const queued = enqueueCommand(readDeviceStore(dataDir), deviceId, command, {
+            force: wanted.force === true,
+          })
+          if (queued.conflict) {
+            return send(res, 409, {
+              error: 'device has an unresolved command (pass {"force":true} to supersede)',
+              command: commandSummary(queued.conflict),
+            })
+          }
+          writeDeviceStoreAtomic(dataDir, queued.store)
+          return send(res, 200, { command: { deviceId, ...commandSummary(queued.command) } })
+        }
+
+        // 设备回执（免鉴权，同 report）
+        const devResultM = /^\/api\/devices\/([^/]+)\/commands\/([^/]+)\/result$/.exec(p)
+        if (req.method === 'POST' && devResultM) {
+          const deviceId = devResultM[1]
+          const commandId = devResultM[2]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          if (!COMMAND_ID_RE.test(commandId)) return send(res, 400, { error: 'bad commandId' })
+          const payload = await readJsonBody(req, 4 * 1024)
+          if (payload.state !== 'success' && payload.state !== 'failed') {
+            return send(res, 400, { error: 'state must be success|failed' })
+          }
+          const outcome = applyResult(
+            readDeviceStore(dataDir),
+            deviceId,
+            commandId,
+            payload.state,
+            payload.detail,
+            new Date().toISOString(),
+          )
+          if (!outcome.command) return send(res, 404, { error: 'command not found', commandId })
+          writeDeviceStoreAtomic(dataDir, outcome.store)
+          return send(res, 200, { ok: true, command: commandSummary(outcome.command) })
+        }
+
         if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {
           return servePart(dataDir, p, res)
         }
