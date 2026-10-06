@@ -34,6 +34,7 @@
 |---|---|---|---|
 | `https://firmware.example.com/` | 443 TLS | 浏览器主入口（Web Serial 需安全上下文） | **自签** `CN=firmware.example.com`（`/etc/ssl/certs/firmware-server.crt`），浏览器信任一次 |
 | `http://firmware.example.com/` | 80 明文 | **AI/爬虫只读通道**（文档/源码/registry） | 无——秘密勿走此通道 |
+| `http://firmware.example.com/` 与 `/index.html` | 80 → 301 | **只有这两个路径跳 https**（明文打开烧录页无意义，Web Serial 需安全上下文）；其余路径（`/api`、`/docs`、`/llms.txt`、`/tools`、`/ota.json`、`/OTA`）**保持 http 可达**——自签 https 会挡住 AI/脚本/设备 | — |
 | `/llms.txt` | 同上 | AI 速查（API/数据结构/认证/文档索引） | 公开 |
 | `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
 | `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；数据来自实时 `/api/devices`，5s 轮询） | 公开 |
@@ -44,9 +45,13 @@
 | `/tools/publish/*.js` | 同上 | 发布 CLI 源码下载（4 文件，零依赖） | 公开 |
 | `/api/registry*` 等 | 同上 | 读接口公开；写接口需 Bearer | 见 §4 |
 
-nginx 配置：`/www/server/panel/vhost/nginx/firmware-server.conf`（备份 `.conf.bak`）——
+nginx 配置：`/www/server/panel/vhost/nginx/firmware-server.conf`（备份 `.conf.bak`、`.bak-before-http-redirect`）——
 `server_name firmware.example.com` 同时 `listen 80` + `listen 443 ssl`，proxy 至 `127.0.0.1:8787`；
 **域名站点 `www.panel.example.com` 是另一独立 server 块，互不影响**。
+> ⚠️ 本机真 nginx 是**宝塔面板**那份：`/www/server/nginx/sbin/nginx -c /www/server/nginx/conf/nginx.conf`，
+> 配置在 `/www/server/panel/vhost/nginx/*.conf`；系统 `/etc/nginx/` 是空壳（`sites-enabled` 为空，别改那里）。
+> 改完必须 `nginx -t -c /www/server/nginx/conf/nginx.conf` → `nginx -s reload`；
+> `systemctl is-active nginx` 会报 failed（不是 systemd 管的），不要去 restart 它。
 
 ## 4. Token（发布/晋升/回滚/保留策略的写权限）
 
