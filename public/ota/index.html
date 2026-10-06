@@ -59,11 +59,11 @@
       <div class="ai-col">
         <h3>三个接口（契约详见 <a href="/docs/ota.md">/docs/ota.md</a> §4）</h3>
         <ul class="ai-api">
-          <li><code>GET  /api/devices</code><span>设备列表（含 online / lastCommand）</span></li>
-          <li><code>GET  /api/registry</code><span>固件版本列表（下拉选项）</span></li>
-          <li><code>POST /api/devices/{deviceId}/commands</code><span>下发 OTA 命令</span></li>
-          <li class="dim"><code>POST /api/devices/{deviceId}/report</code><span>设备上报（设备端职责）</span></li>
-          <li class="dim"><code>POST /api/devices/{deviceId}/commands/{id}/result</code><span>设备回执（设备端职责）</span></li>
+          <li><code>GET  /api/devices</code><span>设备列表，公开只读</span></li>
+          <li><code>GET  /api/registry</code><span>固件版本列表，公开只读</span></li>
+          <li><code>POST /api/devices/{deviceId}/commands</code><span>下发 OTA · <b>需 Bearer token</b></span></li>
+          <li class="dim"><code>POST /api/devices/{deviceId}/report</code><span>设备上报 · 免鉴权（设备端职责）</span></li>
+          <li class="dim"><code>POST /api/devices/{deviceId}/commands/{id}/result</code><span>设备回执 · 免鉴权（设备端职责）</span></li>
         </ul>
       </div>
       <div class="ai-col">
@@ -125,13 +125,25 @@
         <button class="btn btn--p" id="sendBtn">⚡ 下发 OTA</button>
       </div>
     </div>
+    <div class="dispatch dispatch--auth">
+      <div class="field">
+        <label for="dToken">Token（下发是写操作，需要它）<span class="tokstate" id="tokenState"></span></label>
+        <input id="dToken" type="password" autocomplete="off" spellcheck="false"
+               placeholder="主 token 或 wk_ 工作 token —— 只存本机 localStorage，不上传" />
+      </div>
+      <div class="field field--check">
+        <label>&nbsp;</label>
+        <label class="check"><input type="checkbox" id="dForce" /> 顶替未决命令（force）</label>
+      </div>
+    </div>
     <div class="resolved" id="resolved" hidden></div>
     <div class="notice" id="notice" hidden></div>
     <p class="foot-note">
       命令生命周期：<span class="chip chip--pending">pending</span> 已入队 →
       <span class="chip chip--delivered">delivered</span> 设备已取走 →
       <span class="chip chip--success">success</span> / <span class="chip chip--failed">failed</span> 回执。
-      每个设备至多一条未决命令（覆盖 / 报冲突待定，见 <a href="/docs/ota.md">ota.md</a> §7）。
+      每个设备至多一条未决命令：已有未回执命令时再下发返回 <b>409</b>，勾选上方「顶替未决命令」可强制顶替。
+      设备取走后若没回执（如中途断电），下次上报服务器会<b>重复投递同一条</b>。
     </p>
   </section>
 
@@ -142,6 +154,7 @@
   <span>
     <a href="/ota.json">/ota.json</a> ·
     <a href="/docs/ota.md">/docs/ota.md</a> ·
+    <a href="/docs/DEVICE-OTA.md">/docs/DEVICE-OTA.md</a> ·
     <a href="/llms.txt">/llms.txt</a> ·
     <a href="/">返回主站</a>
   </span>
@@ -158,9 +171,20 @@
   "contract_doc": "/docs/ota.md",
   "agent_index": "/llms.txt",
   "apis": {
-    "list_devices": { "method": "GET", "path": "/api/devices" },
-    "list_releases": { "method": "GET", "path": "/api/registry" },
-    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "body": { "type": "ota", "releaseId": "string" } }
+    "list_devices": { "method": "GET", "path": "/api/devices", "auth": "none" },
+    "list_releases": { "method": "GET", "path": "/api/registry", "auth": "none" },
+    "dispatch_command": { "method": "POST", "path": "/api/devices/{deviceId}/commands", "auth": "Bearer token", "body": { "type": "ota", "releaseId": "string", "force": "boolean optional" } }
+  },
+  "auth": {
+    "dispatch_requires_token": true,
+    "token_storage": "localStorage key fw.token (shared with the main app)",
+    "report_and_result_are_unauthenticated": true,
+    "how_to_get_a_token": "main app top-right key button generates a wk_ work token, or ask the operator for the master token"
+  },
+  "dispatch_failure_codes": {
+    "401": "missing/invalid Bearer token",
+    "404": "releaseId not found in registry",
+    "409": "device already has an unresolved command; resend with force=true to supersede"
   },
   "device_id": "base MAC lower-hex without colons, e.g. 3485a1b2c3d4",
   "command_states": ["pending", "delivered", "success", "failed"],

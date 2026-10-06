@@ -69,6 +69,28 @@ describe('独立页 /OTA 静态托管', () => {
     expect(await res.text()).toContain('SPA-FALLBACK')
   })
 
+  // 回归守卫：/OTA 下发是写操作、必须带 Bearer——曾因漏接线而只能 401。
+  // 页面无法在无浏览器环境端到端单测，这里守住「接线存在」这条底线。
+  it('/OTA 页具备下发鉴权接线（token 输入 + Authorization 头）', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    expect(html).toContain('id="dToken"')
+    expect(html).toContain('id="dForce"')
+    expect(html).toContain('id="tokenState"')
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).toContain('Authorization')
+    expect(js).toContain('Bearer')
+    expect(js).toContain('fw.token') // 与主站共用同一 localStorage 键
+  })
+
+  it('/ota.json 描述符如实声明下发需鉴权且端点已实现', async () => {
+    const j = await (await fetch(base + '/ota.json')).json()
+    expect(j.auth.dispatch_requires_token).toBe(true)
+    expect(j.auth.report_and_result_are_unauthenticated).toBe(true)
+    expect(j.apis.dispatch_command.implemented).toBe(true)
+    expect(j.apis.dispatch_command.errors['401']).toBeTruthy()
+    expect(j.apis.dispatch_command.errors['409']).toBeTruthy()
+  })
+
   it('dist 缺失 → 404 not built', async () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'fw-nodist-'))
     const s = http.createServer(createApp({ dataDir, token: 't', distDir: empty }))

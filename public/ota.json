@@ -45,9 +45,15 @@
       "method": "POST",
       "path": "/api/devices/{deviceId}/commands",
       "auth": "Bearer token (write)",
-      "body": { "type": "ota", "releaseId": "string" },
+      "body": { "type": "ota", "releaseId": "string", "force": "boolean, optional" },
       "returns": "{ command: { id, deviceId, type, releaseId, state, createdAt } }",
-      "implemented": false
+      "implemented": true,
+      "errors": {
+        "401": "missing or invalid Bearer token",
+        "404": "releaseId not found in registry",
+        "409": "device already has an unresolved command; resend with force=true to supersede it",
+        "400": "bad deviceId / bad releaseId / unsupported type"
+      }
     },
     "device_report": {
       "method": "POST",
@@ -96,9 +102,14 @@
     "mock": "default; built-in fake devices, no backend required",
     "real": "calls live /api/devices and /api/registry; toggle in the top bar (persisted in localStorage key ota.mode)"
   },
+  "auth": {
+    "dispatch_requires_token": true,
+    "token_storage": "localStorage key fw.token — shared with the main app, never uploaded",
+    "how_to_get_a_token": "main app top-right key button generates a wk_ work token (needs the master token), or ask the operator",
+    "report_and_result_are_unauthenticated": true
+  },
   "not_implemented": [
-    "Device side: ESP32 components/ota (report / poll / download / OTA / ack)",
-    "Server side: /api/devices/* endpoints (devices + commands store)"
+    "Device side: ESP32 firmware (developed on another machine) — see /docs/DEVICE-OTA.md"
   ],
   "open_questions_ref": "/docs/ota.md §7"
 }

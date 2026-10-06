@@ -236,8 +236,10 @@
 | 机器描述符 | `/ota.json`（tool_id=`ota-console`，含接口清单 / 数据模型 / mock-real 说明） |
 | 契约文档 | `/docs/ota.md`（本文件，公网可读） |
 | 数据源 | 顶栏开关 **mock / real**：mock 用内置假设备（默认，无需后端）；real 打真实 `/api/devices` + `/api/registry`，选择持久化于 `localStorage.ota.mode` |
-| 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发 · 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
-| 未实现 | **无**——§4 四个端点均已实现并实测（见 §4.5） |
+| 鉴权 | 下发是写操作：页面有 **Token 输入框**（存 `localStorage.fw.token`，与主站共用同一键、不上传），请求带 `Authorization: Bearer`；无 token 时前置拦截并提示。**report / 回执免鉴权**，设备侧无需 token |
+| 失败提示 | 按状态码给「下一步做什么」：401→填 token、409→勾「顶替未决命令(force)」重试、404→release 不存在、其他→透传服务端文案 |
+| 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发（含 force 顶替）· 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
+| 未实现 | **无**——§4 四个端点均已实现并实测（见 §6.2）；设备端固件由另一台电脑开发，入口见 `docs/DEVICE-OTA.md` |
 
 **服务器端接入前**：页面在 mock 下即可完成 UI 与交互验收；接入后把 `/api/devices` 与 `/api/devices/{id}/commands` 实现出来（§4），real 模式即通。
 

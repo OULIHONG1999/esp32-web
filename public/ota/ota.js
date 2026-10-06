@@ -11,6 +11,8 @@
 
   var POLL_MS = 5000
   var MODE_KEY = 'ota.mode'
+  /** 与主页面同一个键：在主站 🔑 里设过的 token 这里直接可用 */
+  var TOKEN_KEY = 'fw.token'
 
   // ── 契约常量 ──────────────────────────────────────────────
   var STATE_LABEL = { pending: '待执行', delivered: '已投递', success: '成功', failed: '失败' }
@@ -24,6 +26,7 @@
     cSuccess: $('cSuccess'), cFailed: $('cFailed'), srcLabel: $('srcLabel'),
     pollLabel: $('pollLabel'), lastRefresh: $('lastRefresh'),
     dDevice: $('dDevice'), dRelease: $('dRelease'), sendBtn: $('sendBtn'),
+    dToken: $('dToken'), dForce: $('dForce'), tokenState: $('tokenState'),
     resolved: $('resolved'), notice: $('notice')
   }
 
@@ -33,6 +36,7 @@
     devices: [],
     releases: [],
     selectedId: '',
+    token: '',
     timer: null,
     lastError: ''
   }
@@ -89,11 +93,40 @@
   }
 
   // ══ 取数 ════════════════════════════════════════════════
+  /** fetch + JSON；非 2xx 时把服务端 error 文案与状态码一起抛出（便于按码给提示） */
   function fetchJson(url, opts) {
     return fetch(url, opts).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url)
-      return r.json()
+      return r.text().then(function (text) {
+        var json = null
+        try { json = text ? JSON.parse(text) : null } catch (e) { json = null }
+        if (!r.ok) {
+          var err = new Error((json && json.error) || ('HTTP ' + r.status))
+          err.status = r.status
+          err.body = json
+          throw err
+        }
+        return json
+      })
     })
+  }
+
+  /** 把失败翻译成「下一步做什么」——而不是笼统的「服务器未实现」 */
+  function dispatchHint(err) {
+    if (err.status === 401) {
+      return '鉴权失败（401）：下发需要 token。在下方「Token」填入主 token 或 wk_ 工作 token 后重试；' +
+        '没有的话到主站右上角 🔑 生成一个工作 token。'
+    }
+    if (err.status === 409) {
+      var c = err.body && err.body.command
+      return '该设备已有未回执命令（409）' + (c ? '：' + c.state + ' · ' + c.id : '') +
+        '。勾选「顶替未决命令」后重试，或等设备回执。'
+    }
+    if (err.status === 404) {
+      return '服务器上没有这个 release（404）：' + err.message + '。可能是版本已被回滚/清理，刷新页面重选。'
+    }
+    if (err.status === 413) return '请求体过大（413）。'
+    if (err.status) return '服务器返回 ' + err.status + '：' + err.message
+    return '连不上服务器：' + err.message + '（检查网络与该地址是否可达）'
   }
 
   function loadMock() {
@@ -247,13 +280,31 @@
     var dev = el.dDevice.value
     var rel = findRelease(el.dRelease.value)
     el.sendBtn.disabled = !(dev && rel)
+    renderTokenState()
     if (!dev) { el.resolved.hidden = true; return }
     el.resolved.hidden = false
+    var needToken = state.mode === 'real' && !state.token
     el.resolved.innerHTML =
       '将下发：<b>' + esc(fmtMac(dev)) + '</b> → ' +
       (rel
         ? '<code>' + esc(rel.projectId + ' / ' + rel.variant + ' / ' + rel.id) + '</code>'
-        : '<span style="color:var(--warn)">尚未选择 release</span>')
+        : '<span style="color:var(--warn)">尚未选择 release</span>') +
+      (needToken ? ' <span style="color:var(--warn)">· 还缺 Token（下方填写）</span>' : '')
+  }
+
+  /** Token 状态提示：real 模式下没 token 会 401，提前告诉用户 */
+  function renderTokenState() {
+    if (!el.tokenState) return
+    if (state.token) {
+      el.tokenState.textContent = '已设置'
+      el.tokenState.className = 'tokstate tokstate--ok'
+    } else if (state.mode === 'real') {
+      el.tokenState.textContent = '未设置（下发会 401）'
+      el.tokenState.className = 'tokstate tokstate--warn'
+    } else {
+      el.tokenState.textContent = 'mock 模式不需要'
+      el.tokenState.className = 'tokstate'
+    }
   }
 
   function notice(kind, text) {
@@ -275,6 +326,20 @@
 
   el.dDevice.addEventListener('change', function () { state.selectedId = el.dDevice.value; renderDevices(); renderResolved() })
   el.dRelease.addEventListener('change', renderResolved)
+
+  // Token：输入即存本机（不上传），与主站共用 fw.token
+  if (el.dToken) {
+    el.dToken.addEventListener('input', function () {
+      state.token = el.dToken.value.trim()
+      try {
+        if (state.token) localStorage.setItem(TOKEN_KEY, state.token)
+        else localStorage.removeItem(TOKEN_KEY)
+      } catch (e) { /* 隐私模式忽略 */ }
+      renderTokenState()
+      renderResolved()
+    })
+  }
+  if (el.dForce) el.dForce.addEventListener('change', renderResolved)
 
   el.sendBtn.addEventListener('click', function () {
     var deviceId = el.dDevice.value
@@ -303,20 +368,28 @@
     }, 6000)
   }
 
-  /** real：POST 真实接口；服务器未实现时给出明确提示 */
+  /** real：POST 真实接口（带 Bearer token）；失败按状态码给可操作提示 */
   function realDispatch(deviceId, releaseId) {
+    if (!state.token) {
+      notice('err', '请先填 Token——下发是写操作，服务器要求 Bearer 鉴权（上报/回执才是免鉴权的）。')
+      if (el.dToken) el.dToken.focus()
+      return
+    }
     el.sendBtn.disabled = true
     notice('info', '正在下发…')
+    var body = { type: 'ota', releaseId: releaseId }
+    if (el.dForce && el.dForce.checked) body.force = true
     fetchJson('/api/devices/' + encodeURIComponent(deviceId) + '/commands', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'ota', releaseId: releaseId })
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
+      body: JSON.stringify(body)
     }).then(function (res) {
       var cmd = res.command || {}
-      notice('ok', '已下发 ' + (cmd.id || '') + '，状态 ' + (cmd.state || 'pending'))
+      notice('ok', '已下发 ' + (cmd.id || '') + '（' + (cmd.state || 'pending') + '）→ ' + fmtMac(deviceId) +
+        '；等设备下次上报取走后状态会变 delivered。')
       return load()
     }).catch(function (err) {
-      notice('err', '下发失败：' + err.message + '（服务器端 /api/devices 可能尚未实现，见 /docs/ota.md §4）')
+      notice('err', '下发失败：' + dispatchHint(err))
     }).then(function () { renderResolved() })
   }
 
@@ -330,15 +403,20 @@
     el.notice.hidden = true
     load().then(function () {
       if (state.mode === 'real' && state.lastError) {
-        notice('err', 'real 模式取数失败：' + state.lastError + '。服务器端 /api/devices 与 /api/registry 见 /docs/ota.md §4。')
+        notice('err', 'real 模式取数失败：' + state.lastError + '（检查网络/地址是否可达）')
       } else if (state.mode === 'real' && state.devices.length === 0) {
-        notice('info', 'real 模式已连通，但暂无设备上报（设备端未实现）。切回 mock 可看样例。')
+        notice('info', 'real 模式已连通，但暂无设备上报（设备端会在首次 report 后出现在这里）。切回 mock 可看样例。')
+      } else if (state.mode === 'real' && !state.token) {
+        notice('info', 'real 模式已连通。注意：下发是写操作，需要先在下方填 Token（上报/回执免鉴权）。')
       }
+      renderTokenState()
     })
   })
 
   // ══ 启动 ════════════════════════════════════════════════
   try { state.mode = localStorage.getItem(MODE_KEY) === 'real' ? 'real' : 'mock' } catch (e) { /* ignore */ }
+  try { state.token = localStorage.getItem(TOKEN_KEY) || '' } catch (e) { /* ignore */ }
+  if (el.dToken) el.dToken.value = state.token
   el.modeToggle.checked = state.mode === 'real'
   state.selectedId = ''
 
