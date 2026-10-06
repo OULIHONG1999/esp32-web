@@ -48,8 +48,15 @@ $zip = Join-Path $env:TEMP ('fw-deploy-' + (Get-Date -Format 'yyyyMMdd-HHmm') + 
 # ZipArchive / ZipArchiveMode 在 System.IO.Compression；ZipFileExtensions 在 .FileSystem——两个都要载
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$files = Get-ChildItem -Path (Join-Path $root 'server'), (Join-Path $root 'dist'), (Join-Path $root 'package.json') -Recurse -File |
-  Where-Object { $_.FullName -notmatch '\\server-data\\' }
+# 注意：不要把「文件」放进 -Path 再带 -Recurse——PowerShell 会从该文件的**父目录**
+# 开始递归。曾因此把仓库根下 node_modules/**/package.json 全部打进包里（82 个），
+# 远端 /opt/firmware-server/node_modules 被塞满只有 package.json 的目录。
+# 目录用 -Recurse 枚举，单文件用 Get-Item 单独取，两者再合并。
+$files = @(
+  Get-ChildItem -Path (Join-Path $root 'server') -Recurse -File
+  Get-ChildItem -Path (Join-Path $root 'dist') -Recurse -File
+  Get-Item -Path (Join-Path $root 'package.json')
+) | Where-Object { $_.FullName -notmatch '\\server-data\\' -and $_.FullName -notmatch '\\node_modules\\' }
 if ($files.Count -eq 0) { throw '待打包文件为 0——检查 server/ 与 dist/ 是否存在' }
 $fs = [IO.File]::Create($zip)
 try {
