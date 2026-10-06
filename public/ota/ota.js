@@ -1,16 +1,16 @@
 /* OTA Console — 页面逻辑（零依赖、独立页）
  *
- * 两种模式：
- *   mock（默认）— 内置 §4.2 契约形状的假设备，无需后端，用于先开发页面；
- *   real        — 打真实 /api/devices 与 /api/registry（服务器端未实现时自动提示）。
+ * 数据全部来自服务器实时接口，**无本地假数据**：
+ *   GET  /api/devices               设备列表（含 online / lastCommand）
+ *   GET  /api/registry              固件版本（下拉选项）
+ *   POST /api/devices/{id}/commands 下发（需 Bearer token）
  *
- * 契约依据：/docs/ota.md §4；机器描述符：/ota.json。
+ * 契约依据：/docs/ota.md §4；机器描述符：/ota.json；设备端接入：/docs/DEVICE-OTA.md。
  */
 ;(function () {
   'use strict'
 
   var POLL_MS = 5000
-  var MODE_KEY = 'ota.mode'
   /** 与主页面同一个键：在主站 🔑 里设过的 token 这里直接可用 */
   var TOKEN_KEY = 'fw.token'
 
@@ -20,10 +20,10 @@
   // ── DOM ──────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id) }
   var el = {
-    modeToggle: $('modeToggle'), refreshBtn: $('refreshBtn'),
+    refreshBtn: $('refreshBtn'),
     deviceGrid: $('deviceGrid'), deviceEmpty: $('deviceEmpty'),
     cOnline: $('cOnline'), cOffline: $('cOffline'), cPending: $('cPending'),
-    cSuccess: $('cSuccess'), cFailed: $('cFailed'), srcLabel: $('srcLabel'),
+    cSuccess: $('cSuccess'), cFailed: $('cFailed'), connState: $('connState'),
     pollLabel: $('pollLabel'), lastRefresh: $('lastRefresh'),
     dDevice: $('dDevice'), dRelease: $('dRelease'), sendBtn: $('sendBtn'),
     dToken: $('dToken'), dForce: $('dForce'), tokenState: $('tokenState'),
@@ -32,64 +32,13 @@
 
   // ── 状态 ─────────────────────────────────────────────────
   var state = {
-    mode: 'mock',
     devices: [],
     releases: [],
     selectedId: '',
     token: '',
     timer: null,
-    lastError: ''
-  }
-
-  // ══ mock 数据（§4.2 形状；时间戳动态生成）════════════════
-  function nowMinus(sec) { return new Date(Date.now() - sec * 1000).toISOString() }
-
-  function mockDevices() {
-    return [
-      {
-        deviceId: '3485a1b2c3d4', chip: 'ESP32-S3',
-        firmwareVersion: 'v0.6.0-3-g64de242',
-        appSha256: '27877362ce8b9524b4e1650cb9b46b80bbd29cec535748ce88580600b9214e2d',
-        sdkVersion: 'v6.0.1', ip: '192.168.31.100',
-        online: true, lastSeen: nowMinus(6), createdAt: nowMinus(7200),
-        lastCommand: { id: 'cmd_2f3c9a', type: 'ota', releaseId: '20261005-1609-278773', state: 'success' }
-      },
-      {
-        deviceId: '7c9ebd112233', chip: 'ESP32-S3',
-        firmwareVersion: 'v0.5.2',
-        appSha256: 'aa11bb22cc33dd44ee55ff6600778899aabbccddeeff00112233445566778899',
-        sdkVersion: 'v6.0.0', ip: '192.168.31.117',
-        online: true, lastSeen: nowMinus(18), createdAt: nowMinus(3600),
-        lastCommand: { id: 'cmd_71ab04', type: 'ota', releaseId: '20261005-1609-278773', state: 'pending' }
-      },
-      {
-        deviceId: 'a0b1c2d3e4f5', chip: 'ESP32-S3',
-        firmwareVersion: 'v0.6.0-3-g64de242',
-        appSha256: '27877362ce8b9524b4e1650cb9b46b80bbd29cec535748ce88580600b9214e2d',
-        sdkVersion: 'v6.0.1', ip: '192.168.31.141',
-        online: false, lastSeen: nowMinus(430), createdAt: nowMinus(10800),
-        lastCommand: null
-      }
-    ]
-  }
-
-  function mockRegistry() {
-    return {
-      projects: {
-        'lvgl-demo-v9': {
-          id: 'lvgl-demo-v9', name: 'LVGL Demo V9', subscribed: true, retention: 6,
-          variants: {
-            'ESP32-S3': {
-              latest: '20261005-1609-278773',
-              releases: [
-                { id: '20261005-1609-278773', type: 'release', chipFamily: 'ESP32-S3', note: 'OTA 基线条', createdAt: '2026-10-05T16:09:00Z', parts: [] },
-                { id: '20261004-1011-a1b2c3', type: 'snapshot', chipFamily: 'ESP32-S3', note: '调试快照', createdAt: '2026-10-04T10:11:00Z', parts: [] }
-              ]
-            }
-          }
-        }
-      }
-    }
+    lastError: '',
+    hadError: false
   }
 
   // ══ 取数 ════════════════════════════════════════════════
@@ -129,13 +78,8 @@
     return '连不上服务器：' + err.message + '（检查网络与该地址是否可达）'
   }
 
-  function loadMock() {
-    state.devices = mockDevices()
-    state.releases = flattenReleases(mockRegistry())
-    state.lastError = ''
-  }
-
-  function loadReal() {
+  /** 拉实时数据：设备列表 + 固件版本；失败时清空并记下错误（页面会显示「连接失败」） */
+  function loadData() {
     return Promise.all([fetchJson('/api/devices'), fetchJson('/api/registry')])
       .then(function (res) {
         state.devices = Array.isArray(res[0].devices) ? res[0].devices : []
@@ -169,10 +113,18 @@
   }
 
   function load() {
-    var p = state.mode === 'mock' ? Promise.resolve(loadMock()) : loadReal()
-    return p.then(function () {
+    return loadData().then(function () {
       render()
       el.lastRefresh.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+      // 连接状态按「跃迁」提示：失败只报一次、恢复也说一声；
+      // 否则每次轮询都刷提示，会把下发结果等消息顶掉。
+      var failed = !!state.lastError
+      if (failed && !state.hadError) {
+        notice('err', '取数失败：' + state.lastError + '（检查网络、地址是否可达、服务是否在跑）')
+      } else if (!failed && state.hadError) {
+        notice('info', '连接已恢复。')
+      }
+      state.hadError = failed
     })
   }
 
@@ -195,7 +147,8 @@
   }
 
   function render() {
-    el.srcLabel.textContent = state.mode
+    el.connState.textContent = state.lastError ? '连接失败' : '已连接'
+    el.connState.className = state.lastError ? 'conn--err' : 'conn--ok'
     el.pollLabel.textContent = POLL_MS / 1000 + 's'
     renderPills()
     renderDevices()
@@ -283,7 +236,7 @@
     renderTokenState()
     if (!dev) { el.resolved.hidden = true; return }
     el.resolved.hidden = false
-    var needToken = state.mode === 'real' && !state.token
+    var needToken = !state.token
     el.resolved.innerHTML =
       '将下发：<b>' + esc(fmtMac(dev)) + '</b> → ' +
       (rel
@@ -298,12 +251,9 @@
     if (state.token) {
       el.tokenState.textContent = '已设置'
       el.tokenState.className = 'tokstate tokstate--ok'
-    } else if (state.mode === 'real') {
+    } else {
       el.tokenState.textContent = '未设置（下发会 401）'
       el.tokenState.className = 'tokstate tokstate--warn'
-    } else {
-      el.tokenState.textContent = 'mock 模式不需要'
-      el.tokenState.className = 'tokstate'
     }
   }
 
@@ -345,31 +295,11 @@
     var deviceId = el.dDevice.value
     var releaseId = el.dRelease.value
     if (!deviceId || !releaseId) return
-    if (state.mode === 'mock') return mockDispatch(deviceId, releaseId)
-    realDispatch(deviceId, releaseId)
+    dispatchCommand(deviceId, releaseId)
   })
 
-  /** mock：本地生成命令并模拟 pending → delivered → success 流转 */
-  function mockDispatch(deviceId, releaseId) {
-    var dev = state.devices.filter(function (d) { return d.deviceId === deviceId })[0]
-    if (!dev) return notice('err', '设备不存在：' + deviceId)
-
-    var id = 'cmd_' + Math.random().toString(16).slice(2, 8)
-    dev.lastCommand = { id: id, type: 'ota', releaseId: releaseId, state: 'pending' }
-    notice('ok', '已下发（mock）' + id + ' → ' + fmtMac(deviceId) + '；将模拟 pending → delivered → success')
-    render()
-
-    setTimeout(function () { dev.lastCommand.state = 'delivered'; render() }, 2000)
-    setTimeout(function () {
-      dev.lastCommand.state = 'success'
-      dev.firmwareVersion = releaseId
-      render()
-      notice('ok', '命令 ' + id + ' 已回执 success（mock）')
-    }, 6000)
-  }
-
-  /** real：POST 真实接口（带 Bearer token）；失败按状态码给可操作提示 */
-  function realDispatch(deviceId, releaseId) {
+  /** POST 真实接口（带 Bearer token）；失败按状态码给可操作提示 */
+  function dispatchCommand(deviceId, releaseId) {
     if (!state.token) {
       notice('err', '请先填 Token——下发是写操作，服务器要求 Bearer 鉴权（上报/回执才是免鉴权的）。')
       if (el.dToken) el.dToken.focus()
@@ -395,32 +325,19 @@
 
   el.refreshBtn.addEventListener('click', function () { load() })
 
-  el.modeToggle.addEventListener('change', function () {
-    state.mode = el.modeToggle.checked ? 'real' : 'mock'
-    try { localStorage.setItem(MODE_KEY, state.mode) } catch (e) { /* 隐私模式忽略 */ }
-    state.selectedId = ''
-    el.dDevice.value = ''
-    el.notice.hidden = true
-    load().then(function () {
-      if (state.mode === 'real' && state.lastError) {
-        notice('err', 'real 模式取数失败：' + state.lastError + '（检查网络/地址是否可达）')
-      } else if (state.mode === 'real' && state.devices.length === 0) {
-        notice('info', 'real 模式已连通，但暂无设备上报（设备端会在首次 report 后出现在这里）。切回 mock 可看样例。')
-      } else if (state.mode === 'real' && !state.token) {
-        notice('info', 'real 模式已连通。注意：下发是写操作，需要先在下方填 Token（上报/回执免鉴权）。')
-      }
-      renderTokenState()
-    })
-  })
-
   // ══ 启动 ════════════════════════════════════════════════
-  try { state.mode = localStorage.getItem(MODE_KEY) === 'real' ? 'real' : 'mock' } catch (e) { /* ignore */ }
   try { state.token = localStorage.getItem(TOKEN_KEY) || '' } catch (e) { /* ignore */ }
   if (el.dToken) el.dToken.value = state.token
-  el.modeToggle.checked = state.mode === 'real'
   state.selectedId = ''
 
-  load()
+  load().then(function () {
+    // 连接失败/恢复由 load() 内的跃迁逻辑提示；这里只管启动期的引导
+    if (!state.lastError && state.devices.length === 0) {
+      notice('info', '已连通，但暂无设备上报。设备端第一次 report 后就会出现在这里。')
+    } else if (!state.lastError && !state.token) {
+      notice('info', '下发是写操作，需要先在下方填 Token；上报与回执是免鉴权的。')
+    }
+  })
   state.timer = setInterval(load, POLL_MS)
   window.addEventListener('beforeunload', function () { clearInterval(state.timer) })
 })()

@@ -10,7 +10,7 @@
 >
 > * **何时读全文**：动手实现 OTA 设备端或对接口契约时。
 >
-> * **页面已落地**：前端控制台在 **`/OTA`**（独立页 `public/ota/`，复用 firmware-server，不参与主 SPA 构建），可先用内置 mock 数据开发；机器描述符 `/ota.json`。见 §6。
+> * **页面已落地**：前端控制台在 **`/OTA`**（独立页 `public/ota/`，复用 firmware-server，不参与主 SPA 构建），数据全部来自实时接口；机器描述符 `/ota.json`。见 §6。
 >
 > * **最易踩点**：设备身份用 MAC；命令采用 **HTTP 轮询（pull）**，不是推送；改分区表触发工程规则 **R10**；服务器为自签 HTTPS，设备端要处理证书。
 
@@ -233,15 +233,16 @@
 | --- | --- |
 | 访问地址 | `/OTA`（大小写等价 `/ota`、`/ota/`；由 firmware-server `serveStatic` 归一） |
 | 源码 | `public/ota/index.html` + `ota.css` + `ota.js`（零依赖原生 JS，**不进主 SPA 构建**，属独立页） |
-| 机器描述符 | `/ota.json`（tool_id=`ota-console`，含接口清单 / 数据模型 / mock-real 说明） |
+| 机器描述符 | `/ota.json`（tool_id=`ota-console`，含接口清单 / 数据模型 / 鉴权说明） |
 | 契约文档 | `/docs/ota.md`（本文件，公网可读） |
-| 数据源 | 顶栏开关 **mock / real**：mock 用内置假设备（默认，无需后端）；real 打真实 `/api/devices` + `/api/registry`，选择持久化于 `localStorage.ota.mode` |
+| 数据源 | **只有实时接口**（页面内无假数据）：每 5s 拉 `GET /api/devices` + `GET /api/registry`；取数失败时胶囊显示「连接失败」并给出原因 |
 | 鉴权 | 下发是写操作：页面有 **Token 输入框**（存 `localStorage.fw.token`，与主站共用同一键、不上传），请求带 `Authorization: Bearer`；无 token 时前置拦截并提示。**report / 回执免鉴权**，设备侧无需 token |
 | 失败提示 | 按状态码给「下一步做什么」：401→填 token、409→勾「顶替未决命令(force)」重试、404→release 不存在、其他→透传服务端文案 |
 | 已覆盖 | 概览计数（在线/离线/待执行/成功/失败）· 设备卡（MAC/芯片/固件/IP/心跳/最近命令）· 设备与 release 下拉 · 下发（含 force 顶替）· 命令状态流转 · 5s 轮询 · AI 速读区 · 页内结构化摘要 `#ai-data` |
 | 未实现 | **无**——§4 四个端点均已实现并实测（见 §6.2）；设备端固件由另一台电脑开发，入口见 `docs/DEVICE-OTA.md` |
 
-**服务器端接入前**：页面在 mock 下即可完成 UI 与交互验收；接入后把 `/api/devices` 与 `/api/devices/{id}/commands` 实现出来（§4），real 模式即通。
+**页面不再需要 mock 兜底**：服务器四端点已实现（§6.2），页面数据全部来自实时接口；
+设备端联调用 `tools/device-sim/` 模拟器喂数据（见 `docs/DEVICE-OTA.md` §9），不必往页面里塞假数据。
 
 ### 6.2 服务器端已实现（2026-10-06）
 
@@ -256,20 +257,13 @@
 | 重复投递 | 命取走后未回执 → 下次上报**再投递同一条**（响应带 `redelivered:true`，命令内 `deliveryCount` 累加），避免设备取走即崩溃造成永久卡死；设备端需幂等 |
 | 测试 | `tests/devices.test.js` 30 用例（存储纯函数 + 四端点链路 + 409/force/重投递/篡改失败） |
 
-### 6.1 模块规划（原设计表）
+### 6.1 模块规划（原设计表，已全部实现）
 
 | 模块    | 功能                                     | 依赖的 API                                                    |
 | ----- | -------------------------------------- | ---------------------------------------------------------- |
 | 设备列表页 | 展示在线/离线设备、固件版本、IP、lastSeen、最近命令状态；自动刷新 | `GET /api/devices`                                         |
 | 下发面板  | 选中设备 → 从版本下拉选 release（或最新）→ 下发         | `GET /api/registry`（版本）+ `POST /api/devices/{id}/commands` |
 | 状态反馈  | 命令下发后展示 pending→success/failed 流转      | `GET /api/devices` 轮询刷新                                    |
-
-**测试建议（服务器就绪前用 mock）**：
-
-1. 用 `GET /api/devices` 的响应样例（§4.2）造 2\~3 个假设备（1 在线 + 1 离线 + 1 无历史命令），撑起设备列表 UI 与在线/离线样式。
-2. 造 `POST /api/devices/{id}/commands` → 成功 / 设备不存在 / 已存在未决命令 三种返回，验证交互与提示。
-3. mock 一个 `GET /api/devices` 轮询，让某设备的 `lastCommand.state` 从 `pending` 迁到 `success`，验证状态刷新。
-4. 后端联调时，用真实设备 `report` 喂数据，确认在线判定阈值（45 s）与页面刷新节奏匹配。
 
 ## 7. 关键决策点（含已定）
 

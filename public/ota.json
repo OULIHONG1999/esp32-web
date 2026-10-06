@@ -3,9 +3,9 @@
   "name": "OTA Console",
   "name_zh": "OTA 设备下发台",
   "version": "0.1.0",
-  "status": "page-only (device-side & server-side OTA endpoints not implemented yet)",
-  "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). Frontend is developed first against a mock, per the contract in /docs/ota.md.",
-  "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed）。页面端先行开发，按 /docs/ota.md 的接口契约，可先用内置 mock 数据。",
+  "status": "server endpoints + page implemented and live; device-side firmware not implemented yet (developed on another machine)",
+  "description": "Web console for ESP32 fleet OTA: list online/offline devices, pick a firmware release, dispatch an OTA command, and follow the command lifecycle (pending -> delivered -> success/failed). All data comes from the live API — no mock data. Dispatch is a write operation and requires a Bearer token.",
+  "description_zh": "ESP32 设备 OTA 云端控制台：查看在线/离线设备、选择固件版本下发 OTA 命令、跟踪命令状态（pending → delivered → success/failed）。数据全部来自服务器实时接口，页面内无假数据；下发是写操作，需要 Bearer token。",
   "canonical_path": "/OTA",
   "canonical_path_aliases": ["/ota", "/ota/", "/OTA/"],
   "canonical_url_hint": "Share the full base URL including the path /OTA (host is the shared firmware-server)",
@@ -98,9 +98,11 @@
     "At most one unresolved command per device",
     "Firmware download reuses the existing registry parts endpoint"
   ],
-  "page_modes": {
-    "mock": "default; built-in fake devices, no backend required",
-    "real": "calls live /api/devices and /api/registry; toggle in the top bar (persisted in localStorage key ota.mode)"
+  "data_source": {
+    "mode": "live only",
+    "endpoints": ["GET /api/devices", "GET /api/registry"],
+    "poll_interval_ms": 5000,
+    "mock": "none — the page contains no built-in fake data"
   },
   "auth": {
     "dispatch_requires_token": true,

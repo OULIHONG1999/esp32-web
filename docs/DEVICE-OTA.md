@@ -536,7 +536,7 @@ node tools/device-sim/index.js --server http://<SERVER> --id 3485a1b2c3d4 --once
 curl http://<SERVER>/api/devices     # lastCommand.state 应为 success，firmwareVersion 已更新
 ```
 
-**或者更省事**：直接在浏览器打开 `http://<SERVER>/OTA`，页面点「选择并下发」，不用敲 curl。页面数据源切到 **real** 模式即可看到真设备。
+**或者更省事**：直接在浏览器打开 `http://<SERVER>/OTA`，页面点「选择并下发」，不用敲 curl（页面读的是实时设备列表，需要先在上方填 Token）。
 
 ### 9.4 模拟器会替你验证什么
 

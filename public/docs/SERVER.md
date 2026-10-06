@@ -36,7 +36,7 @@
 | `http://firmware.example.com/` | 80 明文 | **AI/爬虫只读通道**（文档/源码/registry） | 无——秘密勿走此通道 |
 | `/llms.txt` | 同上 | AI 速查（API/数据结构/认证/文档索引） | 公开 |
 | `/docs/*.md` | 同上 | 详细文档站（PUBLISH/DEPLOY/FIRMWARE-REGISTRY/REQUIREMENTS/SERVER/ota） | 公开 |
-| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；mock/real 双模式） | 公开 |
+| `/OTA`（=/ota、/ota/） | 同上 | **OTA 设备下发台独立页**（非主 SPA；数据来自实时 `/api/devices`，5s 轮询） | 公开 |
 | `/ota.json` | 同上 | OTA 页机器描述符（AI 入口，tool_id=ota-console） | 公开 |
 | `/docs/DEVICE-OTA.md` | 同上 | **设备接入指南**（另一台电脑上的设备端开工入口） | 公开 |
 | `/tools/device-sim/{index,lib}.js` | 同上 | 设备模拟器源码（零依赖 Node，无硬件联调） | 公开 |

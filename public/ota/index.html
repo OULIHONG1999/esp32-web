@@ -31,12 +31,6 @@
       <a href="/ota.json">ota.json</a>
     </nav>
     <div class="topbar__ops">
-      <label class="switch" title="mock 用内置假设备；real 打真实 /api/devices">
-        <input type="checkbox" id="modeToggle" />
-        <span>mock</span>
-        <span class="switch__track" aria-hidden="true"><i></i></span>
-        <span>real</span>
-      </label>
       <button class="iconbtn" id="refreshBtn" title="立即刷新">↻</button>
     </div>
   </div>
@@ -53,7 +47,7 @@
     <p class="lead">
       本页是 <strong>OTA 设备下发台</strong>：从云端看到当前在线/曾在线设备，选中设备 + 选中固件版本，
       下发一条 OTA 命令；设备在下次心跳（<code>report</code>）时把命令取走并自升级。
-      设备端尚未实现，本页可先用 <strong>mock 数据</strong>开发验证（默认即 mock）。
+      页面数据<strong>全部来自服务器实时接口</strong>（无本地假数据），每 5 秒轮询一次。
     </p>
     <div class="ai-grid">
       <div class="ai-col">
@@ -90,7 +84,7 @@
     <div class="pill"><span class="dot dot--warn"></span><span class="m">待执行</span><b id="cPending">0</b></div>
     <div class="pill"><span class="dot dot--on"></span><span class="m">成功</span><b id="cSuccess">0</b></div>
     <div class="pill"><span class="dot dot--err"></span><span class="m">失败</span><b id="cFailed">0</b></div>
-    <div class="pill pill--src"><span class="m">数据源</span><b id="srcLabel">mock</b></div>
+    <div class="pill pill--src"><span class="m">数据源</span><b id="connState" class="conn--ok">连接中…</b></div>
   </section>
 
   <!-- ── 设备清单 ──────────────────────────────────────────── -->
@@ -102,7 +96,7 @@
       </span>
     </div>
     <div class="devices" id="deviceGrid"></div>
-    <p class="empty" id="deviceEmpty" hidden>暂无设备。切到 mock 可看样例；或等设备端实现后上报。</p>
+    <p class="empty" id="deviceEmpty" hidden>暂无设备上报。设备端第一次 <code>report</code> 后就会出现在这里（接入指引见 <a href="/docs/DEVICE-OTA.md">/docs/DEVICE-OTA.md</a>）。</p>
   </section>
 
   <!-- ── 下发面板 ──────────────────────────────────────────── -->
@@ -190,8 +184,8 @@
   "command_states": ["pending", "delivered", "success", "failed"],
   "online_rule": "now - lastSeen > 45s => offline (server-side)",
   "transport": "HTTP polling (pull)",
-  "modes": { "mock": "built-in fake devices, no backend needed (default)", "real": "calls live /api/devices" },
-  "not_implemented": ["device-side component (ESP32 components/ota)", "server-side /api/devices endpoints"]
+  "data_source": "live only — GET /api/devices + GET /api/registry, polled every 5s (no mock data in the page)",
+  "not_implemented": ["device-side component (ESP32 components/ota)"]
 }
 </script>
 

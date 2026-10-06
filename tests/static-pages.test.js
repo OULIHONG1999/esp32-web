@@ -82,6 +82,18 @@ describe('独立页 /OTA 静态托管', () => {
     expect(js).toContain('fw.token') // 与主站共用同一 localStorage 键
   })
 
+  // 回归守卫：页面只读实时接口，不得再夹带本地假数据（2026-10-06 移除）。
+  it('/OTA 页不含本地假数据与模式开关', async () => {
+    const html = await (await fetch(base + '/OTA')).text()
+    expect(html).not.toContain('modeToggle')
+    expect(html).toContain('id="connState"') // 连接状态取代了原「数据源 mock/real」胶囊
+    const js = await (await fetch(base + '/ota/ota.js')).text()
+    expect(js).not.toContain('mockDevices')
+    expect(js).not.toContain('mockRegistry')
+    expect(js).not.toContain('loadMock')
+    expect(js).not.toContain('MODE_KEY')
+  })
+
   it('/ota.json 描述符如实声明下发需鉴权且端点已实现', async () => {
     const j = await (await fetch(base + '/ota.json')).json()
     expect(j.auth.dispatch_requires_token).toBe(true)

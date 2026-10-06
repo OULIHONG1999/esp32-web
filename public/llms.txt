@@ -50,7 +50,7 @@
 ## OTA 设备接入（服务器端点已实现 · 设备端待开发）
 - 设备接入指南(设备工程师/AI 唯一入口): GET /docs/DEVICE-OTA.md
 - 页面入口: GET /OTA                 (等价 /ota、/ota/；独立页，非主 SPA)
-- 机器描述符: GET /ota.json          (tool_id=ota-console；接口清单/数据模型/mock-real 说明)
+- 机器描述符: GET /ota.json          (tool_id=ota-console；接口清单/数据模型/鉴权说明)
 - 三端契约: GET /docs/ota.md         (设备上报 + 命令下发 + 页面端设计)
 - 用途: 查看在线/离线设备、选固件版本、下发 OTA 命令、跟踪命令状态（pending→delivered→success/failed）
 - 状态: 服务器端点 ✅ 已实现并实测；页面 ✅ 已实现；**设备端固件 ❌ 待开发（在另一台电脑）**
