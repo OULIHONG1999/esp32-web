@@ -160,7 +160,7 @@ interface FirmwareSet {
 | `ChipDetectFail` | magic 不匹配等 | "芯片识别失败，升级内核/选择芯片型号强制模式" | 支持手动指定 chip |
 | `TransferFail` | 高波特率失步（报告 F4 案例2） | "传输中断，已自动降波特率重试 1 次" | 自动降速重试一次，再失败才报错 |
 | `PolicyInsecure` | 非安全上下文 | "需 HTTPS 访问（或浏览器 flag 豁免）" | 阻断在 connect 前 |
-| `PermissionDenied` | Permissions-Policy 无 serial | "页面未获串口权限" | 检测 `navigator.serial === undefined` 提前拦截 |
+| `PermissionDenied` | Permissions-Policy 无 serial | "页面未获串口权限" | 检测 `navigator.serial === undefined` 提前拦截——注意 undefined 有三种成因（非安全上下文 / 内嵌策略 / 浏览器真不支持），引导页按 §7 优先级区分，**不得一律报「浏览器不支持」** |
 
 **自动降速策略**：flash 断在中途 → 以 `原波特率/2` 重试一次（下限 115200），重试写入日志；只重试一次，避免死循环。
 
@@ -249,12 +249,13 @@ https://your.host/
 ```
 
 - **HTTPS 是浏览器硬约束，无法靠服务器配置放宽**（报告 §2）。自用三选一：
-  1. 反代 + 自签证书，浏览器首次点"继续访问"；
+  1. 反代 + 自签证书，浏览器首次点"继续访问"——**判定只看 scheme**（`https`/`wss`/`file` 与 `localhost` 一律可信，与证书是否有效无关），所以放行一次即可；
   2. `chrome://flags/#unsafely-treat-insecure-origin-as-secure` 加入站点 origin，纯 HTTP 直接跑（最省事，仅本机可控浏览器）；
   3. 有域名就 Caddy/Let's Encrypt 免费自动证书（推荐长期方案）。
 - 站点鉴权自用可省（Web Serial 只能操作本机用户手动选择的端口）；要加就一层 HTTP Basic / URL token。
 - 若嵌入 iframe：需要 `allow="serial"`。
 - 应用启动即自检：`!window.isSecureContext || !navigator.serial` → 环境引导页。
+- **自检的根因优先级（2026-10-06 修正，改文案必读）**：① `!isSecureContext` → **只报 `insecure`**——Chrome 只在安全上下文暴露 `navigator.serial`，此时再补一条「浏览器不支持」就是同因两报，还会把用户带去换浏览器（**真实误诊案例**）；② 安全上下文但 `navigator.serial` 缺失且页面在 iframe 内 → `embedded`（先排除内嵌/Permissions-Policy 因素）；③ 否则 → `no-serial`。引导页同时显示**现场**（`location.origin` / 浏览器名+主版本 / 是否 iframe）与「能通过自检的两种打开方式」，让排查者与 AI 都不必再问「你用什么打开的」。判定是纯函数 `checkEnvironment(probe)`（可注入探针），用例见 `tests/environment.test.ts`。
 
 ## 8. 版本与升级策略
 

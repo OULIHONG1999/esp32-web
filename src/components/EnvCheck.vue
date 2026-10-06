@@ -1,8 +1,19 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { EnvReport } from '../env/environment'
 
-defineProps<{ report: EnvReport }>()
+const props = defineProps<{ report: EnvReport }>()
 defineEmits<{ recheck: [] }>()
+
+// 非安全上下文时 navigator.serial 必然一起消失：标注为「上项的后果」，
+// 免得读者以为浏览器不支持、去换浏览器。
+const serialState = computed(() =>
+  props.report.serialApi
+    ? '通过'
+    : props.report.secureContext
+      ? '不可用'
+      : '不可用（受上项影响）',
+)
 </script>
 
 <template>
@@ -15,13 +26,22 @@ defineEmits<{ recheck: [] }>()
       </li>
       <li :class="report.serialApi ? 'pass' : 'fail'">
         Web Serial API 可用
-        <span class="state">{{ report.serialApi ? '通过' : '不可用' }}</span>
+        <span class="state">{{ serialState }}</span>
       </li>
     </ul>
+    <p class="env__scene">
+      现场：{{ report.origin || '（取不到来源）' }} · {{ report.browser
+      }}<template v-if="report.inIframe"> · 内嵌于 iframe</template>
+    </p>
     <div v-if="!report.ok" class="env__problems">
       <div v-for="p in report.problems" :key="p.id" class="env__problem">
         <p class="env__problem-msg">{{ p.message }}</p>
         <p class="env__problem-hint">修复：{{ p.hint }}</p>
+      </div>
+      <div class="env__ways">
+        <p class="env__ways-title">能通过自检的两种打开方式</p>
+        <p class="env__way">① https://&lt;你的地址&gt;/ —— 自签证书首次点“继续访问”即可</p>
+        <p class="env__way">② http://localhost:&lt;端口&gt;/ —— 本机 vite dev 或本地服务</p>
       </div>
     </div>
     <p v-else class="env__allgood">环境就绪，可以进入下一步（连接向导尚未实现，见 PROGRESS.md）。</p>
@@ -66,6 +86,13 @@ defineEmits<{ recheck: [] }>()
 .env .fail .state {
   color: var(--err);
 }
+.env__scene {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
 .env__problem {
   margin: 8px 0;
   font-size: 13px;
@@ -78,6 +105,24 @@ defineEmits<{ recheck: [] }>()
   margin: 0;
   color: var(--muted);
   line-height: 1.6;
+}
+.env__ways {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.env__ways-title {
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.env__way {
+  margin: 0;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
 }
 .env__allgood {
   color: var(--accent);
