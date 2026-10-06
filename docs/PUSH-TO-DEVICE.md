@@ -14,6 +14,7 @@
 | 命令 | `node tools/publish/index.js push --to <mac> [--build <dir> \| --release <id> \| --latest]` |
 | 谁用 | 设备开发机（已持有发布 token 的那台）；**设备端固件无需任何改动** |
 | 复用 | 发布 token、`POST /api/publish`、`GET /api/devices`、`POST …/commands`、`POST …/progress` |
+| 稳定性要点 | **两步可分离**（发布成功但推送失败 → 只重推，不必重编译）；**重入幂等**（同版本已在队列 → 接着等，不报错、不重复下发）；**轮询容错**（等待期间服务器短暂不可达不误判）；**`--status` 只读复查**（CLI 中断/超时后也能看结果） |
 | 服务器 | 加**一条权威规则**：下发时设备不在线 → 拒收（不下发、不排队、不等上线）、留记录、返 412（§3.1）；其余不加端点 |
 | AI 入口 | `/llms.txt` → `/push.json` → `/docs/PUSH-TO-DEVICE.md` → 下载 `/tools/publish/push.js` |
 | 默认行为（用户已定） | ① 目标设备不在清单里 → **拒绝**；② 只做手动一条命令（**不做 watch 自动推送**）；③ 设备已在目标版本 → **跳过并说明**；④ 设备不在线 → **直接取消**（只留记录与提醒） |
@@ -79,6 +80,7 @@ B 的输出（阶段行来自 `command.trail`，与页面「OTA 过程」面板�
 | `--allow-unknown` | off | 允许推给从未上报过的 deviceId（默认拒绝） |
 | `--skip-if-same` / `--no-skip-if-same` | **开** | 设备当前 `firmwareVersion` 已等于目标 releaseId → 跳过（退出码 8） |
 | `--list` | — | 只打印设备清单（id / 芯片 / 固件 / 在线 / 最后心跳 / 最近命令）后退出 |
+| `--status` | — | **只读复查**：打印该设备最近命令的状态与**完整过程链**，不下发、零副作用（`--wait` 超时或被 Ctrl+C 之后用它看结果） |
 | `--json` | off | 机器可读输出（§2.4） |
 | `--dry-run` | off | 只打印**将会发生什么**，不发任何请求 |
 | `--config` / `--server` | 同 `once` | 复用 `publish.config.json` 与其中的 `${FIRMWARE_PUBLISH_TOKEN}` |
@@ -100,8 +102,9 @@ B 的输出（阶段行来自 `command.trail`，与页面「OTA 过程」面板�
 | 7 | **安全闸门拒绝** | 芯片族不匹配（需 `--force-chip`） |
 | 8 | **跳过（非失败）** | 设备已在目标版本；`--json` 里 `skipped: true` |
 | 9 | **设备不在线（已取消）** | 未下发、未排队；服务器留 `cancelled` 记录，页面有提醒 |
+| 10 | **已有其他版本的未决命令** | 409 且 releaseId 不同；用 `--force` 顶替。**同一 releaseId 的 409 不算错误**——那是重入，CLI 接着等（§3.2） |
 
-`4` 与 `9` 刻意分开：`4` 是"这台设备我从没见过"（MAC 打错、或从没接入过），`9` 是"这台设备我认识，但它现在不在线"——脚本/告警要能区分这两种。
+`4` 与 `9` 刻意分开：`4` 是"这台设备我从没见过"（MAC 打错、或从没接入过），`9` 是"这台设备我认识，但它现在不在线"——脚本/告警要能区分这两种。`9`/`10` 分开同理：离线是"现在推不了"，他版未决是"设备正忙"。
 
 ### 2.4 `--json` 输出契约
 
@@ -146,6 +149,7 @@ flowchart TD
 | 芯片族必须一致 | 芯片推错是**变砖级**故障，不能只靠设备端自己挡 | `--force-chip` |
 | 同版本跳过 | 省一次下载与擦写（flash 寿命）；设备端幂等是第二道保险 | `--no-skip-if-same` |
 | **必须在线** | 见 §3.1 | **不可放行** |
+| 重入识别 | 脚本重跑、超时后重试时，你要的是"接着看结果"，而不是"报错"或"白刷一次 flash" | 同 releaseId 的未决命令 → 接着等；不同 → 409 + `--force` |
 
 ### 3.1 离线即取消（本设计的硬规则）
 
@@ -167,6 +171,27 @@ flowchart TD
 * **提醒**：页面 `/OTA` 上 ① 离线设备的「下发」按钮直接置灰并写明"设备不在线（最后心跳 X 前），下发会被取消、不会排队"；② 设备卡与「OTA 过程」面板显示最近一次 `cancelled` 记录及其原因。
 * **残留窗口（诚实说明）**：离线判定本身有最长 45s 的滞后。若设备在 45s 窗口内掉线，命令会正常入队并停在 `pending`，直到设备下次上报才被取走；若它再也不回来，`--wait` 会超时（exit 5），页面能看到它停在 `pending` 并显示"设备已离线"。这是判定口径的固有误差，不是"排队等上线"。
 * **设备端无需任何改动**：这是服务器侧的准入规则，设备端行为不变（仍只在自己上报时取命令）。
+
+### 3.2 重入、阻塞与中断（"稳定推送"的关键细节）
+
+| 场景 | 服务器返回 | CLI 行为 |
+|---|---|---|
+| 设备已有未决命令，releaseId **相同** | 409（带现有命令） | **不报错**：判定为同一次推送的重入（脚本重跑、`--wait` 超时后重试），把等待切到那条命令上，`--json` 里 `command.id` 是旧的那条 |
+| 设备已有未决命令，releaseId **不同** | 409 | 报错 exit 10，提示 `--force` 顶替或等回执 |
+| 设备离线 | 412 | exit 9（§3.1） |
+| `--wait` 期间服务器短暂不可达 | 轮询失败 | **不立即判失败**：继续重试，连续 3 次失败或累计 30s 不可达才 exit 6；命令在服务器上不受影响 |
+| `--wait` 期间 Ctrl+C / 进程被杀 | — | 命令仍在服务器执行；退出前打印 `已下发 <cmd_id>，设备会照做；用 push --status --to <mac> 复查` |
+
+> 为什么重入要当"正常"处理：推送是**远程副作用**操作，脚本/网络的重试是常态；把重入报成失败会让人去 `--force`，
+> 而 `--force` 会**顶替**掉正在执行的那条命令（白刷一次 flash，甚至把设备留在一个中间状态）。重入必须"接着等"。
+
+### 3.3 失败与超时时必须打印的"过程证据"
+
+不管退出码是几，CLI 退出前都要把**已有过程**打全，这是"看得见过程"的最低要求：
+
+* 完整过程链：`已下发 → 设备取走 → 各阶段（含 percent / message）→ 回执`，每步带**相对耗时**；
+* 若停在某一步：带上"停滞了多久"（与页面同源规则：`pending > 30s`、`delivered` 无过程 > 2min、过程 > 60s 未更新）；
+* 设备端**没上报过程**时：明确写出"设备端未上报过程点（旧固件/未实现）——以上仅为服务器可见的时间点"，**不假装有进度**。
 
 ## 4. 契约与依赖
 
@@ -235,8 +260,10 @@ flowchart LR
              "push_existing": "node tools/publish/index.js push --to <mac> --release <releaseId>",
              "list_devices": "node tools/publish/index.js push --list" },
   "params": { "to": { "required": true, "note": "单个设备；冒号格式或 12 位小写 hex" },
-              "build|release|latest": "三选一", "wait": "默认 true", "waitTimeoutS": 300, "pollS": 2,
-              "force": "顶替未决命令", "forceChip": "跨芯片族放行", "allowUnknown": "允许未上报过的设备",
+              "build|release|latest": "三选一",
+              "status": "只读复查：打印最近命令状态与完整过程链，零副作用",
+              "wait": "默认 true", "waitTimeoutS": 300, "pollS": 2,
+              "force": "顶替未决命令（他版本未决时）", "forceChip": "跨芯片族放行", "allowUnknown": "允许未上报过的设备",
               "skipIfSame": "默认 true", "json": "机器可读", "dryRun": "不产生副作用",
               "noOfflineOverride": "离线即取消，无放行开关" },
   "exit_codes": { "0": "success", "1": "device reported failed", "2": "usage error", "3": "auth failed",
@@ -244,11 +271,14 @@ flowchart LR
                   "5": "timeout waiting for result", "6": "network/server error",
                   "7": "safety gate refused (chip mismatch)",
                   "8": "skipped (device already on target release)",
-                  "9": "device offline -> cancelled, not queued" },
+                  "9": "device offline -> cancelled, not queued",
+                  "10": "device has an unresolved command for a DIFFERENT release (use --force to supersede)" },
   "gates": ["device must exist in GET /api/devices (else exit 4)",
             "release.chipFamily must equal device.chip (else exit 7)",
             "skip when device.firmwareVersion == releaseId (exit 8)",
-            "device must be online at dispatch time -> server enforces, 412 + cancelled record (exit 9)"],
+            "device must be online at dispatch time -> server enforces, 412 + cancelled record (exit 9)",
+            "unresolved command for the SAME releaseId -> treat as re-entry and keep waiting (not an error)",
+            "unresolved command for a DIFFERENT releaseId -> exit 10 unless --force"],
   "apis": { "publish": "POST /api/publish", "list_devices": "GET /api/devices",
             "dispatch": "POST /api/devices/{deviceId}/commands  (412 when device offline; 409 when unresolved command exists)",
             "progress_source": "command.progress / command.trail" },
@@ -294,7 +324,12 @@ curl -s http://<host>/api/devices                     # 3) 现在有哪些设备
 | `跳过了` | 8 | 设备已在该版本 | 想重刷加 `--no-skip-if-same` |
 | **`设备不在线，已取消`** | 9 | 下发的瞬间设备离线（最后心跳 > 45s） | 设备上线后**重跑本命令**；页面 `/OTA` 能看到这次取消的记录与原因 |
 | `401` | 3 | token 缺失/失效 | 设 `FIRMWARE_PUBLISH_TOKEN` 或 config 的 `token`（建议用可撤销的工作 token） |
-| `409 已有未决命令` | — | 设备上一条命令还没回执 | 等它回执，或 `--force` 顶替 |
+| `409 已有未决命令` | — | 设备上一条命令还没回执 | 见 §3.2：同版本=接着等；他版本=exit 10，等回执或 `--force` |
+| **`设备不在线，已取消`** | 9 | 下发的瞬间设备离线（最后心跳 > 45s） | 设备上线后**重跑本命令**；页面 `/OTA` 能看到这次取消的记录与原因 |
+| 轮询中服务器短暂不可达 | — | 网络抖动 / 服务器重启 | CLI 自动重试；累计失败才 exit 6，**命令不受影响**（状态在服务器上） |
+| CLI 被中断 / 超时后想知道结果 | 5 / — | 进程没了但命令还在跑 | `push --status --to <mac>`（只读）；或页面 `/OTA` 的过程面板 |
+| **发布成功、推送失败** | 9/7/10 | 固件已成 **snapshot** 躺在服务器上 | **不必重编译**：`push --to <mac> --release <id>` 再推一次；要转正式版用 `promote`；不想要就等 retention 清理 snapshot |
+| 网络/服务器错误 | 6 | 连不上、5xx | 两步可分离：重跑时 `--build` 会因增量上传（按 sha 复用）秒回，不会重传固件 |
 | 超时 | 5 | 下发时在线、之后掉了/正忙/断电 | `--json` 看 `trail` 停在哪一步；页面 `/OTA` 有同款过程视图 |
 | 设备回执 failed | 1 | 下载校验失败、写入失败等 | 看输出里的 `detail`（设备给的原文）；再跑一次通常能区分偶发/必然 |
 
@@ -310,7 +345,13 @@ curl -s http://<host>/api/devices                     # 3) 现在有哪些设备
 - [ ] **离线期间重推**（设备仍离线）→ 仍然 exit 9，不因 409 被挡（cancelled/失败记录不占未决位）
 - [ ] **设备上线后重推** → 正常 200 下发并成功（证明取消没有留下阻塞）
 - [ ] 页面：离线设备的「下发」按钮置灰 + 文案说明；在线设备行为不变
-- [ ] 已有未决命令 → 明确提示并给出 `--force`；加 `--force` 后旧命令标 `superseded`
+- [ ] 已有未决命令 → 明确提示并给出 `--force`；加 `--force` 后旧命令标 `superseded`（他版本 → exit 10）
+- [ ] **重入**：同版本已是未决命令时重跑 → **不报错、接着等**，最终 exit 0（而不是 409 失败、也不重复下发）
+- [ ] **轮询容错**：`--wait` 期间把服务器重启一次 → CLI 不误判，恢复后仍给出最终结论
+- [ ] **中断可复查**：下发后 Ctrl+C → 退出前提示 `--status`；`--status` 能打出完整过程链与停滞时长
+- [ ] **发布失败只需重推**：`--build` 推送失败后，`push --release <id>` 直接成功（不重新发布、不重传固件）
+- [ ] 失败 / 超时时**打印完整过程链**（每步相对耗时 + 停滞判断）；设备未上报过程时**明说**而不是留空
+- [ ] 故障注入三条（device-sim 搞）：① 设备取走后断电（不回执）② 轮询期服务器重启 ③ 等待期 token 被撤销 → 退出码与提示符合 §3.2/§7
 - [ ] `--no-wait` 只下发即返回；`--dry-run` 零副作用；`--json` 结构与 §2.4 一致
 - [ ] 设备回执失败 → exit 1 且打印设备 `detail`
 - [ ] 测试：`push-cli.test.js` + `devices.test.js` 全绿；`public/tools/publish/{push,pushlib}.js` 可下载即跑（Node 18+）
@@ -320,8 +361,8 @@ curl -s http://<host>/api/devices                     # 3) 现在有哪些设备
 1. **服务器准入规则**：`devices.js` 加 `cancelled` + `recordCancelled()`；`app.js` 入队前判在线 → 412；`tests/devices.test.js` 补齐（离线 412、留记录、不占未决位、上线后可重推）
 2. **页面同步**：`/OTA` 离线按钮置灰 + `cancelled` 标签与提醒；`ota.json` / `#ai-data` 补状态与 412
 3. `pushlib.js` + 单测（纯逻辑，无网络）→ 测试绿
-4. `push.js`（先 `--release` + `--wait` + `--json`）→ 临时服务器端到端
-5. 接 `--build`（复用 `once.js`）、补 `--list` / `--dry-run` / 各闸门开关 → 全清单验收
+4. `push.js`（先 `--release` + `--wait` + `--status` + `--json`）→ 临时服务器端到端
+5. 接 `--build`（复用 `once.js`；**发布这一步给 1 次重试**——现在 `once` 分支传的是 `retries: 0`）、补 `--list` / `--dry-run` / 各闸门与重入 → 全清单验收
 6. `index.js` 子命令 + `usage()`；镜像到 `public/tools/publish/`
 7. 文档三处（本文已就位、`ota.md`/`DEVICE-OTA.md`/`PUBLISH.md`）+ `push.json` + `llms.txt` 段
 8. `test` + `build` 全绿 → 提交 → 按纪律 9 发布云端 → 线上跑一次验收清单
