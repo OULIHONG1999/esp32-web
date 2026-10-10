@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>崩溃上报台 — 设备 coredump 收集</title>
+
+<meta name="description" content="ESP32 设备崩溃转储收集台：查看设备上传的 coredump 列表、崩溃原因、崩溃任务与时间，下载原始 dump 供离线符号化。API 契约见 /docs/coredump.md，机器描述符见 /coredump.json。" />
+<meta name="coredump:canonical-path" content="/coredump" />
+<meta name="coredump:agent-descriptor" content="/coredump.json" />
+<meta name="coredump:api-contract-doc" content="/docs/coredump.md" />
+<meta name="coredump:agent-index" content="/llms.txt" />
+<link rel="alternate" type="application/json" href="/coredump.json" title="coredump tool descriptor" />
+<link rel="stylesheet" href="/coredump/coredump.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__in">
+    <a class="brand" href="/coredump">
+      <span class="brand__sq" aria-hidden="true"></span>
+      <span>崩溃上报台</span>
+      <code class="brand__path">/coredump</code>
+    </a>
+    <nav class="topbar__nav">
+      <a href="#dumps">崩溃列表</a>
+      <a href="#symbolize">符号化</a>
+      <a href="#ai">AI 速读</a>
+      <a href="/docs/coredump.md">文档</a>
+      <a href="/coredump.json">coredump.json</a>
+    </nav>
+    <div class="topbar__ops">
+      <button class="iconbtn" id="refreshBtn" title="立即刷新">↻</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── AI 速读 ──────────────────────────────────────────── -->
+  <section class="panel panel--ai" id="ai">
+    <div class="panel__hd">
+      <h2>AI 速读 · 本页是什么</h2>
+      <span class="hint">机器可读描述符 <a href="/coredump.json"><code>/coredump.json</code></a></span>
+    </div>
+    <p class="lead">
+      本页是 <strong>崩溃上报台</strong>：设备崩溃后，开机（网络就绪）时把 flash 里的 coredump 上传到服务器，
+      服务器落盘并记录元数据，这里按时间倒序展示。数据<strong>全部来自服务器实时接口</strong>（无本地假数据），每 5 秒轮询。
+    </p>
+    <div class="ai-grid">
+      <div class="ai-col">
+        <h3>接口（契约详见 <a href="/docs/coredump.md">/docs/coredump.md</a> §5）</h3>
+        <ul class="ai-api">
+          <li><code>GET  /api/coredumps</code><span>全部崩溃列表，公开只读</span></li>
+          <li><code>GET  /api/devices/{deviceId}/coredumps</code><span>单设备列表，公开只读</span></li>
+          <li><code>GET  /api/coredumps/{id}</code><span>单条摘要，公开只读</span></li>
+          <li><code>GET  /api/coredumps/{id}/download</code><span>下载原始 dump，公开只读</span></li>
+          <li class="dim"><code>POST /api/devices/{deviceId}/coredump</code><span>设备上报 · 免鉴权（设备端职责）</span></li>
+        </ul>
+      </div>
+      <div class="ai-col">
+        <h3>命名与约定</h3>
+        <dl class="ai-kv">
+          <div><dt>deviceId</dt><dd>base MAC 去冒号小写十六进制，如 <code>3485a1b2c3d4</code></dd></div>
+          <div><dt>排重键</dt><dd><code>(deviceId, sha256)</code> —— 重复上传直接 <code>duplicate:true</code>，不重复入库</dd></div>
+          <div><dt>sha256</dt><dd>「原始 body 字节」的签名（64 hex），服务器会重算校验</dd></div>
+          <div><dt>时间</dt><dd>崩溃绝对时间不可还原，以 <code>receivedAt</code>（接收时间）为准</dd></div>
+          <div><dt>retention</dt><dd>每设备保留最近 20 条，超出自动淘汰</dd></div>
+        </dl>
+      </div>
+    </div>
+    <p class="foot-note">
+      推荐抓取顺序：<code>/coredump.json</code> → <code>/docs/coredump.md</code> → 本页。
+      本页地址以 <code>/coredump</code> 结尾（等价 <code>/coredump/</code>）。
+    </p>
+  </section>
+
+  <!-- ── 概览胶囊 ──────────────────────────────────────────── -->
+  <section class="pills" aria-label="崩溃概览">
+    <div class="pill"><span class="m">崩溃总数</span><b id="cTotal">0</b></div>
+    <div class="pill"><span class="m">涉及设备</span><b id="cDevices">0</b></div>
+    <div class="pill"><span class="m">最近接收</span><b id="cLast" class="pill--time">—</b></div>
+    <div class="pill pill--src"><span class="m">数据源</span><b id="connState" class="conn--ok">连接中…</b></div>
+  </section>
+
+  <!-- ── 崩溃清单 ──────────────────────────────────────────── -->
+  <section id="dumps">
+    <div class="eyebrow">
+      <span>崩溃清单</span>
+      <span class="eyebrow__right">
+        设备
+        <select id="deviceFilter"><option value="">全部设备</option></select>
+        <span class="sep">·</span>
+        轮询 <b id="pollLabel">5s</b> · 上次刷新 <b id="lastRefresh">—</b>
+      </span>
+    </div>
+    <div class="dumps" id="listBody"></div>
+    <p class="empty" id="listEmpty" hidden>
+      暂无崩溃上报。设备崩溃后开机上报一条 <code>POST /api/devices/{id}/coredump</code> 就会出现在这里（契约见 <a href="/docs/coredump.md">/docs/coredump.md</a> §4）。
+    </p>
+  </section>
+
+  <!-- ── 详情面板 ──────────────────────────────────────────── -->
+  <section class="panel" id="detailPanel" hidden>
+    <div class="panel__hd">
+      <h2>崩溃详情</h2>
+      <span class="hint"><code id="detailId">—</code></span>
+    </div>
+    <div id="detailBody"></div>
+  </section>
+
+  <!-- ── 符号化指引 ────────────────────────────────────────── -->
+  <section class="panel" id="symbolize">
+    <div class="panel__hd">
+      <h2>符号化（离线动作）</h2>
+      <span class="hint">页面不解析，下载后用官方工具还原 backtrace</span>
+    </div>
+    <p class="lead">
+      服务器落盘的是设备上传的<strong>原始字节</strong>——ESP-IDF 写 flash 默认是专有二进制格式，不保证是标准 ELF。
+      要拿到可读 backtrace，需要三样东西：<strong>dump 文件</strong> + <strong>崩溃固件的 ELF</strong> + 官方 <code>espcoredump.py</code>。
+    </p>
+    <div class="symbolize">
+      <div class="step"><b>1</b><span>点崩溃卡上的「下载」拿到 <code>.bin</code></span></div>
+      <div class="step"><b>2</b><span>按 <code>appElfSha256</code>（若有）或固件版本，从 <a href="/api/registry">registry</a> 取对应发布的 app ELF</span></div>
+      <div class="step"><b>3</b><span>本地运行 <code>espcoredump.py</code> 还原</span></div>
+    </div>
+    <pre class="codeblock"><code># 若设备上传的是 raw 分区镜像（esp_core_dump_image_get 原始格式）
+espcoredump.py --chip esp32s3 info_corefile -t raw -g app.elf coredump.bin
+# 若已是标准 ELF
+espcoredump.py info_corefile coredump.bin</code></pre>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span>崩溃上报台 · 独立页（非主 SPA）· 服务器 firmware-server</span>
+  <span>
+    <a href="/coredump.json">/coredump.json</a> ·
+    <a href="/docs/coredump.md">/docs/coredump.md</a> ·
+    <a href="/docs/coredump-upload.md">/docs/coredump-upload.md</a> ·
+    <a href="/llms.txt">/llms.txt</a> ·
+    <a href="/">返回主站</a>
+  </span>
+</footer>
+
+<script type="application/json" id="ai-data">
+{
+  "page": "崩溃上报台",
+  "canonical_path": "/coredump",
+  "aliases": ["/coredump/", "/COREDUMP"],
+  "purpose": "查看设备上传的 coredump（崩溃转储）：崩溃原因、崩溃任务、固件版本、接收时间，并下载原始 dump 供离线符号化",
+  "descriptor": "/coredump.json",
+  "contract_doc": "/docs/coredump.md",
+  "device_side_doc": "/docs/coredump-upload.md",
+  "agent_index": "/llms.txt",
+  "apis": {
+    "list": { "method": "GET", "path": "/api/coredumps", "auth": "none", "returns": "{ _meta, coredumps: Coredump[] }" },
+    "list_by_device": { "method": "GET", "path": "/api/devices/{deviceId}/coredumps", "auth": "none" },
+    "detail": { "method": "GET", "path": "/api/coredumps/{id}", "auth": "none" },
+    "download": { "method": "GET", "path": "/api/coredumps/{id}/download", "auth": "none", "returns": "raw dump bytes (application/octet-stream)" },
+    "upload": { "method": "POST", "path": "/api/devices/{deviceId}/coredump", "auth": "none (device-side)", "note": "binary body; metadata in query (sha256/size/fw) + headers (X-Panic-Reason/X-Exc-Task/X-App-Elf-Sha256...); idempotent on (deviceId, sha256)" }
+  },
+  "data_model": {
+    "Coredump": {
+      "id": "cdump_<8 hex>",
+      "deviceId": "base MAC lower-hex 12 chars",
+      "sha256": "sha256 of the raw body (64 hex)",
+      "size": "bytes",
+      "firmwareVersion": "string | null",
+      "panicReason": "string | null (already decoded)",
+      "excTask": "string | null",
+      "excPc": "string | null",
+      "appElfSha256": "string | null",
+      "chip": "string | null",
+      "sdkVersion": "string | null",
+      "receivedAt": "ISO8601 UTC (receive time — crash absolute time is not recoverable)"
+    }
+  },
+  "invariants": [
+    "at-least-once upload; server dedups on (deviceId, sha256) and returns duplicate:true",
+    "sha256 is the signature of the raw body bytes; server recomputes and rejects mismatch (400)",
+    "dump bytes are stored to disk as <sha256>.bin, not embedded in JSON",
+    "retention: at most 20 per device, oldest evicted with its file",
+    "symbolization is offline (espcoredump.py + matching app ELF), not done in the page"
+  ],
+  "data_source": { "mode": "live only", "endpoints": ["GET /api/coredumps"], "poll_interval_ms": 5000, "mock": "none" },
+  "auth": { "upload_unauthenticated": true, "read_public": true, "note": "deviceId is the identity; three hard guards against disk flooding: deviceId whitelist, body <= 64K, sha256 match" },
+  "not_implemented": ["online symbolization in the page", "device-side firmware (lives in another repository; see /docs/coredump-upload.md)"]
+}
+</script>
+
+<script src="/coredump/coredump.js"></script>
+</body>
+</html>

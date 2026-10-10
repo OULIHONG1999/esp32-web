@@ -1,6 +1,23 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { LIMITS } from './config.js'
+import {
+  COREDUMP_ID_RE,
+  MAX_COREDUMP_BYTES,
+  MAX_COREDUMPS_PER_DEVICE,
+  SHA256_RE,
+  coredumpById,
+  coredumpDir,
+  coredumpFile,
+  coredumpSummary,
+  listCoredumpViews,
+  listCoredumpsForDevice,
+  newCoredumpId,
+  readCoredumpStore,
+  receiveCoredump,
+  writeCoredumpStoreAtomic,
+} from './coredumps.js'
 import {
   COMMAND_ID_RE,
   DEVICE_ID_RE,
@@ -202,6 +219,15 @@ async function readJsonBody(req, maxBytes) {
     throw Object.assign(new Error('body must be a json object'), { status: 400 })
   }
   return parsed
+}
+
+/** 读可选 header 文本：取首个、截断、非空否则 null；X-Panic-Reason 传 urlencoded（含 backtrace 可能是长串） */
+function headerText(req, name, maxLen) {
+  const raw = req.headers[name]
+  const v = Array.isArray(raw) ? raw[0] : raw
+  if (typeof v !== 'string' || !v.trim()) return null
+  const s = v.trim().slice(0, maxLen)
+  return s || null
 }
 
 function serveStatic(distDir, urlPath, res) {
@@ -582,6 +608,120 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
             wasDelivered: outcome.wasDelivered,
             command: commandSummary(outcome.command),
           })
+        }
+
+        // ---- coredump 上报与查看（docs/coredump.md §5–§6；上报免鉴权，deviceId 即身份）----
+        // 上报：二进制 body（application/octet-stream），元数据走 query + header，见契约 §5.1。
+        const cdReportM = /^\/api\/devices\/([^/]+)\/coredump$/.exec(p)
+        if (req.method === 'POST' && cdReportM) {
+          const deviceId = cdReportM[1]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          const sha256 = (url.searchParams.get('sha256') ?? '').toLowerCase()
+          if (!SHA256_RE.test(sha256)) {
+            return send(res, 400, { error: 'sha256 query param must be 64 hex chars (of the raw body)' })
+          }
+          const body = await collectBody(req, MAX_COREDUMP_BYTES)
+          if (body.length === 0) return send(res, 400, { error: 'empty coredump body' })
+          // 完整性/防伪造：body 的 sha256 必须等于 query 的 sha256（两端对同一数据源计算）
+          const actual = crypto.createHash('sha256').update(body).digest('hex')
+          if (actual !== sha256) {
+            return send(res, 400, { error: 'sha256 mismatch: body does not match the declared sha256' })
+          }
+          const sizeRaw = url.searchParams.get('size')
+          if (sizeRaw !== null && Number(sizeRaw) !== body.length) {
+            return send(res, 400, { error: 'size does not match body length' })
+          }
+          // 落盘：按 sha256 命名 → 同 key 覆盖写同一路径，天然幂等
+          fs.mkdirSync(coredumpDir(dataDir), { recursive: true })
+          const file = coredumpFile(dataDir, sha256)
+          if (!fs.existsSync(file)) {
+            const tmp = file + '.tmp'
+            fs.writeFileSync(tmp, body)
+            fs.renameSync(tmp, file)
+          }
+          let panicReason = headerText(req, 'x-panic-reason', 2048)
+          if (panicReason) {
+            try {
+              panicReason = decodeURIComponent(panicReason)
+            } catch {
+              /* 设备端非 urlencode 时保留原样 */
+            }
+          }
+          const record = {
+            id: newCoredumpId(),
+            deviceId,
+            sha256,
+            size: body.length,
+            firmwareVersion: url.searchParams.get('fw')?.slice(0, 128) || null,
+            panicReason: panicReason?.slice(0, 2048) || null,
+            excTask: headerText(req, 'x-exc-task', 128),
+            excPc: headerText(req, 'x-exc-pc', 32),
+            appElfSha256: headerText(req, 'x-app-elf-sha256', 64)?.toLowerCase() || null,
+            chip: headerText(req, 'x-chip', 32),
+            sdkVersion: headerText(req, 'x-sdk-version', 64),
+            receivedAt: new Date().toISOString(),
+          }
+          const result = receiveCoredump(readCoredumpStore(dataDir), record)
+          if (!result.duplicate) {
+            // retention 淘汰的旧记录：删掉它的 dump 文件（元数据随 store 一起原子写）
+            for (const d of result.removed) {
+              try {
+                fs.rmSync(coredumpFile(dataDir, d.sha256), { force: true })
+              } catch {
+                /* 文件本就不存在则忽略 */
+              }
+            }
+            writeCoredumpStoreAtomic(dataDir, result.store)
+          }
+          return send(res, 200, { ok: true, id: result.record.id, duplicate: result.duplicate })
+        }
+
+        // 全局 coredump 列表（公开只读，页面首页数据源）
+        if (req.method === 'GET' && p === '/api/coredumps') {
+          return send(res, 200, {
+            _meta: {
+              service: 'firmware-server',
+              docs: '/docs/coredump.md',
+              maxPerDevice: MAX_COREDUMPS_PER_DEVICE,
+            },
+            coredumps: listCoredumpViews(readCoredumpStore(dataDir), baseUrlOf(req)),
+          })
+        }
+
+        // 单设备 coredump 列表（公开只读）
+        const devCdsM = /^\/api\/devices\/([^/]+)\/coredumps$/.exec(p)
+        if (req.method === 'GET' && devCdsM) {
+          const deviceId = devCdsM[1]
+          if (!DEVICE_ID_RE.test(deviceId)) {
+            return send(res, 400, { error: 'deviceId must be 12 lowercase hex chars (base MAC)' })
+          }
+          return send(res, 200, {
+            deviceId,
+            coredumps: listCoredumpsForDevice(readCoredumpStore(dataDir), deviceId, baseUrlOf(req)),
+          })
+        }
+
+        // 单条详情 / 下载原始 dump（公开只读）
+        const cdOneM = /^\/api\/coredumps\/([^/]+)(\/download)?$/.exec(p)
+        if (req.method === 'GET' && cdOneM) {
+          const id = cdOneM[1]
+          const download = cdOneM[2] === '/download'
+          if (!COREDUMP_ID_RE.test(id)) return send(res, 400, { error: 'bad coredump id' })
+          const rec = coredumpById(readCoredumpStore(dataDir), id)
+          if (!rec) return send(res, 404, { error: 'coredump not found', id })
+          if (!download) return send(res, 200, { coredump: coredumpSummary(rec, baseUrlOf(req)) })
+          const file = coredumpFile(dataDir, rec.sha256)
+          if (!fs.existsSync(file)) return send(res, 404, { error: 'dump file missing on server', id })
+          const data = fs.readFileSync(file)
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(data.length),
+            'Content-Disposition': `attachment; filename="${rec.id}.bin"`,
+            'Cache-Control': 'no-cache',
+          })
+          return res.end(data)
         }
 
         if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {

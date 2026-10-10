@@ -1,7 +1,7 @@
 # PROGRESS — ESP32 Web Flasher 工作记录
 
 > 本文件是**活的进度表**：每次有意义的推进后更新。新接手的 AI/工程师请先读本文，再读 AGENTS.md。
-> 最后更新：2026-10-07（**推送固件到指定设备已上线并真机验证**：远端编译 → `push --build` 直推真机成功、速度与 USB 相当；设备端过程上报待补）
+> 最后更新：2026-10-11（**coredump 崩溃上报：服务器 + 页面 + 三端契约已落地**；设备端上传方在另一台电脑，契约见 `docs/coredump-upload.md`）
 
 ## 一句话
 
@@ -23,6 +23,7 @@
 8. `docs/FIRMWARE-REGISTRY.md` — v1.5 固件库设计
 9. **`docs/ota.md` — OTA 三端设计契约（设备/云端/页面）；页面端已落地为独立页 `/OTA`（§6.0）**
    - `docs/PUSH-TO-DEVICE.md` — **推送固件给指定设备（已实现并上线）**：一条命令 = 发布+下发+等结果+打过程；含 AI 入口（`/push.json` / `llms.txt` 段 / `--json` 契约）与验收结果（§8 全通过）
+   - `docs/coredump.md` — **崩溃上报三端契约（服务器+页面已实现；设备端为上传方）**：独立页 `/coredump` + 描述符 `/coredump.json` + `POST /api/devices/{id}/coredump`；`docs/coredump-upload.md` 为设备端检测/上传设计
 10. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
 11. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
 12. 本文 — 进度与下一步
@@ -52,6 +53,8 @@
 
 | **推送固件到指定设备（push）** | ✅ 已实现并上线 | 规则：**离线不下发（412 + cancelled 记录，不排队）**、可撤销未决命令（pending 真拦住 / delivered 停掉重复投递）、迟到回执不覆盖终态；入口：CLI `push`（`--build`/`--release`/`--latest`/`--status`/`--cancel`/`--json`，退出码 0–12 + 130）+ 页面离线置灰与「撤销」按钮 + 按 id 复查端点；**341 测试全绿**（`push-cli.test.js` 纯逻辑 36 + 端到端 30，含三条故障注入），页面 DOM 桩 28/28；**2026-10-07 真机端到端验证通过**（远端编译→直推真机 42s 成功，速度与 USB 相当）；文档 `docs/PUSH-TO-DEVICE.md`（§8 验收全通过）+ `/push.json` + `llms.txt` 推送段 |
 
+| **coredump 崩溃上报** | ✅ 服务器+页面已实现 | 设备崩溃后开机上传 coredump → 服务器落盘（`server-data/coredumps/<sha256>.bin`）+ `(deviceId, sha256)` 幂等排重 → 独立页 `/coredump` 查看/下载 → 符号化离线。`POST /api/devices/{id}/coredump`（**方案 A 二进制 body**，元数据走 query+header，免鉴权）+ 查询/下载四端点（公开只读）；retention 每设备 20 条。`tests/coredumps.test.js` 15 用例 + 全量 356 全绿；端到端（上传→幂等→列表→下载字节一致）通过。**设备端上传方待做（另一台电脑）**；页面 JS 渲染未经真浏览器实测（本机无 Playwright） |
+
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 
 ## 代码结构（2026-09-27 S1 后）
@@ -75,6 +78,9 @@ src/components/               # EnvCheck / FirmwarePanel / LogPanel / FlashHisto
 src/api/registry.ts           # v1.5 项目库客户端（registry/parts 下载、flattenLatest、flashParams 映射）
 public/ota/{index.html,ota.css,ota.js}  # OTA 独立页（服务 ip/OTA；原生 JS 零依赖，不进主 SPA 构建）
 public/ota.json               # OTA 页机器描述符（AI 入口；tool_id=ota-console）
+public/coredump/{index.html,coredump.css,coredump.js}  # 崩溃上报独立页（/coredump；深色控制台珊瑚红 accent；零依赖）
+public/coredump.json          # 崩溃上报台机器描述符（AI 入口；tool_id=coredump-console）
+server/coredumps.js           # coredump 存储层（幂等 + retention + 原子写；app.js 接上报/查询/下载四端点）
 server/{config,registry,multipart,publish,app,index}.js  # 自含服务（纯 JS 零依赖 node:http）+ rebuild.js 自愈（serveStatic 含 /OTA 归一 + 目录 index.html）
 tools/publish/{lib,index}.js  # 发布 CLI：flash_args/assets 解析、查缺、multipart 上传（once）
 vite.config.ts                # /api/registry* /api/publish* proxy（→8787；dev 中间件已移除）
@@ -174,6 +180,8 @@ tests/fixtures/               # fake-build 四段假 bin + publish.config.json�
 
 
 ## 变更日志
+- **2026-10-11（coredump 崩溃上报：服务器 + 页面 + 三端契约，一次做完）**：用户要「把 coredump 做成类似 OTA 的独立子链接体系，完整一点，直接开始」。按 OTA 的完整结构落地一套对称的 `/coredump`：设备崩溃后开机上传 flash coredump → 服务器落盘 + 幂等排重 → 独立页查看/下载 → 符号化离线。① **服务器**（`server/coredumps.js` 存储层 + `app.js` 接线）：`POST /api/devices/{id}/coredump`（**方案 A 二进制 body**，元数据走 query `sha256/size/fw` + header `X-Panic-Reason`(urlencode)/`X-Exc-Task`/`X-Exc-Pc`/`X-App-Elf-Sha256`/`X-Chip`/`X-Sdk-Version`；免鉴权，MAC 即身份）；**幂等键 `(deviceId, sha256)`**（重复 → `duplicate:true` 返回旧 id）；sha256 是「原始 body 字节」签名、服务器重算校验（不符 400，兼防传输损坏与磁盘灌水）；dump 落盘 `server-data/coredumps/<sha256>.bin`（按 sha256 命名天然幂等）；retention 每设备 20 条（超出连同文件淘汰）；查询 `GET /api/coredumps`（全局）/`/api/devices/{id}/coredumps`（单设备）/`/api/coredumps/{id}`（详情）/`/api/coredumps/{id}/download`（下载），公开只读。② **页面** `public/coredump/`（深色运维控制台，珊瑚红 accent 区分 OTA 绿）：概览胶囊 + 崩溃卡片列表（panic 原因/崩溃任务/固件/大小/时间）+ 设备筛选 + 详情面板（sha256/appElfSha256/excPc 全字段）+ 下载按钮 + 符号化指引（离线 espcoredump.py 三步）。③ **AI 面**：`public/coredump.json` 描述符 + `llms.txt` 崩溃上报段 + 页内 `#ai-data`。④ **文档**：`docs/coredump.md`（三端契约：方案 A 定稿 + 数据模型 + 符号化离线说明）+ `docs/coredump-upload.md` 一并镜像到 `public/docs/`。⑤ **验证**：`tests/coredumps.test.js` 15 用例（幂等/retention/sha256 校验/header 解码/下载字节一致）+ 全量 356 测试 + build 全绿；临时 server 端到端（上传→幂等去重→跨设备列表→下载 `match=true`）；UI 静态自检 13 个 JS 引用 id 全匹配。**未做/诚实标注**：页面 JS 渲染未经真浏览器实测（本机无 npx/Playwright，同问题「线 189」）；设备端上传方在另一台电脑（契约见 `docs/coredump-upload.md`，§8 三项待设备端确认：raw vs ELF、`X-Panic-Reason` 编码、`appElfSha256` 是否上报）；符号化留离线动作、页面不做。
+
 - **2026-10-06（部署上线 + 打包脚本修坑）**：按纪律 9 走完云端部署——build（bundle `index-DPC6vB74`）→ `tools/package-deploy.ps1` → scp → 远端 unzip → `systemctl restart firmware-server`。**核对通过**：`ExecMainStartTimestamp` 00:19:11 → **19:59:08**（新 PID 3166615）；HTTP 与 HTTPS 入口页面均引用 `index-DPC6vB74.js`；`/api/status`、`/api/devices`、`/OTA`、`/llms.txt` 全 200；新 JS 资源 200（306 KB）。踩坑与修复：
   ① `Compress-Archive` 在 Windows 写 `\` 作路径分隔符 → 远端 `unzip` 报 backslash 警告并**以退出码 1 结束**，`unzip && systemctl restart` 链在此中断——文件解出来了、服务却没重启（正是 SERVER.md 记过的「unzip 成功≠进程重启」，本次复现）。改为脚本自建 zip、显式写 `/` 条目名，并加产出自检（条目数 / 反斜杠数 / 体积），远端实测 `unzip_exit=0`。
   ② 编辑 `.ps1` 会丢掉 UTF-8 **BOM** → PowerShell 5.1 按 ANSI 读中文注释乱码、引号错位直接解析失败（问题 21 的变体）。**纪律：改完 `.ps1` 必须确认前 3 字节是 239,187,191**。

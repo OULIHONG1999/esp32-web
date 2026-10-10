@@ -82,6 +82,22 @@
   - GET /tools/device-sim/index.js · /tools/device-sim/lib.js
   - 用法: node index.js --server http://HOST --devices 3 --interval 5（--help 看全部参数）
 
+## coredump 崩溃上报（服务器 + 页面已实现；设备端为上传方）
+- 一句话: 设备崩溃后开机上传 flash 里的 coredump，服务器落盘 + 幂等排重，页面 `/coredump` 查看/下载，符号化离线完成
+- 页面入口: GET /coredump              (等价 /coredump/、/COREDUMP；独立页，非主 SPA)
+- 机器描述符: GET /coredump.json       (tool_id=coredump-console；接口清单/数据模型/鉴权说明)
+- 三端契约: GET /docs/coredump.md      (设备端/服务端/页面唯一契约)
+- 设备端设计: GET /docs/coredump-upload.md (设备端检测/上传流程与 NVS 签名)
+- 接口:
+  - POST /api/devices/{deviceId}/coredump   (上报 · 免鉴权 · 二进制 body；query sha256/size/fw + header X-Panic-Reason/X-Exc-Task/X-App-Elf-Sha256 等)
+  - GET  /api/coredumps                     (全部崩溃列表 · 公开只读)
+  - GET  /api/devices/{deviceId}/coredumps  (单设备列表 · 公开只读)
+  - GET  /api/coredumps/{id}                (单条详情 · 公开只读)
+  - GET  /api/coredumps/{id}/download       (下载原始 dump · 公开只读)
+- 约定: 幂等键 `(deviceId, sha256)`——重复上传返回 `duplicate:true` 不重复入库；sha256 是「原始 body 字节」签名、服务器重算校验(不符 400)；
+  dump 落盘 `server-data/coredumps/<sha256>.bin`；每设备 retention 20 条(超出自动淘汰)；`receivedAt` 为准(崩溃绝对时间不可还原)；
+  符号化离线(`espcoredump.py` + 匹配固件 ELF)，页面只做收集/查看/下载
+
 ## 推送固件到指定设备（设备开发机 CLI，零依赖）
 - 一句话: 一条命令 = 发布（可选）+ 下发给**一台**指定设备 + 等结果 + 打印过程（退出码可分流）
 - 机器描述: GET /push.json            (tool_id=push-cli；参数/退出码/闸门/JSON 输出)
@@ -106,6 +122,8 @@
 - 设计与数据模型: /docs/FIRMWARE-REGISTRY.md
 - **设备接入指南(单片机侧接入 OTA 服务器)**: /docs/DEVICE-OTA.md
 - OTA 三端设计契约(设备/云端/页面): /docs/ota.md
+- **崩溃上报三端契约(设备/云端/页面)**: /docs/coredump.md
+- **崩溃上报设备端设计(检测/上传流程)**: /docs/coredump-upload.md
 - **推送固件到指定设备(设计+操作+AI 面)**: /docs/PUSH-TO-DEVICE.md
 - 验收清单(F-01..F-24): /docs/REQUIREMENTS.md
 - CLI 源码: /tools/publish/index.js (及 once/lib/watch/push/pushlib 同目录)
@@ -121,4 +139,7 @@
 - curl http://firmware.example.com/docs/ota.md             # OTA 设计契约
 - curl http://firmware.example.com/push.json               # 推送 CLI 机器描述符(参数/退出码/闸门)
 - curl http://firmware.example.com/docs/PUSH-TO-DEVICE.md  # 推送固件到指定设备(设计与操作)
+- curl http://firmware.example.com/coredump.json           # 崩溃上报台机器描述符
+- curl http://firmware.example.com/docs/coredump.md        # 崩溃上报三端契约
+- curl http://firmware.example.com/api/coredumps           # 全部崩溃列表(含下载链接)
 - curl https://firmware.example.com/api/registry           # HTTPS 也可(自签证书)

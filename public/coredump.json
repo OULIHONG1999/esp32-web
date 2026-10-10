@@ -1,0 +1,130 @@
+{
+  "tool_id": "coredump-console",
+  "name": "Coredump Console",
+  "name_zh": "崩溃上报台",
+  "version": "0.1.0",
+  "status": "server endpoints + page implemented; device side (firmware on another machine) is the uploader — see /docs/coredump-upload.md",
+  "description": "Web console for ESP32 crash-dump collection: list coredumps uploaded by devices on boot, show panic reason / crashing task / firmware version / receive time, and download the raw dump for offline symbolization. All data comes from the live API — no mock data. Upload is device-side (no Bearer token; the MAC is the identity). The server stores raw bytes to disk keyed by sha256 and dedups on (deviceId, sha256).",
+  "description_zh": "ESP32 崩溃转储收集台：查看设备开机上传的 coredump 列表（崩溃原因/崩溃任务/固件版本/接收时间），下载原始 dump 供离线符号化。数据全部来自服务器实时接口，页面内无假数据；上报由设备端完成（免鉴权，MAC 即身份）；服务器按 sha256 落盘、按 (deviceId, sha256) 幂等排重。",
+  "canonical_path": "/coredump",
+  "canonical_path_aliases": ["/coredump/", "/COREDUMP", "/COREDUMP/"],
+  "canonical_url_hint": "Share the full base URL including the path /coredump (host is the shared firmware-server)",
+  "entrypoints": {
+    "page": "/coredump",
+    "descriptor_json": "/coredump.json",
+    "contract_doc": "/docs/coredump.md",
+    "device_side_doc": "/docs/coredump-upload.md",
+    "agent_index": "/llms.txt",
+    "home": "/"
+  },
+  "read_order_for_ai": [
+    "/coredump.json",
+    "/docs/coredump.md",
+    "/docs/coredump-upload.md",
+    "/coredump"
+  ],
+  "read_order_for_human": [
+    "/coredump",
+    "/docs/coredump.md"
+  ],
+  "apis": {
+    "upload": {
+      "method": "POST",
+      "path": "/api/devices/{deviceId}/coredump",
+      "auth": "device-side (no Bearer token by design — the MAC is the identity)",
+      "content_type": "application/octet-stream (raw dump bytes as body)",
+      "query": {
+        "sha256": "required — sha256 of the raw body bytes (64 hex)",
+        "size": "optional — byte count; if given must equal body length",
+        "fw": "optional — firmwareVersion, <=128 chars"
+      },
+      "headers": {
+        "X-Panic-Reason": "optional — urlencoded panic reason (<=2KB), server decodes it",
+        "X-Exc-Task": "optional — crashing task name <=128",
+        "X-Exc-Pc": "optional — <=32, e.g. 0x42001234",
+        "X-App-Elf-Sha256": "optional — sha256 of the crashing app ELF (64 hex), for symbolization",
+        "X-Chip": "optional — <=32",
+        "X-Sdk-Version": "optional — <=64"
+      },
+      "returns": "{ ok: true, id: 'cdump_...', duplicate: false } or { ok: true, id: '<existing id>', duplicate: true }",
+      "implemented": true,
+      "errors": {
+        "400": "bad deviceId / sha256 missing or not 64 hex / empty body / sha256 does not match body / size mismatch",
+        "413": "body exceeds 64K"
+      },
+      "note": "at-least-once semantics: the server dedups on (deviceId, sha256) and returns duplicate:true on repeat, so a retry after a lost ack does not create a second record. sha256 is recomputed from the body and must match — this also guards against transmission corruption and naive spoofing."
+    },
+    "list": {
+      "method": "GET",
+      "path": "/api/coredumps",
+      "auth": "none (read)",
+      "returns": "{ _meta: { service, docs, maxPerDevice }, coredumps: Coredump[] } — newest first, each with downloadUrl",
+      "implemented": true
+    },
+    "list_by_device": {
+      "method": "GET",
+      "path": "/api/devices/{deviceId}/coredumps",
+      "auth": "none (read)",
+      "returns": "{ deviceId, coredumps: Coredump[] }",
+      "implemented": true
+    },
+    "detail": {
+      "method": "GET",
+      "path": "/api/coredumps/{id}",
+      "auth": "none (read)",
+      "returns": "{ coredump: Coredump }",
+      "implemented": true,
+      "errors": { "400": "bad id", "404": "not found" }
+    },
+    "download": {
+      "method": "GET",
+      "path": "/api/coredumps/{id}/download",
+      "auth": "none (read)",
+      "returns": "raw dump bytes (application/octet-stream + Content-Disposition)",
+      "implemented": true,
+      "errors": { "400": "bad id", "404": "not found / dump file missing on server" }
+    }
+  },
+  "data_model": {
+    "Coredump": {
+      "id": "string, e.g. cdump_a1b2c3d4 (server-generated)",
+      "deviceId": "base MAC lower-hex 12 chars, e.g. 3485a1b2c3d4",
+      "sha256": "sha256 of the raw body bytes (64 hex) — the dedup key",
+      "size": "number — byte count",
+      "firmwareVersion": "string | null",
+      "panicReason": "string | null — already decoded on the server",
+      "excTask": "string | null — crashing task name",
+      "excPc": "string | null",
+      "appElfSha256": "string | null — crashing app ELF sha256, for symbolization",
+      "chip": "string | null",
+      "sdkVersion": "string | null",
+      "receivedAt": "ISO8601 UTC — receive time (the crash absolute time is NOT recoverable from the dump)",
+      "downloadUrl": "string — /api/coredumps/{id}/download (absolute when listed via the page)"
+    }
+  },
+  "invariants": [
+    "at-least-once upload; server dedups on (deviceId, sha256) and returns duplicate:true",
+    "sha256 is the signature of the raw body bytes; server recomputes and rejects mismatch (400)",
+    "dump bytes are stored to disk as <sha256>.bin — not embedded in the JSON store",
+    "retention: at most 20 coredumps per device; oldest evicted together with its dump file",
+    "receive time (receivedAt) is the only trustworthy timestamp — the dump has no wall-clock time",
+    "symbolization is offline (espcoredump.py + matching app ELF), never in the page"
+  ],
+  "auth": {
+    "upload_unauthenticated": true,
+    "read_public": true,
+    "upload_guards": "deviceId whitelist (12 lower-hex), body <= 64K, sha256 must match body — three hard checks against disk flooding over the unauthenticated binary endpoint",
+    "known_trust_boundary": "over plain HTTP anyone can spoof any deviceId to upload fake data (same existing limitation as the OTA report endpoint)"
+  },
+  "data_source": {
+    "mode": "live only",
+    "endpoints": ["GET /api/coredumps"],
+    "poll_interval_ms": 5000,
+    "mock": "none — the page contains no built-in fake data"
+  },
+  "not_implemented": [
+    "online symbolization in the page (offline only, see /docs/coredump.md §7)",
+    "device-side firmware uploader (lives in another repository; see /docs/coredump-upload.md)",
+    "automatic symbol matching against the registry (appElfSha256 is stored but not yet auto-resolved)"
+  ]
+}
