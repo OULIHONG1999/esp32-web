@@ -112,6 +112,19 @@
   读公开（设备无凭据下载）、写需 Bearer；下载始终 attachment；存储 server-data/drive/<fileId> + index.json
 - 与 fetch 衔接: 云盘下载 url 直接填进 fetch 命令的 url 字段（设备落盘 /fs 或 /sdcard）；设备单次 ≤4MB
 
+## fetch 命令通道（下发文件到设备；服务器已实现，设备端固件在另一台电脑）
+- 一句话: 下发一条命令让设备从任意 HTTP 源下载一个文件到 /fs 或 /sdcard（目录自动逐级建、同名覆盖）
+- 契约: GET /docs/fetch-channel/README.md   (三方对齐契约，§3 单一事实来源；01 设备端 / 02 服务器端 / 03 云盘需求)
+- 接口: POST /api/devices/{deviceId}/commands  (type:"fetch" · 需 Bearer；复用现有命令通道，无新端点)
+- 载荷: {"type":"fetch","url":"http://...","dest":"/fs/...或/sdcard/...","maxBytes":262144}
+- 信封(设备在 report 响应里拿到): {id,type,url,dest,maxBytes,createdAt} 六字段
+- 约定: url 仅 http:// 且 ≤256；dest 白名单 /fs/、/sdcard/（仅 ASCII 可打印、无 ..、≤127）；
+  maxBytes 缺省 262144、上限 4194304（越界取边界而非报错）；设备在线 45s 窗口（离线 412 不入队）；
+  每设备一条未决（冲突 409，可 force 顶替）；回执 POST …/result {state:success|failed, detail}；
+  未回执会重复投递（fetch 幂等=重复覆盖同一文件，无害）；fetch 与 OTA 共用未决位、不并发
+- 文件源: 云盘 /api/drive/files/{fileId}（推荐）或 /files/<path>（静态托管）
+- 回执/状态/撤销: 复用 OTA 命令通道（POST …/result、GET …/commands/{id}、POST …/cancel 全部通用）
+
 ## 推送固件到指定设备（设备开发机 CLI，零依赖）
 - 一句话: 一条命令 = 发布（可选）+ 下发给**一台**指定设备 + 等结果 + 打印过程（退出码可分流）
 - 机器描述: GET /push.json            (tool_id=push-cli；参数/退出码/闸门/JSON 输出)
