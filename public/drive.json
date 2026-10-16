@@ -1,0 +1,109 @@
+{
+  "tool_id": "drive-console",
+  "name": "Cloud Drive",
+  "name_zh": "云盘",
+  "version": "0.1.0",
+  "status": "implemented — server endpoints + page live; this is the recommended file source for the fetch command channel",
+  "description": "Cloud file repository for the device + agent + human collaboration loop: upload arbitrary files (JSON/font/audio/image/doc), devices download them via a fetch command into /fs or /sdcard, agents and humans download/inspect them over HTTP. All data comes from the live API — no mock data. Write (upload/delete) requires a Bearer token; read (list/download/meta) is public so devices can download without credentials.",
+  "description_zh": "设备 + 智能体 + 人协作体系的共享文件仓库：上传任意文件到云端，设备经 fetch 命令下载安装到 /fs 或 /sdcard，智能体/人经 HTTP 下载查看。数据全部来自服务器实时接口，页面内无假数据；写操作（上传/删除）需 Bearer token，读操作（列表/下载/元数据）公开（设备端无凭据下载）。",
+  "canonical_path": "/drive",
+  "canonical_path_aliases": ["/drive/", "/DRIVE", "/DRIVE/"],
+  "canonical_url_hint": "Share the full base URL including the path /drive (host is the shared firmware-server)",
+  "entrypoints": {
+    "page": "/drive",
+    "descriptor_json": "/drive.json",
+    "contract_doc": "/docs/cloud-drive.md",
+    "agent_index": "/llms.txt",
+    "home": "/"
+  },
+  "read_order_for_ai": [
+    "/drive.json",
+    "/docs/cloud-drive.md",
+    "/drive"
+  ],
+  "read_order_for_human": [
+    "/drive",
+    "/docs/cloud-drive.md"
+  ],
+  "apis": {
+    "upload": {
+      "method": "POST",
+      "path": "/api/drive/files",
+      "auth": "Bearer (master or work token)",
+      "content_type": "multipart/form-data (field `file` + optional `note`) OR raw body + X-Filename header (optional X-Note)",
+      "returns": "{ file: DriveFile } — fileId, name, size, note, createdAt, url",
+      "implemented": true,
+      "errors": {
+        "400": "no file field / empty body / missing X-Filename",
+        "401": "bad or missing token",
+        "413": "file exceeds 8 MB or drive total quota (1 GB) exceeded"
+      },
+      "note": "display name is sanitized server-side (control chars, path separators, '..' removed); bytes are stored as <fileId>, never by the user-supplied name."
+    },
+    "list": {
+      "method": "GET",
+      "path": "/api/drive/files",
+      "auth": "none (read)",
+      "returns": "{ _meta: { docs, maxFileBytes, maxTotalBytes, totalBytes }, files: DriveFile[] } — newest first",
+      "implemented": true
+    },
+    "download": {
+      "method": "GET",
+      "path": "/api/drive/files/{fileId}",
+      "auth": "none (read)",
+      "returns": "raw bytes; Content-Type by extension, always Content-Disposition: attachment",
+      "implemented": true,
+      "errors": { "400": "bad fileId", "404": "not found / file missing on server" }
+    },
+    "meta": {
+      "method": "GET",
+      "path": "/api/drive/files/{fileId}?meta=1",
+      "auth": "none (read)",
+      "returns": "{ file: DriveFile }",
+      "implemented": true
+    },
+    "delete": {
+      "method": "DELETE",
+      "path": "/api/drive/files/{fileId}",
+      "auth": "Bearer (master or work token)",
+      "returns": "{ ok: true, removed: true|false } — idempotent (repeat DELETE → 200 removed:false)",
+      "implemented": true,
+      "errors": { "400": "bad fileId", "401": "bad or missing token" }
+    }
+  },
+  "data_model": {
+    "DriveFile": {
+      "fileId": "string, e.g. f_1a2b3c4d (server-generated)",
+      "name": "string — display name (sanitized; never used as a disk path)",
+      "size": "number — byte count",
+      "note": "string | null — optional note",
+      "createdAt": "ISO8601 UTC",
+      "url": "string — /api/drive/files/{fileId} (absolute when listed via the page)"
+    }
+  },
+  "invariants": [
+    "bytes stored as dataDir/drive/<fileId>; display name sanitized (control chars, path separators, '..' removed) and never used as a path",
+    "single file <= 8 MB; total <= 1 GB — over → 413",
+    "read (list/download/meta) public; write (upload/delete) requires Bearer",
+    "download always Content-Disposition: attachment — HTML/SVG never inline-executed",
+    "delete idempotent (repeat DELETE → 200 removed:false); removes both the disk file and the metadata",
+    "the download url is the recommended `url` for the fetch command channel (docs/fetch-channel/README.md §3)"
+  ],
+  "auth": {
+    "write_requires_bearer": true,
+    "read_public": true,
+    "known_trust_boundary": "read is open by design because the device downloads over net::http_get without any token; private files would need signed URLs (v2)"
+  },
+  "data_source": {
+    "mode": "live only",
+    "endpoints": ["GET /api/drive/files"],
+    "poll_interval_ms": 5000,
+    "mock": "none — the page contains no built-in fake data"
+  },
+  "not_implemented": [
+    "rename / note update (F6, P2)",
+    "multi-user / multi-tenant, directory hierarchy (flat storage only)",
+    "versioning, dedup, resumable upload",
+    "signed URLs for private files (v2)"
+  ]
+}

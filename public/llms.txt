@@ -98,6 +98,20 @@
   dump 落盘 `server-data/coredumps/<sha256>.bin`；每设备 retention 20 条(超出自动淘汰)；`receivedAt` 为准(崩溃绝对时间不可还原)；
   符号化离线(`espcoredump.py` + 匹配固件 ELF)，页面只做收集/查看/下载
 
+## 云盘（设备 + 智能体共享文件仓库；服务器 + 页面已实现）
+- 一句话: 上传任意文件到云端，设备经 fetch 命令下载到 /fs 或 /sdcard，智能体/人经 HTTP 下载查看
+- 页面入口: GET /drive                (等价 /drive/、/DRIVE；独立页，非主 SPA)
+- 机器描述符: GET /drive.json         (tool_id=drive-console；接口清单/数据模型/鉴权说明)
+- 契约: GET /docs/cloud-drive.md      (API/数据模型/限额/与 fetch 衔接)
+- 接口:
+  - POST   /api/drive/files           (上传 · 需 Bearer；multipart file+note 或 raw body + X-Filename)
+  - GET    /api/drive/files           (列表 · 公开只读)
+  - GET    /api/drive/files/{fileId}  (下载 · 公开只读；?meta=1 返回元数据)
+  - DELETE /api/drive/files/{fileId}  (删除 · 需 Bearer · 幂等)
+- 约定: fileId = f_+8hex（服务端生成，与展示名解耦）；单文件 ≤8MB、总配额 1GB（超额 413）；
+  读公开（设备无凭据下载）、写需 Bearer；下载始终 attachment；存储 server-data/drive/<fileId> + index.json
+- 与 fetch 衔接: 云盘下载 url 直接填进 fetch 命令的 url 字段（设备落盘 /fs 或 /sdcard）；设备单次 ≤4MB
+
 ## 推送固件到指定设备（设备开发机 CLI，零依赖）
 - 一句话: 一条命令 = 发布（可选）+ 下发给**一台**指定设备 + 等结果 + 打印过程（退出码可分流）
 - 机器描述: GET /push.json            (tool_id=push-cli；参数/退出码/闸门/JSON 输出)

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>云盘 — 设备与智能体共享文件仓库</title>
+
+<meta name="description" content="云端文件仓库：上传任意文件（JSON/字体/音频/图片/文档），设备经 fetch 命令下载安装到 /fs 或 /sdcard，智能体经 HTTP 下载查看。API 契约见 /docs/cloud-drive.md，机器描述符见 /drive.json。" />
+<meta name="drive:canonical-path" content="/drive" />
+<meta name="drive:agent-descriptor" content="/drive.json" />
+<meta name="drive:api-contract-doc" content="/docs/cloud-drive.md" />
+<meta name="drive:agent-index" content="/llms.txt" />
+<link rel="alternate" type="application/json" href="/drive.json" title="drive tool descriptor" />
+<link rel="stylesheet" href="/drive/drive.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__in">
+    <a class="brand" href="/drive">
+      <span class="brand__sq" aria-hidden="true"></span>
+      <span>云盘</span>
+      <code class="brand__path">/drive</code>
+    </a>
+    <nav class="topbar__nav">
+      <a href="#upload">上传</a>
+      <a href="#files">文件</a>
+      <a href="#ai">AI 速读</a>
+      <a href="/docs/cloud-drive.md">文档</a>
+      <a href="/drive.json">drive.json</a>
+    </nav>
+    <div class="topbar__ops">
+      <input class="token" id="tokenInput" type="password" placeholder="Bearer token（上传/删除用）" autocomplete="off" />
+      <button class="iconbtn" id="refreshBtn" title="立即刷新">↻</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── AI 速读 ──────────────────────────────────────────── -->
+  <section class="panel panel--ai" id="ai">
+    <div class="panel__hd">
+      <h2>AI 速读 · 本页是什么</h2>
+      <span class="hint">机器可读描述符 <a href="/drive.json"><code>/drive.json</code></a></span>
+    </div>
+    <p class="lead">
+      本页是<strong>云盘</strong>：宿主机/智能体把任意文件上传到云端，设备经 <code>fetch</code> 命令下载安装到
+      <code>/fs</code> 或 <code>/sdcard</code>，智能体/人经 HTTP 直接下载查看。数据<strong>全部来自服务器实时接口</strong>（无本地假数据），每 5 秒轮询。
+    </p>
+    <div class="ai-grid">
+      <div class="ai-col">
+        <h3>接口（契约详见 <a href="/docs/cloud-drive.md">/docs/cloud-drive.md</a> §4）</h3>
+        <ul class="ai-api">
+          <li><code>POST /api/drive/files</code><span>上传 · 需 Bearer（multipart file+note 或 raw body + X-Filename）</span></li>
+          <li><code>GET  /api/drive/files</code><span>列表 · 公开只读</span></li>
+          <li><code>GET  /api/drive/files/{fileId}</code><span>下载原始字节 · 公开只读（?meta=1 返回元数据）</span></li>
+          <li><code>DELETE /api/drive/files/{fileId}</code><span>删除 · 需 Bearer · 幂等</span></li>
+        </ul>
+      </div>
+      <div class="ai-col">
+        <h3>命名与约定</h3>
+        <dl class="ai-kv">
+          <div><dt>fileId</dt><dd>服务端生成 <code>f_xxxxxxxx</code>，与用户文件名解耦，落盘 <code>server-data/drive/&lt;fileId&gt;</code></dd></div>
+          <div><dt>下载 URL</dt><dd><code>/api/drive/files/{fileId}</code>——直接填进 fetch 命令的 <code>url</code></dd></div>
+          <div><dt>单文件上限</dt><dd>8 MB；总配额 1 GB（超额 413）</dd></div>
+          <div><dt>读 / 写</dt><dd>读（列表/下载）开放——设备端无凭据下载；写（上传/删除）需 Bearer token</dd></div>
+        </dl>
+      </div>
+    </div>
+    <p class="foot-note">
+      推荐抓取顺序：<code>/drive.json</code> → <code>/docs/cloud-drive.md</code> → 本页。
+      与 fetch 通道衔接见 <a href="/docs/cloud-drive.md">契约 §7</a>。
+    </p>
+  </section>
+
+  <!-- ── 上传 ──────────────────────────────────────────── -->
+  <section class="panel" id="upload">
+    <div class="panel__hd">
+      <h2>上传文件</h2>
+      <span class="hint">multipart（file + note）· 写操作需 Bearer token</span>
+    </div>
+    <div class="upload">
+      <input type="file" id="fileInput" />
+      <input type="text" id="noteInput" placeholder="备注（可选，如「vanim 动画 robot」）" />
+      <button class="btn btn--p" id="uploadBtn">上传</button>
+    </div>
+    <p class="upload-msg" id="uploadMsg" hidden></p>
+  </section>
+
+  <!-- ── 概览胶囊 ──────────────────────────────────────────── -->
+  <section class="pills" aria-label="云盘概览">
+    <div class="pill"><span class="m">文件数</span><b id="fTotal">0</b></div>
+    <div class="pill"><span class="m">总大小</span><b id="fBytes">0 B</b></div>
+    <div class="pill"><span class="m">最近上传</span><b id="fLast" class="pill--time">—</b></div>
+    <div class="pill pill--src"><span class="m">数据源</span><b id="connState">连接中…</b></div>
+  </section>
+
+  <!-- ── 文件清单 ──────────────────────────────────────────── -->
+  <section id="files">
+    <div class="eyebrow">
+      <span>文件</span>
+      <span class="eyebrow__right">轮询 <b id="pollLabel">5s</b> · 上次刷新 <b id="lastRefresh">—</b></span>
+    </div>
+    <div class="files" id="listBody"></div>
+    <p class="empty" id="listEmpty" hidden>
+      暂无文件。上传一个文件就会出现在这里；设备端下载走 fetch 命令（契约见 <a href="/docs/cloud-drive.md">/docs/cloud-drive.md</a> §7）。
+    </p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span>云盘 · 独立页（非主 SPA）· 服务器 firmware-server</span>
+  <span>
+    <a href="/drive.json">/drive.json</a> ·
+    <a href="/docs/cloud-drive.md">/docs/cloud-drive.md</a> ·
+    <a href="/llms.txt">/llms.txt</a> ·
+    <a href="/">返回主站</a>
+  </span>
+</footer>
+
+<script type="application/json" id="ai-data">
+{
+  "page": "云盘",
+  "canonical_path": "/drive",
+  "aliases": ["/drive/", "/DRIVE"],
+  "purpose": "云端文件仓库：上传任意文件，设备经 fetch 命令下载安装到 /fs 或 /sdcard，智能体/人经 HTTP 下载查看",
+  "descriptor": "/drive.json",
+  "contract_doc": "/docs/cloud-drive.md",
+  "agent_index": "/llms.txt",
+  "apis": {
+    "upload": { "method": "POST", "path": "/api/drive/files", "auth": "Bearer", "note": "multipart (file + note) or raw body + X-Filename" },
+    "list": { "method": "GET", "path": "/api/drive/files", "auth": "none", "returns": "{ _meta, files: DriveFile[] }" },
+    "download": { "method": "GET", "path": "/api/drive/files/{fileId}", "auth": "none", "returns": "raw bytes (Content-Type by extension, attachment)" },
+    "meta": { "method": "GET", "path": "/api/drive/files/{fileId}?meta=1", "auth": "none", "returns": "{ file: DriveFile }" },
+    "delete": { "method": "DELETE", "path": "/api/drive/files/{fileId}", "auth": "Bearer", "returns": "{ ok, removed } — idempotent" }
+  },
+  "data_model": {
+    "DriveFile": {
+      "fileId": "f_<8 hex> (server-generated)",
+      "name": "display name (sanitized: control chars / path separators / .. removed)",
+      "size": "bytes",
+      "note": "string | null",
+      "createdAt": "ISO8601 UTC",
+      "url": "string — /api/drive/files/{fileId} (absolute when listed via the page)"
+    }
+  },
+  "invariants": [
+    "file bytes stored as dataDir/drive/<fileId>, name is display-only (never used as a path)",
+    "single file <= 8 MB; total <= 1 GB (quota) — over → 413",
+    "read (list/download/meta) public; write (upload/delete) requires Bearer",
+    "download always Content-Disposition: attachment (HTML/SVG never inline-executed)",
+    "delete is idempotent (repeat DELETE → 200 removed:false)",
+    "this is the recommended file source for the fetch command channel (fetch url = download url)"
+  ],
+  "data_source": { "mode": "live only", "endpoints": ["GET /api/drive/files"], "poll_interval_ms": 5000, "mock": "none" },
+  "auth": { "write_requires_bearer": true, "read_public": true, "note": "device downloads must not require credentials (net::http_get carries no token)" },
+  "not_implemented": ["rename / note update (F6)", "multi-user / multi-tenant", "directory hierarchy (flat storage)", "versioning / dedup / resumable upload", "signed URLs for private files"]
+}
+</script>
+
+<script src="/drive/drive.js"></script>
+</body>
+</html>

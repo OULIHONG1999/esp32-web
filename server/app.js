@@ -41,6 +41,23 @@ import {
   upsertReport,
   writeDeviceStoreAtomic,
 } from './devices.js'
+import {
+  DRIVE_FILE_ID_RE,
+  MAX_DRIVE_FILE_BYTES,
+  MAX_DRIVE_TOTAL_BYTES,
+  addDriveFile,
+  driveFileById,
+  driveFilePath,
+  driveFileView,
+  listDriveViews,
+  newFileId,
+  readDriveStore,
+  removeDriveFile,
+  sanitizeName,
+  totalDriveBytes,
+  writeDriveStoreAtomic,
+} from './drive.js'
+import { parseMultipart } from './multipart.js'
 import { handlePublish } from './publish.js'
 import { applyRetention, previewRetention, promoteRelease, setLatest, setRetention } from './releases.js'
 import { readRegistry, registryPath, upsertSubscribed, writeRegistryAtomic } from './registry.js'
@@ -185,7 +202,9 @@ function servePart(dataDir, urlPath, res) {
 
 /** 独立页路径归一：/OTA、/OTA/… → /ota（Linux 大小写敏感，显式归一保证 /OTA 可访问） */
 function normalizePagePath(urlPath) {
-  return /^\/ota(\/|$)/i.test(urlPath) ? '/ota' + urlPath.slice(4) : urlPath
+  if (/^\/ota(\/|$)/i.test(urlPath)) return '/ota' + urlPath.slice(4)
+  if (/^\/drive(\/|$)/i.test(urlPath)) return '/drive' + urlPath.slice(6)
+  return urlPath
 }
 
 /** 客户端 IP：优先 nginx 转发的 X-Forwarded-For，退化到 socket（去掉 IPv6 映射前缀） */
@@ -758,6 +777,105 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
             'Cache-Control': 'no-cache',
           })
           return res.end(data)
+        }
+
+        // ---- 云盘（docs/cloud-drive.md §4–§5；写需 Bearer，读公开）----
+        // 上传：multipart（file + 可选 note）或 raw body + X-Filename 头
+        if (req.method === 'POST' && p === '/api/drive/files') {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const body = await collectBody(req, MAX_DRIVE_FILE_BYTES + 1024 * 1024)
+          const ctype = String(req.headers['content-type'] ?? '')
+          let name
+          let note = null
+          let data
+          if (ctype.includes('multipart/form-data')) {
+            const parsed = parseMultipart(body, ctype)
+            const file = parsed.files.find((f) => f.field === 'file') ?? parsed.files[0]
+            if (!file) return send(res, 400, { error: 'file field required' })
+            data = file.data
+            name = file.filename || parsed.fields.get('name') || ''
+            note = parsed.fields.get('note') || null
+          } else {
+            name = headerText(req, 'x-filename', 200)
+            if (!name) {
+              return send(res, 400, { error: 'X-Filename header required (or send multipart with a file field)' })
+            }
+            note = headerText(req, 'x-note', 500)
+            data = body
+          }
+          if (!data || data.length === 0) return send(res, 400, { error: 'empty file body' })
+          if (data.length > MAX_DRIVE_FILE_BYTES) {
+            return send(res, 413, { error: `file exceeds ${MAX_DRIVE_FILE_BYTES} bytes` })
+          }
+          const store = readDriveStore(dataDir)
+          if (totalDriveBytes(store) + data.length > MAX_DRIVE_TOTAL_BYTES) {
+            return send(res, 413, { error: 'drive quota exceeded' })
+          }
+          const fileId = newFileId()
+          const filePath = driveFilePath(dataDir, fileId)
+          fs.mkdirSync(path.dirname(filePath), { recursive: true })
+          const tmp = filePath + '.tmp'
+          fs.writeFileSync(tmp, data)
+          fs.renameSync(tmp, filePath)
+          const record = {
+            fileId,
+            name: sanitizeName(name),
+            size: data.length,
+            note: note ? note.slice(0, 500) : null,
+            createdAt: new Date().toISOString(),
+          }
+          writeDriveStoreAtomic(dataDir, addDriveFile(store, record))
+          return send(res, 200, { file: driveFileView(record, baseUrlOf(req)) })
+        }
+
+        // 列表（公开只读）
+        if (req.method === 'GET' && p === '/api/drive/files') {
+          const store = readDriveStore(dataDir)
+          return send(res, 200, {
+            _meta: {
+              service: 'firmware-server',
+              docs: '/docs/cloud-drive.md',
+              maxFileBytes: MAX_DRIVE_FILE_BYTES,
+              maxTotalBytes: MAX_DRIVE_TOTAL_BYTES,
+              totalBytes: totalDriveBytes(store),
+            },
+            files: listDriveViews(store, baseUrlOf(req)),
+          })
+        }
+
+        // 单文件：?meta=1 返回元数据，否则下载原始字节
+        const driveOneM = /^\/api\/drive\/files\/([^/]+)$/.exec(p)
+        if (req.method === 'GET' && driveOneM) {
+          const fileId = driveOneM[1]
+          if (!DRIVE_FILE_ID_RE.test(fileId)) return send(res, 400, { error: 'bad fileId' })
+          const rec = driveFileById(readDriveStore(dataDir), fileId)
+          if (!rec) return send(res, 404, { error: 'file not found', fileId })
+          if (url.searchParams.get('meta') === '1') {
+            return send(res, 200, { file: driveFileView(rec, baseUrlOf(req)) })
+          }
+          const filePath = driveFilePath(dataDir, fileId)
+          if (!fs.existsSync(filePath)) return send(res, 404, { error: 'file missing on server', fileId })
+          const data = fs.readFileSync(filePath)
+          const ext = path.extname(rec.name).toLowerCase()
+          res.writeHead(200, {
+            'Content-Type': MIME[ext] ?? 'application/octet-stream',
+            'Content-Length': String(data.length),
+            'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(rec.name)}`,
+            'Cache-Control': 'no-cache',
+          })
+          return res.end(data)
+        }
+
+        // 删除（Bearer；幂等——重复删除也 200，removed 区分是否真删了东西）
+        if (req.method === 'DELETE' && driveOneM) {
+          if (!authOk(req)) return send(res, 401, { error: 'unauthorized' })
+          const fileId = driveOneM[1]
+          if (!DRIVE_FILE_ID_RE.test(fileId)) return send(res, 400, { error: 'bad fileId' })
+          const removed = removeDriveFile(readDriveStore(dataDir), fileId)
+          if (!removed.removed) return send(res, 200, { ok: true, removed: false })
+          writeDriveStoreAtomic(dataDir, removed.store)
+          fs.rmSync(driveFilePath(dataDir, fileId), { force: true })
+          return send(res, 200, { ok: true, removed: true })
         }
 
         if (req.method === 'GET' && p.startsWith('/api/registry/projects/')) {
