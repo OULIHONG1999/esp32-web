@@ -23,6 +23,10 @@ export const DEVICE_ID_RE = /^[0-9a-f]{12}$/
 /** 命令 ID 白名单（用于回执路径段校验） */
 export const COMMAND_ID_RE = /^cmd_[0-9a-f]{4,16}$/
 
+/** fetch 命令：maxBytes 缺省与上限（docs/fetch-channel/README.md §3.1） */
+export const FETCH_DEFAULT_MAX_BYTES = 262144
+export const FETCH_MAX_BYTES = 4194304
+
 /** 允许设备上报的字段（白名单，未列出的忽略） */
 const PATCH_FIELDS = [
   'chip',
@@ -89,6 +93,45 @@ export function writeDeviceStoreAtomic(dataDir, store) {
 
 export function newCommandId() {
   return 'cmd_' + crypto.randomBytes(3).toString('hex')
+}
+
+/**
+ * 校验并构建 fetch 命令（docs/fetch-channel/README.md §3.1）。
+ * 服务端与设备端同规则做纵深防御：dest 白名单只有 /fs/ 与 /sdcard/ 两棵子树，
+ * url 仅明文 http://，maxBytes 越界取边界而非报错。
+ * 返回 { command } 或 { error }。
+ */
+export function buildFetchCommand(wanted, now) {
+  const url = wanted.url
+  if (typeof url !== 'string' || !/^http:\/\//.test(url) || url.length > 256) {
+    return { error: 'bad url' }
+  }
+  const dest = wanted.dest
+  if (typeof dest !== 'string' || !/^\/(fs|sdcard)\//.test(dest)) {
+    return { error: 'bad dest: must start with /fs/ or /sdcard/' }
+  }
+  if (dest.length > 127 || !/^[\x20-\x7E]+$/.test(dest) || dest.includes('..')) {
+    return { error: 'bad dest: illegal path' }
+  }
+  let maxBytes = FETCH_DEFAULT_MAX_BYTES
+  if (wanted.maxBytes !== undefined && wanted.maxBytes !== null) {
+    if (typeof wanted.maxBytes !== 'number' || !Number.isFinite(wanted.maxBytes)) {
+      return { error: 'bad maxBytes' }
+    }
+    maxBytes = Math.max(1, Math.min(FETCH_MAX_BYTES, Math.round(wanted.maxBytes)))
+  }
+  return {
+    command: {
+      id: newCommandId(),
+      type: 'fetch',
+      url,
+      dest,
+      maxBytes,
+      state: 'pending',
+      deliveryCount: 0,
+      createdAt: now,
+    },
+  }
 }
 
 /** 纯函数：设备上报 upsert（字段白名单 + 心跳刷新；首次上报建条目） */
@@ -318,13 +361,12 @@ export function applyResult(store, deviceId, commandId, state, detail, now) {
   return { store: next, command: cmd }
 }
 
-/** 命令摘要（列表/回执响应用，不含下载字段） */
+/** 命令摘要（列表/回执响应用，不含下载字段）；fetch 命令不带 releaseId，改带 url/dest/maxBytes */
 export function commandSummary(c) {
   if (!c) return null
-  return {
+  const base = {
     id: c.id,
     type: c.type,
-    releaseId: c.releaseId,
     state: c.state,
     deliveryCount: c.deliveryCount ?? 0,
     createdAt: c.createdAt,
@@ -339,11 +381,26 @@ export function commandSummary(c) {
     wasDelivered: c.wasDelivered ?? null,
     lateResult: c.lateResult ?? null,
   }
+  if (c.type === 'fetch') {
+    return { ...base, url: c.url ?? null, dest: c.dest ?? null, maxBytes: c.maxBytes ?? null }
+  }
+  return { ...base, releaseId: c.releaseId ?? null }
 }
 
 /** 交付给设备的完整命令体（ota.md §4.1；baseUrl 可选，给出绝对地址方便设备直取） */
 export function commandForDevice(c, baseUrl) {
   if (!c) return null
+  // fetch 信封只有六个字段（fetch-channel/README.md §3.2），不带 urlAbsolute 与下载字段
+  if (c.type === 'fetch') {
+    return {
+      id: c.id,
+      type: 'fetch',
+      url: c.url,
+      dest: c.dest,
+      maxBytes: c.maxBytes ?? FETCH_DEFAULT_MAX_BYTES,
+      createdAt: c.createdAt,
+    }
+  }
   const body = {
     id: c.id,
     type: c.type,

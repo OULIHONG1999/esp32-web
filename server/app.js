@@ -25,6 +25,7 @@ import {
   PROGRESS_PHASES,
   applyProgress,
   applyResult,
+  buildFetchCommand,
   cancelCommand,
   commandForDevice,
   commandSummary,
@@ -255,6 +256,32 @@ function serveStatic(distDir, urlPath, res) {
   res.end(data)
 }
 
+/** GET /files/<path>：fetch 命令的 URL 源（docs/fetch-channel/02-server.md §5）。只读，路径即磁盘路径，防穿越。 */
+function serveHostedFile(dataDir, relPath, res) {
+  let rel
+  try {
+    rel = decodeURIComponent(relPath)
+  } catch {
+    return send(res, 400, { error: 'bad path' })
+  }
+  const root = path.resolve(dataDir, 'files')
+  const abs = path.resolve(root, rel)
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    return send(res, 400, { error: 'bad path' })
+  }
+  if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
+    return send(res, 404, { error: 'file not found' })
+  }
+  const ext = path.extname(abs).toLowerCase()
+  const data = fs.readFileSync(abs)
+  res.writeHead(200, {
+    'Content-Type': MIME[ext] ?? 'application/octet-stream',
+    'Content-Length': String(data.length),
+    'Cache-Control': 'no-cache',
+  })
+  res.end(data)
+}
+
 /** 创建 http 请求处理器（deps 注入便于单测） */
 export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
   const hub = createSseHub({ heartbeatMs: sseHeartbeatMs })
@@ -448,29 +475,38 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
           }
           const wanted = await readJsonBody(req, 8 * 1024)
           const type = wanted.type ?? 'ota'
-          if (type !== 'ota') return send(res, 400, { error: 'unsupported command type' })
-          const releaseId = wanted.releaseId
-          if (typeof releaseId !== 'string' || !LIMITS.safeName.test(releaseId)) {
-            return send(res, 400, { error: 'bad releaseId' })
-          }
-          const found = resolveRelease(readRegistry(dataDir), releaseId)
-          if (!found) return send(res, 404, { error: 'release not found', releaseId })
-          const part = pickAppPart(found.release)
-          if (!part) return send(res, 400, { error: 'release has no app part to OTA', releaseId })
           const now = new Date().toISOString()
-          const command = {
-            id: newCommandId(),
-            type: 'ota',
-            releaseId,
-            projectId: found.projectId,
-            variant: found.variant,
-            file: part.file,
-            url: `/api/registry/projects/${found.projectId}/variants/${found.variant}/releases/${releaseId}/parts/${part.file}`,
-            sha256: part.sha256 ?? null,
-            size: part.size ?? null,
-            state: 'pending',
-            deliveryCount: 0,
-            createdAt: now,
+          let command
+          if (type === 'ota') {
+            const releaseId = wanted.releaseId
+            if (typeof releaseId !== 'string' || !LIMITS.safeName.test(releaseId)) {
+              return send(res, 400, { error: 'bad releaseId' })
+            }
+            const found = resolveRelease(readRegistry(dataDir), releaseId)
+            if (!found) return send(res, 404, { error: 'release not found', releaseId })
+            const part = pickAppPart(found.release)
+            if (!part) return send(res, 400, { error: 'release has no app part to OTA', releaseId })
+            command = {
+              id: newCommandId(),
+              type: 'ota',
+              releaseId,
+              projectId: found.projectId,
+              variant: found.variant,
+              file: part.file,
+              url: `/api/registry/projects/${found.projectId}/variants/${found.variant}/releases/${releaseId}/parts/${part.file}`,
+              sha256: part.sha256 ?? null,
+              size: part.size ?? null,
+              state: 'pending',
+              deliveryCount: 0,
+              createdAt: now,
+            }
+          } else if (type === 'fetch') {
+            // fetch 命令：url/dest/maxBytes 由 buildFetchCommand 校验并钳位（服务端与设备端同规则）
+            const built = buildFetchCommand(wanted, now)
+            if (built.error) return send(res, 400, { error: built.error })
+            command = built.command
+          } else {
+            return send(res, 400, { error: 'unsupported command type' })
           }
           const storeBefore = readDeviceStore(dataDir)
           const target = storeBefore.devices[deviceId] ?? null
@@ -729,6 +765,11 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
         }
         if (req.method === 'GET' && p.startsWith('/api/')) {
           return send(res, 404, { error: 'unknown api' })
+        }
+        // 静态文件托管（fetch 命令的 URL 源）：GET /files/<path> ← data/files/（只读，防穿越）
+        const hostedFileM = /^\/files(\/(.*))?$/.exec(p)
+        if (req.method === 'GET' && hostedFileM) {
+          return serveHostedFile(dataDir, hostedFileM[2] ?? '', res)
         }
         if (req.method === 'GET' || req.method === 'HEAD') {
           return serveStatic(distDir, p, res)

@@ -137,3 +137,17 @@ node tools/publish/index.js fetch --to <mac> --url <url> --dest /fs/... [--max-b
 | 2 | `detail` 非法字符 | 原样存储（设备保证 ASCII） |
 | 3 | 静态托管目录的磁盘配额 | 跟随云盘项目（03）统一定，v1 不设 |
 | 4 | 命令持久化的存储位置 | 沿用现状 |
+
+## 9. 实现状态（2026-10-16 已落地）
+
+按 §2 三件事全部完成并上线：
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 命令通道接受 `fetch` | ✅ | `server/app.js` `POST /commands` type 分支；`server/devices.js` `buildFetchCommand()` 校验+钳位 |
+| 服务端参数校验 | ✅ | 同 `buildFetchCommand`：`url` 仅 `http://` ≤256、`dest` 白名单 `/fs/`/`/sdcard/` + ASCII 可打印 + 无 `..` ≤127、`maxBytes` 缺省 262144 / 越界取边界 1..4194304；校验不过 400 |
+| 静态文件托管 | ✅ | `server/app.js` `serveHostedFile()` + `GET /files/<path>` ← `dataDir/files/`（只读、防穿越、Content-Type 按扩展名） |
+
+- 信封六字段、离线 412、冲突 409、未决位、回执、撤销**全部沿用 ota 语义**（fetch 与 ota 共用"每设备一条未决"）。
+- 验收：`tests/fetch.test.js` 19 用例 + 全量 375 全绿；线上部署后外网核验见 PROGRESS 变更日志。
+- **`/files/` 目录尚未放文件**（v1 由运维 SCP 放，首个用例 vanim 预置 JSON 待放）；云盘（`03-cloud-drive.md`）另立项目，本次未做。
