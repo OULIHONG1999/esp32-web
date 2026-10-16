@@ -564,6 +564,16 @@ function dismissGuide(): void {
         <TreeItem v-else icon="○" label="（连接设备后可用）" disabled />
       </TreeSection>
 
+      <!-- 工具：其它独立页入口（新标签打开，不离开烧录页） -->
+      <TreeSection id="sec-tools" title="工具 · 独立页">
+        <div class="nav-links">
+          <a class="nav-link" href="/drive" target="_blank" rel="noopener"><span class="nav-ico">☁</span>云盘</a>
+          <a class="nav-link" href="/OTA" target="_blank" rel="noopener"><span class="nav-ico">⬆</span>OTA 设备台</a>
+          <a class="nav-link" href="/coredump" target="_blank" rel="noopener"><span class="nav-ico">☠</span>崩溃上报台</a>
+          <a class="nav-link" href="/llms.txt" target="_blank" rel="noopener"><span class="nav-ico">¶</span>AI 索引</a>
+        </div>
+      </TreeSection>
+
       <!-- b-ide 侧栏底部卡：服务状态（烧录历史已移入底部面板标签） -->
       <div id="sec-service" class="side-card">
         <div class="side-card__svc" style="border-top: none; margin-top: 0; padding-top: 0">
@@ -1026,6 +1036,37 @@ function dismissGuide(): void {
 .mini:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* ── 侧栏：独立页入口（工具分区） ── */
+.nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4.5px 10px;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.nav-link:hover {
+  background: #2a2d2e;
+  color: var(--accent);
+}
+:root[data-theme='light'] .nav-link:hover {
+  background: #e8e8e8;
+}
+.nav-ico {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.85;
 }
 /* b-ide 侧栏底部卡：历史 + 服务 合一 */
 .side-card {
