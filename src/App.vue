@@ -57,6 +57,8 @@ const {
   resetFlashMarks,
   soundOn,
   toggleSound,
+  autoMonitor,
+  toggleAutoMonitor,
   viewPaused,
   connect,
   switchPort,
@@ -757,10 +759,12 @@ function dismissGuide(): void {
       :flash-params="activeParams"
       :theme="theme"
       :sound-on="soundOn"
+      :auto-monitor="autoMonitor"
       :version="buildLabel"
       @configure-token="configureToken"
       @toggle-theme="toggleTheme"
       @toggle-sound="toggleSound"
+      @toggle-auto-monitor="toggleAutoMonitor"
     />
 
     <!-- 共享隐藏文件选择器（侧栏「添加 bin」与固件页共用） -->

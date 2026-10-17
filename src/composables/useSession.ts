@@ -16,6 +16,7 @@ const DISPLAY_CAP = 500
 const FLUSH_MS = 120
 const HISTORY_KEY = 'fw.flashHistory'
 const HISTORY_CAP = 20
+const AUTO_MONITOR_KEY = 'fw.autoMonitor'
 
 /** 烧录历史条目（localStorage 持久，F 追加：排障/追溯） */
 export interface FlashHistoryItem {
@@ -168,6 +169,23 @@ export function useSession() {
     setSoundEnabled(soundOn.value)
     if (soundOn.value) playFlashOk() // 打开立即试听一声，确认能听见
   }
+  /** 烧录后自动监视开关（默认开，localStorage 持久）：烧写成功后自动开串口 + 信号复位抓启动日志 */
+  const autoMonitor = ref(loadAutoMonitor())
+  function loadAutoMonitor(): boolean {
+    try {
+      return globalThis.localStorage?.getItem(AUTO_MONITOR_KEY) !== '0'
+    } catch {
+      return true
+    }
+  }
+  function toggleAutoMonitor(): void {
+    autoMonitor.value = !autoMonitor.value
+    try {
+      globalThis.localStorage?.setItem(AUTO_MONITOR_KEY, autoMonitor.value ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
   function resetFlashMarks(): void {
     flashFailedIndex.value = null
     flashResult.value = null
@@ -215,6 +233,8 @@ export function useSession() {
     resetFlashMarks,
     soundOn,
     toggleSound,
+    autoMonitor,
+    toggleAutoMonitor,
     connect: () => runWithLock(() => device.connect()),
     switchPort: () => runWithLock(() => device.switchPort()),
     disconnect: () => run(() => device.disconnect()),
@@ -252,8 +272,20 @@ export function useSession() {
         ok,
         error: errMsg,
       })
-      if (ok) playFlashOk()
-      else playFlashErr()
+      if (ok) {
+        playFlashOk()
+        // 烧录后自动监视（可关）：烧写成功自动开串口 + 信号复位，抓新固件完整启动日志。
+        // 失败静默——烧录已成功，监视起不来不回调烧录结果、也不该变成 error。
+        if (autoMonitor.value) {
+          try {
+            await device.resumeMonitor()
+          } catch {
+            /* ignore */
+          }
+        }
+      } else {
+        playFlashErr()
+      }
     },
     erase: () => run(() => device.erase()),
     hardReset: () => run(() => device.hardReset()),

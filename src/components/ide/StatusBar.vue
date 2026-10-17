@@ -24,12 +24,15 @@ defineProps<{
   theme: string
   /** 烧录提示音开关（🔊/🔇） */
   soundOn: boolean
+  /** 烧录后自动监视开关（成功即自动开串口+复位抓启动日志） */
+  autoMonitor: boolean
   version?: string
 }>()
 defineEmits<{
   'configure-token': []
   'toggle-theme': []
   'toggle-sound': []
+  'toggle-auto-monitor': []
 }>()
 
 const STATE_LABEL: Record<DeviceState, string> = {
@@ -85,6 +88,15 @@ const STATE_LABEL: Record<DeviceState, string> = {
         @click="$emit('toggle-sound')"
       >
         {{ soundOn ? '🔊' : '🔇' }}
+      </button>
+      <button
+        class="st__btn"
+        :class="{ 'st__btn--off': !autoMonitor }"
+        type="button"
+        :title="autoMonitor ? '烧录后自动监视：开（烧写成功自动重启并进入日志，点击关闭）' : '烧录后自动监视：关（点击开启）'"
+        @click="$emit('toggle-auto-monitor')"
+      >
+        🖥
       </button>
       <span
         class="st__item st__ver"
