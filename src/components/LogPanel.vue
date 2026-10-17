@@ -14,6 +14,23 @@ const props = defineProps<{
 
 const body = ref<HTMLElement | null>(null)
 
+/** 距底 24px 内视为「在底部」——在此范围内新日志才自动跟随，否则视为用户正在翻看历史 */
+const SCROLL_SLACK = 24
+const atBottom = ref(true)
+
+function scrollToBottom(): void {
+  const el = body.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+  atBottom.value = true
+}
+
+function onScroll(): void {
+  const el = body.value
+  if (!el) return
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_SLACK
+}
+
 const filtered = computed<LogEntry[]>(() => {
   const list = props.logs
   switch (props.filter) {
@@ -39,7 +56,15 @@ watch(
   () => props.logs.length,
   async () => {
     await nextTick()
-    body.value?.scrollTo({ top: body.value.scrollHeight })
+    if (atBottom.value) scrollToBottom()
+  },
+)
+
+// 过滤条件变化会重排列表，重置到底部并恢复自动跟随
+watch(
+  () => props.filter,
+  () => {
+    nextTick(scrollToBottom)
   },
 )
 </script>
@@ -47,7 +72,7 @@ watch(
 <template>
   <section class="panel">
     <p v-if="viewPaused" class="logbar__hint">⏸ 视图已暂停——日志仍在后台收集，导出不受影响</p>
-    <div ref="body" class="logbox">
+    <div ref="body" class="logbox" @scroll="onScroll">
       <p v-for="(e, i) in filtered" :key="e.seq" class="logline" :class="'logline--' + e.level">
         <span class="logline__n">{{ i + 1 }}</span>
         <span class="logline__ts">{{ new Date(e.ts).toLocaleTimeString() }}</span>
@@ -63,6 +88,11 @@ watch(
       </p>
       <!-- 终端提示符（b-ide 同款闪烁光标） -->
       <p class="logbox__prompt">❯<span class="logbox__cursor"></span></p>
+      <p v-if="!atBottom" class="logbox__jumpbar">
+        <button class="logbox__jump" type="button" title="回到底部并恢复自动滚动" @click="scrollToBottom">
+          ↓ 回到底部
+        </button>
+      </p>
     </div>
   </section>
 </template>
@@ -137,6 +167,30 @@ watch(
   margin: 2px 0 0;
   color: var(--accent);
   font-weight: 700;
+}
+/* 「回到底部」悬浮按钮：sticky 固定在日志可视区底部，用户上翻看历史时出现 */
+.logbox__jumpbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 0;
+  pointer-events: none;
+}
+.logbox__jump {
+  pointer-events: auto;
+  font-size: 11px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-family: var(--sans, sans-serif);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+.logbox__jump:hover {
+  filter: brightness(1.12);
 }
 .logbox__cursor {
   display: inline-block;
