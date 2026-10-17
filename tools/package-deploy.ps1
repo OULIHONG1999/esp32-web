@@ -53,6 +53,15 @@ Get-ChildItem -Path $dist -Recurse -Include *.html, *.txt, *.js, *.css, *.json, 
   if ($changed) { [IO.File]::WriteAllText($_.FullName, $c, [Text.UTF8Encoding]::new($false)) }
 }
 
+# 部署版本标识：git 短 hash + 构建时间写入 dist/build.json——右下角「程序版本」与 /api/status 共用的单一事实来源。
+# 服务器 statusSnapshot 读它、前端状态栏右下角展示它；本地 git log -1 即可对上「线上跑的是哪个提交」。
+$revision = 'unknown'
+try { $revision = (git -C $root rev-parse --short HEAD 2>$null).Trim() } catch {}
+if (-not $revision) { $revision = 'unknown' }
+$buildInfo = @{ revision = $revision; builtAt = (Get-Date -Format 'yyyy-MM-dd HH:mm') } | ConvertTo-Json -Compress
+[IO.File]::WriteAllText((Join-Path $dist 'build.json'), $buildInfo, [Text.UTF8Encoding]::new($false))
+Write-Host "BUILD: $revision"
+
 $zip = Join-Path $env:TEMP ('fw-deploy-' + (Get-Date -Format 'yyyyMMdd-HHmm') + '.zip')
 # 自建 zip：Compress-Archive 在 Windows 上写 `\` 作路径分隔符，远端 `unzip -o` 会报
 # "appears to use backslashes as path separators" 并**以退出码 1 结束**——文档里的

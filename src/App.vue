@@ -194,6 +194,13 @@ const serviceLabel = computed(() => {
   return s ? `◉ 服务在线 ${s.projects}/${s.releases}` : '◉ 服务…'
 })
 
+/** 右下角「程序版本」：部署 git 短 hash + 构建时间（无则本地 dev 环境显示 dev） */
+const buildLabel = computed(() => {
+  const s = svc.snap.value
+  if (!s?.revision) return undefined
+  return s.builtAt ? `${s.revision} · ${s.builtAt}` : s.revision
+})
+
 /** 面板头「导出」 */
 function downloadLogs(): void {
   const blob = new Blob([exportLogs()], { type: 'text/plain;charset=utf-8' })
@@ -750,6 +757,7 @@ function dismissGuide(): void {
       :flash-params="activeParams"
       :theme="theme"
       :sound-on="soundOn"
+      :version="buildLabel"
       @configure-token="configureToken"
       @toggle-theme="toggleTheme"
       @toggle-sound="toggleSound"

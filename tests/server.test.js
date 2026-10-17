@@ -300,6 +300,23 @@ describe('GET /api/registry 与 parts 下载', () => {
     expect(typeof s.releases).toBe('number')
     expect(typeof s.dataDirBytes).toBe('number')
     expect(s.uptimeSeconds).toBeGreaterThanOrEqual(0)
+    expect('revision' in s).toBe(true)
+    expect('builtAt' in s).toBe(true)
+  })
+
+  it('GET /api/status：部署版本标识（dist/build.json 存在时返回 revision/builtAt）', async () => {
+    const distDir = path.join(dataDir, 'no-dist')
+    fs.mkdirSync(distDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(distDir, 'build.json'),
+      JSON.stringify({ revision: 'abc1234', builtAt: '2026-10-18 23:40' }),
+    )
+    const res = await fetch(`${base}/api/status`)
+    const s = await res.json()
+    expect(s.revision).toBe('abc1234')
+    expect(s.builtAt).toBe('2026-10-18 23:40')
+    expect(s.version).toBe('abc1234')
+    fs.rmSync(path.join(distDir, 'build.json'), { force: true })
   })
 })
 

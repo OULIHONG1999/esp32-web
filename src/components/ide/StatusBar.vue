@@ -86,7 +86,10 @@ const STATE_LABEL: Record<DeviceState, string> = {
       >
         {{ soundOn ? '🔊' : '🔇' }}
       </button>
-      <span class="st__item st__ver">{{ version ?? 'v0.2.0' }}</span>
+      <span
+        class="st__item st__ver"
+        :title="version ? `部署版本：${version}（本地 git log -1 可对上）` : '本地开发环境（未部署，无 git 版本）'"
+      >{{ version || 'dev' }}</span>
       <button
         class="st__btn st__btn--theme"
         type="button"

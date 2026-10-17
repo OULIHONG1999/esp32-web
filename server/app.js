@@ -127,8 +127,23 @@ function dirSize(dir) {
   return total
 }
 
-/** GET /api/status 快照：项目/版本统计 + 数据目录占用 + 服务运行时长 */
-function statusSnapshot(dataDir) {
+/** 部署版本标识（git short hash + 构建时间）。dist/build.json 由打包脚本写入，缺失/损坏回退 null。 */
+function readBuildInfo(distDir) {
+  const p = path.join(distDir, 'build.json')
+  try {
+    if (!fs.existsSync(p)) return null
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'))
+    return {
+      revision: typeof j.revision === 'string' ? j.revision : null,
+      builtAt: typeof j.builtAt === 'string' ? j.builtAt : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** GET /api/status 快照：项目/版本统计 + 数据目录占用 + 服务运行时长 + 部署版本标识 */
+function statusSnapshot(dataDir, distDir) {
   const reg = readRegistry(dataDir)
   let projects = 0
   let releases = 0
@@ -142,9 +157,12 @@ function statusSnapshot(dataDir) {
       }
     }
   }
+  const build = readBuildInfo(distDir)
   return {
     service: 'firmware-server',
-    version: '0.1.0',
+    version: build?.revision ?? '0.1.0',
+    revision: build?.revision ?? null,
+    builtAt: build?.builtAt ?? null,
     docs: '/llms.txt',
     projects,
     releases,
@@ -333,7 +351,7 @@ export function createApp({ dataDir, token, distDir, sseHeartbeatMs }) {
         }
         // 服务状态摘要卡（公开只读；AI 亦可读）
         if (req.method === 'GET' && p === '/api/status') {
-          return send(res, 200, statusSnapshot(dataDir))
+          return send(res, 200, statusSnapshot(dataDir, distDir))
         }
         if (req.method === 'GET' && p === '/api/registry/stream') {
           return hub.handler(req, res)

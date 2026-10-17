@@ -10,6 +10,10 @@ export interface ServiceSnap {
   latestPublishAt: string | null
   dataDirBytes: number
   uptimeSeconds: number
+  /** 部署 git 短 hash（dist/build.json；本地 git log -1 可对上） */
+  revision: string | null
+  /** 部署构建时间 */
+  builtAt: string | null
 }
 
 const snap = ref<ServiceSnap | null>(null)
