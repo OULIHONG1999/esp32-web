@@ -1,6 +1,6 @@
 # AGENTS.md — ESP32 Web Flasher 接手指引
 
-给下一个接手的 AI/工程师：**先读 `PROGRESS.md`**（进度与坑），本文只讲纪律和入口。需求与设计的原文以 `docs/REQUIREMENTS.md` / `docs/docs/DESIGN.md` 为准，不要凭记忆重写。
+给下一个接手的 AI/工程师：**先读 `PROGRESS.md`**（进度总览）与 **`docs/progress/decisions.md`**（关键决策与坑），本文只讲纪律和入口。需求与设计的原文以 `docs/REQUIREMENTS.md` / `docs/docs/DESIGN.md` 为准，不要凭记忆重写。
 
 ## 快速入口
 
@@ -8,7 +8,8 @@
 
 | 要做什么 | 入口 |
 |---|---|
-| 了解当前进度 / 下一步 | `PROGRESS.md` |
+| 了解当前进度 / 下一步 | `PROGRESS.md`（总览） |
+| 变更日志 / 决策坑 / 代码结构 | `docs/progress/`（changelog · decisions · structure） |
 | **方案总览 / 快速开始** | `README.md` |
 | **使用手册（操作者）** | `docs/USER-GUIDE.md` |
 | 验收标准（F-xx） | `docs/REQUIREMENTS.md` §2 |
@@ -59,6 +60,7 @@ tools/device-sim/  设备模拟器（假装 ESP32 跑完 OTA 全链路；镜像�
 docs/          现行文档（USER-GUIDE/DESIGN/REQUIREMENTS/DEPLOY/SERVER/PUBLISH/TROUBLESHOOTING/FIRMWARE-REGISTRY/ota/DEVICE-OTA）
 docs/archive/  开发过程历史产出（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV 等）
 docs/research/ 专题调研报告（选型/复位能力）
+docs/progress/ 工作记录分文档（changelog 变更日志 · decisions 决策与坑 · structure 代码结构）——与根目录 PROGRESS.md 同属内部记录，不挂公网
 tests/        Vitest（node 环境）：*.test.ts=前端核心层；*.test.js=server/CLI
 tests/fixtures/ 假构建产物（e2e 用）
 ```
