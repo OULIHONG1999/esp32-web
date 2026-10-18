@@ -554,4 +554,22 @@ describe('手动开关 emit 同步（按钮切换依赖）', () => {
     expect(ticks).toBeGreaterThan(afterPause) // 恢复也必须通知
     expect(d.isStreamOn).toBe(true)
   })
+
+  it('resume 在 signalReset 完成前就已 emit（按钮不等复位超时即切换）', async () => {
+    const { deps } = makeDeps({ hasExistingPort: true })
+    let resolveReset!: () => void
+    deps.signalReset = () => new Promise<void>((r) => (resolveReset = r))
+    const d = await connectReady(deps)
+    let seenWhileResetPending = false
+    d.subscribe(() => {
+      if (d.isStreamOn && d.state === 'ready') seenWhileResetPending = true
+    })
+    const p = d.resumeMonitor()
+    // 放行微任务让 openStream 完成（streamOn=true + emit），signalReset 仍未 resolve
+    await new Promise((r) => setTimeout(r, 0))
+    expect(d.isStreamOn).toBe(true)
+    expect(seenWhileResetPending).toBe(true)
+    resolveReset()
+    await p
+  })
 })

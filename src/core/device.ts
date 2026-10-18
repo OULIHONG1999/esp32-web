@@ -224,12 +224,16 @@ export class DeviceManager {
   private async openStream(): Promise<void> {
     await this.deps.startStream(this.streamHandlers())
     this.streamOn = true
+    // 开流即通知：让「开始/停止监视」按钮立刻切换，别等后续 signalReset/复位完成
+    this.emit()
   }
 
   private async closeStream(): Promise<void> {
     if (this.streamOn) {
       await this.deps.stopStream()
       this.streamOn = false
+      // 停流即通知：释放端口的异步耗时不再阻塞按钮回切
+      this.emit()
     }
   }
 
