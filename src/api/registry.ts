@@ -96,18 +96,49 @@ export async function fetchRegistry(): Promise<Registry> {
   return (await r.json()) as Registry
 }
 
+/** 单段下载的实时进度（onProgress 回调参数） */
+export interface PartProgress {
+  /** 本段已接收字节 */
+  received: number
+  /** 本段总字节（优先 content-length；未知时为 received，调用方可用 part.size 兜底） */
+  total: number
+}
+
 export async function fetchReleasePart(
   pid: string,
   vid: string,
   rid: string,
   file: string,
+  opts?: { signal?: AbortSignal; onProgress?: (p: PartProgress) => void },
 ): Promise<Uint8Array> {
   const r = await fetch(
     `/api/registry/projects/${encodeURIComponent(pid)}/variants/${encodeURIComponent(vid)}` +
       `/releases/${encodeURIComponent(rid)}/parts/${encodeURIComponent(file)}`,
+    { signal: opts?.signal },
   )
   if (!r.ok) throw new Error(`${file} 下载失败（HTTP ${r.status}）`)
-  return new Uint8Array(await r.arrayBuffer())
+  // 无进度回调（或无 body 流）时走一次性读取，保持原行为
+  if (!opts?.onProgress || !r.body) {
+    return new Uint8Array(await r.arrayBuffer())
+  }
+  const contentLength = Number(r.headers.get('content-length') ?? 0)
+  const reader = r.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value as Uint8Array)
+    received += (value as Uint8Array).byteLength
+    opts.onProgress({ received, total: contentLength || received })
+  }
+  const out = new Uint8Array(received)
+  let off = 0
+  for (const c of chunks) {
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return out
 }
 
 /** Release.flashParams（mode/freq/size）→ 烧录参数注入形状 */

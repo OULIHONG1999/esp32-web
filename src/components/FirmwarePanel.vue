@@ -100,6 +100,22 @@ function fmtSize(n: number): string {
   return `${n} B`
 }
 
+/** 载入整体进度百分比（已下载字节 / 总字节） */
+const loadPercent = computed<number>(() => {
+  const p = props.ws.state.loadProgress
+  if (!p || p.totalBytes <= 0) return 0
+  return Math.min(100, Math.round((p.bytes / p.totalBytes) * 100))
+})
+
+/** 载入实时速度（字节/秒；随 loadProgress 变化刷新） */
+const loadSpeed = computed<string>(() => {
+  const p = props.ws.state.loadProgress
+  if (!p) return ''
+  const elapsed = (Date.now() - p.startedAt) / 1000
+  if (elapsed < 0.5 || p.bytes <= 0) return ''
+  return `${fmtSize(p.bytes / elapsed)}/s`
+})
+
 const chipFamilyCell = computed(() => {
   if (!props.chipName) return { text: '未连接', ok: false }
   return { text: props.chipName, ok: true }
@@ -295,13 +311,39 @@ async function exportPack(): Promise<void> {
     </div>
 
     <div v-if="ws.state.loading" class="fw__loading">
-      ⏳ 正在载入 <code>{{ ws.state.loading }}</code>
+      <div class="fw__loading-head">
+        ⏳ 正在载入 <code>{{ ws.state.loading }}</code>
+        <button class="btn btn--ghost" type="button" title="取消载入" @click="ws.cancelLoad()">
+          ✕ 取消
+        </button>
+      </div>
       <template v-if="ws.state.loadProgress">
-        —— {{ ws.state.loadProgress.done }}/{{ ws.state.loadProgress.total }} 段
-        · {{ fmtSize(ws.state.loadProgress.bytes) }}
+        <div class="fw__prog">
+          <div class="fw__prog-bar" :style="{ width: loadPercent + '%' }"></div>
+          <span class="fw__prog-t">{{ loadPercent }}%</span>
+        </div>
+        <div class="fw__loading-meta">
+          {{ fmtSize(ws.state.loadProgress.bytes) }} / {{ fmtSize(ws.state.loadProgress.totalBytes) }}
+          · {{ ws.state.loadProgress.done }}/{{ ws.state.loadProgress.total }} 段
+          <template v-if="loadSpeed"> · {{ loadSpeed }}</template>
+          <template v-if="ws.state.loadProgress.current.length">
+            · 进行中：{{ ws.state.loadProgress.current.slice(0, 3).join('、')
+            }}<template v-if="ws.state.loadProgress.current.length > 3">…</template>
+          </template>
+        </div>
       </template>
     </div>
-    <p v-if="ws.state.registryMsg" class="fw__msg">{{ ws.state.registryMsg }}</p>
+    <p v-if="ws.state.registryMsg" class="fw__msg">
+      {{ ws.state.registryMsg }}
+      <button
+        v-if="ws.state.lastFailure"
+        class="btn btn--ghost"
+        type="button"
+        @click="ws.retryLoad()"
+      >
+        ↻ 重试
+      </button>
+    </p>
 
     <!-- 烧录表格 -->
     <table v-if="rows.length" class="fw__tbl">
@@ -614,6 +656,23 @@ async function exportPack(): Promise<void> {
 }
 .fw__loading code {
   font-family: ui-monospace, monospace;
+}
+.fw__loading-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.fw__loading-head .btn {
+  flex: none;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+.fw__loading-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .fw__msg {
   margin: 0;

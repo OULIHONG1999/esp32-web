@@ -76,9 +76,23 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     flashParams: null as FlashParams | null,
     /** 载入中的版本 id（防重复点击；树行/固件页 loading 态） */
     loading: null as string | null,
-    /** 载入进度（并行下载计数） */
-    loadProgress: null as { done: number; total: number; bytes: number } | null,
+    /** 载入进度（并行下载 + 字节级实时进度） */
+    loadProgress: null as {
+      done: number
+      total: number
+      bytes: number
+      totalBytes: number
+      current: string[]
+      startedAt: number
+    } | null,
+    /** 最近一次载入失败（重试入口；成功后清空） */
+    lastFailure: null as
+      | { opt: Pick<RegistryOption, 'projectId' | 'projectName' | 'variant'>; rel: RegistryRelease }
+      | null,
   })
+
+  /** 载入取消句柄（AbortController 跨下载复用） */
+  let abortCtrl: AbortController | null = null
 
   async function refreshRegistry(): Promise<void> {
     state.registryLoading = true
@@ -122,18 +136,41 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       return
     }
     state.loading = rel.id
-    state.loadProgress = { done: 0, total: rel.parts.length, bytes: 0 }
+    state.lastFailure = null
+    const totalBytes = rel.parts.reduce((n, p) => n + (p.size ?? 0), 0)
+    const received = new Map<string, number>()
+    const finished = new Set<string>()
+    const startedAt = Date.now()
+    const recalc = (): void => {
+      let sum = 0
+      for (const p of rel.parts) sum += received.get(p.file) ?? 0
+      const current = rel.parts.filter((p) => !finished.has(p.file)).map((p) => p.file)
+      state.loadProgress = {
+        done: finished.size,
+        total: rel.parts.length,
+        bytes: sum,
+        totalBytes,
+        current,
+        startedAt,
+      }
+    }
+    recalc()
+    abortCtrl = new AbortController()
     try {
-      // 并行下载（文件越多越明显）+ 进度计数 + 失败定位到具体文件
-      let done = 0
-      let bytes = 0
+      // 并行下载 + 每段字节级进度 + 失败定位到具体文件
       const loaded: FlashRow[] = await Promise.all(
         rel.parts.map(async (p) => {
           try {
-            const b = await fetchReleasePart(opt.projectId, opt.variant, rel.id, p.file)
-            done += 1
-            bytes += p.size ?? b.byteLength
-            state.loadProgress = { done, total: rel.parts.length, bytes }
+            const b = await fetchReleasePart(opt.projectId, opt.variant, rel.id, p.file, {
+              signal: abortCtrl!.signal,
+              onProgress: ({ received: r }) => {
+                received.set(p.file, r)
+                recalc()
+              },
+            })
+            received.set(p.file, p.size ?? b.byteLength)
+            finished.add(p.file)
+            recalc()
             return {
               id: nextId++,
               label: p.label,
@@ -168,11 +205,17 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
       deps.onLoaded(`${opt.projectId}/${opt.variant}`, rel.id)
       state.registryMsg = `已载入 ${opt.projectName}/${opt.variant} ${rel.id}（${loaded.length} 段，烧录参数已注入）`
     } catch (e) {
-      console.error('[api] loadRelease 失败:', e)
-      state.registryMsg = `载入失败：${e instanceof Error ? e.message : String(e)}`
+      if (abortCtrl?.signal.aborted) {
+        state.registryMsg = '已取消载入'
+      } else {
+        console.error('[api] loadRelease 失败:', e)
+        state.registryMsg = `载入失败：${e instanceof Error ? e.message : String(e)}`
+        state.lastFailure = { opt, rel }
+      }
     } finally {
       state.loading = null
       state.loadProgress = null
+      abortCtrl = null
     }
   }
 
@@ -181,6 +224,18 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     const opt = state.options[state.selectedIdx]
     if (!opt) return
     await loadRelease(opt, opt.release)
+  }
+
+  /** 取消进行中的载入（AbortController 中止所有段的 fetch） */
+  function cancelLoad(): void {
+    abortCtrl?.abort()
+  }
+
+  /** 失败后重试最近一次载入（走 loadRelease，芯片比对/进度照常） */
+  function retryLoad(): void {
+    const f = state.lastFailure
+    if (!f) return
+    void loadRelease(f.opt, f.rel)
   }
 
   async function toggleSubscribe(): Promise<void> {
@@ -246,6 +301,8 @@ export function useFirmwareWorkspace(deps: WorkspaceDeps) {
     refreshRegistry,
     loadRelease,
     reloadSelected,
+    cancelLoad,
+    retryLoad,
     toggleSubscribe,
     selectOption,
     addFiles,
