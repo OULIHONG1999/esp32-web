@@ -63,6 +63,15 @@ tools/publish/               发布/推送 CLI（零依赖）——6 文件：
   watch.js                           --watch 轮询防抖
   push.js / pushlib.js               push 子命令（发布+下发+等结果；退出码 0–12）
 
+tools/balance_gateway/       小米 MiMo 余额网关（Python 3.8+ 标准库；独立子项目，README=唯一入口）——7 文件：
+  balance_gateway.py                HTTP 网关（:8088 /summary + /user/balance + /health；缓存/单飞/stale）
+  browser_session.py                专用浏览器 + CDP 取 Cookie → 写 session.json（唯一可行取 Cookie 路径）
+  session_keeper.py                 常驻探活 + 失效自动交接 + webhook 告警
+  browser_cookie.py                 ⚠ 失败的本地解密尝试，仅作记录勿用
+  cloud/setup_debian.py             Debian 一键安装（装依赖/建用户/装 systemd；入口是 .py 防 CRLF）
+  cloud/start_console.sh            Xvfb + x11vnc + noVNC + Chrome（CDP 9223 仅本机）
+  cloud/mimo-{console,gateway,keeper}.service   三个 systemd 单元（路径 /opt/mimo）
+
 tests/                       Vitest（node 环境）——23 文件 · 392 用例全绿：
   *.test.ts（12，前端核心层）: device/log/errors/lines/md5/zip/firmware-pack/progress/bininfo/tokenLink/environment/registry-stream
   *.test.js（11，server/CLI）: server/devices/device-sim/publish-cli/publish-watch/e2e/static-pages/coredumps/drive/fetch/push-cli

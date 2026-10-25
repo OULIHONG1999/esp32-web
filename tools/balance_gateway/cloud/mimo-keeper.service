@@ -1,0 +1,20 @@
+[Unit]
+Description=Mimo session keeper (probe cookie, adopt from browser, alert)
+After=mimo-console.service
+Wants=mimo-console.service
+
+[Service]
+Type=simple
+User=mimo
+Group=mimo
+WorkingDirectory=/opt/mimo/tools/balance_gateway
+Environment=HOME=/var/lib/mimo
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/mimo/tools/balance_gateway/session_keeper.py --watch
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

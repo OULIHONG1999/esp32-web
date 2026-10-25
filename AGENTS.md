@@ -17,6 +17,7 @@
 | v1.5 固件库设计 | `docs/FIRMWARE-REGISTRY.md` |
 | **OTA 三端契约 / 独立页** | `docs/ota.md`（契约）· `public/ota/`（页面）· `/OTA`（线上，描述符 `/ota.json`） |
 | **设备端接入（设备在另一台电脑）** | `docs/DEVICE-OTA.md`（设备端唯一入口）· `tools/device-sim/`（模拟器，无硬件可联调） |
+| **余额网关（MiMo 控制台 → /summary）** | `tools/balance_gateway/README.md`（自包含，未挂公网；`config.json`/`session.json` 已 gitignore） |
 | 部署 / 运维 | `docs/DEPLOY.md`（含本机快速路径）+ `docs/docs/SERVER.md` |
 | 为什么选这条路线 | `docs/research/esp32-web-flash/REPORT.md` |
 | 历史路线/选型存档 | `docs/archive/README.md`（EXECUTION-PLAN 等） |
@@ -57,6 +58,7 @@ server/       v1.5 自含服务（纯 JS 零依赖 node:http）— registry/发�
               devices.js = OTA 设备与命令存储（纯函数 + 原子写 devices.json）；四个端点接在 app.js
 tools/publish/  发布 CLI（纯 JS 零依赖，once/--watch/promote/push；push = 发布+推给指定设备）
 tools/device-sim/  设备模拟器（假装 ESP32 跑完 OTA 全链路；镜像到 public/tools/device-sim/ 供下载）
+tools/balance_gateway/  小米 MiMo 余额网关（Python 标准库；网关/浏览器会话/探活/cloud 三件套；凭证不进 git）
 docs/          现行文档（USER-GUIDE/DESIGN/REQUIREMENTS/DEPLOY/SERVER/PUBLISH/TROUBLESHOOTING/FIRMWARE-REGISTRY/ota/DEVICE-OTA）
 docs/archive/  开发过程历史产出（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV 等）
 docs/research/ 专题调研报告（选型/复位能力）

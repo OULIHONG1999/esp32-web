@@ -20,3 +20,9 @@ font-cloud-server/fonts/*.ttf
 font-cloud-server/fonts/*.otf
 font-cloud-server/fonts/*.ttc
 .tmp-*.cjs
+
+# balance_gateway: credentials / local runtime (see tools/balance_gateway/README.md)
+tools/balance_gateway/config.json
+tools/balance_gateway/session.json
+__pycache__/
+*.py[cod]

@@ -2,7 +2,7 @@
 
 > 本文件是**活的进度总览**：每次有意义的推进后更新这里的「当前状态」「验收」「下一步」。
 > 新接手的 AI/工程师请先读本文，再读 `AGENTS.md`。
-> 最后更新：2026-10-18（**文档拆分**：PROGRESS 瘦身为总分入口；历史/决策/结构拆入 `docs/progress/`——变更日志 `changelog.md`、关键决策与坑 `decisions.md`、代码结构 `structure.md`）
+> 最后更新：2026-10-25（**balance_gateway 收编**进 `tools/balance_gateway/`，详见 changelog）；此前 2026-10-18（**文档拆分**：PROGRESS 瘦身为总分入口；历史/决策/结构拆入 `docs/progress/`——变更日志 `changelog.md`、关键决策与坑 `decisions.md`、代码结构 `structure.md`）
 
 ## 一句话
 
@@ -59,6 +59,7 @@
 | **coredump 崩溃上报** | ✅ 服务器+页面已实现 | 上传二进制 body + 幂等排重 + 独立页 `/coredump` + 符号化离线；`tests/coredumps.test.js` 15 用例；设备端上传方待做（另一台电脑） |
 | **fetch 命令通道** | ✅ 服务器已实现并上线 | 服务器端 fetch 受理（url/dest/maxBytes 校验钳位 + 六字段信封 + `/files/` 静态托管 + 复用 ota 409/412/撤销语义）；**2026-10-17 真机端到端闭环**（云盘 → fetch → 设备取走 → success 回执）；设备端固件 0.12.3 已实现 fetcher |
 | **云盘 /drive** | ✅ 服务器+页面已实现并上线 | `/api/drive/files*` 四端点 + `/drive` 独立页 + `drive.json` 描述符；净化/配额/幂等删除/下载附件头；文档 `docs/cloud-drive.md` |
+| **余额网关 balance_gateway** | 📦 已收编未部署 | 2026-10-25 云盘 zip 收编进 `tools/balance_gateway/`（独立子项目）；凭证 gitignore；mock 冒烟通过；**云部署/systemd 实机验证未做**（README §14） |
 
 **待用户决策**：主操作按钮方案——推荐映射「⚡一键烧录 / 查看日志 / 选择文件」vs 字面三按钮（下载 / 下载并查看日志 / 查看日志），见会话记录 2026-09-26。
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=Mimo console browser (Xvfb + x11vnc + noVNC + Chrome + CDP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mimo
+Group=mimo
+Environment=HOME=/var/lib/mimo
+Environment=DISPLAY_NUM=:99
+Environment=CDP_PORT=9223
+ExecStart=/opt/mimo/tools/balance_gateway/cloud/start_console.sh
+Restart=always
+RestartSec=5
+# Chrome 崩了就整组重启（Xvfb/x11vnc/websockify 会跟着退出）
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

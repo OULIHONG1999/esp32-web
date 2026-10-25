@@ -1,0 +1,20 @@
+[Unit]
+Description=Balance gateway (Xiaomi quota -> DeepSeek /user/balance shape)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mimo
+Group=mimo
+WorkingDirectory=/opt/mimo/tools/balance_gateway
+Environment=HOME=/var/lib/mimo
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/mimo/tools/balance_gateway/balance_gateway.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
