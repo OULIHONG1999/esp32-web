@@ -31,7 +31,7 @@
 10. `docs/research/*/REPORT.md` — 选型与复位能力调研（现行参考）
 11. `docs/archive/README.md` — 历史产出索引（EXECUTION-PLAN/PAGE-REDESIGN/IDF-ENV/实测报告等）
 12. 本文 — 进度总览（当前状态/验收/下一步）
-13. **`docs/progress/` — 工作记录分文档**：`changelog.md`（变更日志，只追加）· `decisions.md`（关键决策与坑 1–24）· `structure.md`（代码结构清单）
+13. **`docs/progress/` — 工作记录分文档**：`changelog.md`（变更日志，只追加）· `decisions.md`（关键决策与坑 1–24）· `structure.md`（代码结构清单）· **`HANDOFF.md`（换电脑继续开发交接：clone/环境/本地重建清单/代理）**
 
 ## 当前状态（任务面板同步）
 
